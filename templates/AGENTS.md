@@ -7,9 +7,10 @@ Keep environment context small: do not preload `README.md`, manifests, build not
 ## Route by need
 
 - If a required local capability is uncertain, run `agent-env doctor` before concluding a tool is unavailable.
-- If GitHub may be needed in this turn, run `agent-env github` **before substantial GitHub-dependent work**.
-  - If it reports that no credential source exists and the user is engaged, run `agent-env github-auth` immediately, let the user complete the browser/device authorization, then rerun `agent-env github` and continue the original task.
-  - If a credential exists but GitHub is unreachable or rejects it, diagnose that condition; do not blindly re-authenticate.
+- If GitHub may be needed in this turn, run `agent-env github` **once before substantial GitHub-dependent work**.
+  - If it reports `Shell GitHub network: unavailable` (exit 3), treat remote GitHub shell access as unavailable for the rest of the session unless the host/network changes. Do not retry `gh` authentication/API calls or GitHub `git fetch/push`; local Git still works. Use a platform GitHub connector/app if one is available.
+  - If shell GitHub networking is reachable but no credential source exists and the user is engaged, run `agent-env github-auth`, let the user complete browser/device authorization, then rerun `agent-env github` and continue.
+  - If a credential exists but GitHub rejects it, diagnose that credential/account state; do not blindly re-authenticate.
   - For an HTTPS GitHub worktree that will push, run `agent-env github-git` once in that repository. It installs only a repo-local, location-neutral `gh` credential helper and verifies the push path with a no-write dry run.
 - Never print or request a GitHub token when the interactive OAuth flow is available. Never use `gh auth status --show-token`.
 - Do not request broader GitHub OAuth scopes in advance. If a concrete operation requires an additional scope, request only that scope while the user is engaged, verify the operation, and resume the task.

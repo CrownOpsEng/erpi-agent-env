@@ -18,9 +18,18 @@ fi
 exec "$REAL_GIT" "\$@"
 SHGIT
 chmod +x "$TMP/bin/git"
-export PATH="$TMP/bin:$PATH"
 
-# No credential: status says auth is appropriate; auth performs mock OAuth.
+# Deterministic shell-network probe: production uses bundled Python/httpx, but
+# this behavioral test must not depend on the CI runner's external network.
+cat > "$TMP/bin/python" <<'SHPY'
+#!/bin/sh
+[ "${MOCK_GITHUB_NETWORK:-up}" = up ]
+SHPY
+chmod +x "$TMP/bin/python"
+export PATH="$TMP/bin:$PATH"
+export MOCK_GITHUB_NETWORK=up
+
+# Base gh mock supports no-credential -> OAuth -> authenticated transitions.
 cat > "$TMP/bin/gh" <<'EOFGH'
 #!/bin/sh
 state="${MOCK_GH_STATE:?}"
@@ -49,6 +58,27 @@ chmod +x "$TMP/bin/gh"
 export MOCK_GH_STATE="$TMP/credential"
 export MOCK_GH_LOGIN_LOG="$TMP/login.log"
 
+# A blocked sandbox/host is classified before credential/OAuth logic. The
+# command must explicitly tell the agent to stop retrying shell GitHub and use
+# a platform connector/app when available.
+export MOCK_GITHUB_NETWORK=down
+set +e
+"$TMP/github.sh" status >"$TMP/network.out" 2>"$TMP/network.err"
+network_rc=$?
+"$TMP/github.sh" auth >"$TMP/network-auth.out" 2>"$TMP/network-auth.err"
+network_auth_rc=$?
+set -e
+[[ "$network_rc" -eq 3 ]]
+[[ "$network_auth_rc" -eq 3 ]]
+grep -q 'Shell GitHub network: unavailable' "$TMP/network.err"
+grep -q 'Do not retry gh authentication' "$TMP/network.err"
+grep -q 'Local Git remains usable' "$TMP/network.err"
+grep -q 'GitHub connector/app' "$TMP/network.err"
+[[ ! -e "$TMP/login.log" ]]
+export MOCK_GITHUB_NETWORK=up
+
+# No credential on a reachable host: status says auth is appropriate; auth
+# performs the mock OAuth flow.
 set +e
 "$TMP/github.sh" status >/dev/null 2>&1
 rc=$?
@@ -146,4 +176,4 @@ cmp "$TMP/cred-before" "$TMP/cred-after"
 global_helpers="$("$REAL_GIT" config --global --get-all credential.https://github.com.helper 2>/dev/null || true)"
 ! grep -Fq "$ROOT" <<<"$global_helpers"
 
-echo 'GitHub auth and Git transport checks passed.'
+echo 'GitHub network, auth, and Git transport checks passed.'

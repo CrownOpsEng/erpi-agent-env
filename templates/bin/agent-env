@@ -21,8 +21,8 @@ Usage: agent-env COMMAND [ARGS...]
 
 Commands:
   doctor [--json]    Diagnose local bundle, host commands, and current repository
-  github             Validate GitHub auth/API and current-repository access
-  github-auth        Run browser/device GitHub OAuth when needed, then verify it
+  github             Probe shell GitHub reachability, auth/API, and repo access
+  github-auth        Run browser/device GitHub OAuth when reachable, then verify it
   github-git         Configure current-repo Git auth safely and verify push dry-run
   git [ARGS...]      Run host Git with this environment active
   selftest           Exercise bundled capabilities and portability invariants

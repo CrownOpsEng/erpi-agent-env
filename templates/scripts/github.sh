@@ -9,6 +9,44 @@ if [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]]; then
   have_env_token=1
 fi
 
+shell_network_probe() {
+  command -v python >/dev/null 2>&1 || return 1
+  python - <<'PY'
+import sys
+
+try:
+    import httpx
+    response = httpx.get(
+        "https://api.github.com/meta",
+        timeout=4.0,
+        follow_redirects=True,
+    )
+except Exception:
+    raise SystemExit(1)
+
+# A GitHub request id proves the HTTPS request reached GitHub rather than merely
+# receiving a generic policy/proxy response from the host environment.
+if "x-github-request-id" not in {name.lower() for name in response.headers}:
+    raise SystemExit(1)
+raise SystemExit(0)
+PY
+}
+
+require_shell_network() {
+  if shell_network_probe >/dev/null 2>&1; then
+    echo "Shell GitHub network: reachable."
+    return 0
+  fi
+
+  cat >&2 <<'MSG'
+Shell GitHub network: unavailable.
+This host/sandbox cannot currently reach GitHub from shell commands.
+Do not retry gh authentication, gh API calls, or GitHub git fetch/push in this shell unless the host/network changes.
+Local Git remains usable. If the platform provides a GitHub connector/app, use it for remote GitHub operations.
+MSG
+  return 3
+}
+
 credential_source() {
   if (( have_env_token )); then
     printf '%s\n' environment
@@ -61,8 +99,10 @@ report_git_auth() {
 status() {
   command -v gh >/dev/null 2>&1 || { echo "GitHub CLI is unavailable." >&2; return 1; }
   local source account repo_info
-  source="$(credential_source)"
   printf 'GitHub CLI: %s\n' "$(gh --version | sed -n '1p')"
+  require_shell_network || return $?
+
+  source="$(credential_source)"
   printf 'Credential source: %s\n' "$source"
 
   if [[ "$source" == none ]]; then
@@ -71,12 +111,12 @@ status() {
   fi
 
   if ! gh auth status --active --hostname "$HOST" >/dev/null 2>&1; then
-    echo "A GitHub credential exists but failed validation. Check network/token state before re-authenticating." >&2
+    echo "A GitHub credential exists but failed validation. Check token/account state before re-authenticating." >&2
     return 1
   fi
 
   if ! account="$(gh api user --jq '.login' 2>/dev/null)" || [[ -z "$account" ]]; then
-    echo "GitHub authentication exists but the API is unreachable or rejected the credential." >&2
+    echo "GitHub authentication exists but the API rejected the credential or request." >&2
     return 1
   fi
   printf 'API: ready as %s\n' "$account"
@@ -135,7 +175,7 @@ git_ready() {
   esac
 
   if ! git push --dry-run --no-verify "$remote_name" "HEAD:refs/heads/${branch}" >/dev/null 2>&1; then
-    echo "Git push dry-run failed. Check network, repository permission, branch policy, or SSH credentials." >&2
+    echo "Git push dry-run failed. Check repository permission, branch policy, or SSH credentials." >&2
     return 1
   fi
 
@@ -148,6 +188,7 @@ git_ready() {
 
 auth() {
   command -v gh >/dev/null 2>&1 || { echo "GitHub CLI is unavailable." >&2; return 1; }
+  require_shell_network || return $?
 
   if (( have_env_token )); then
     echo "GH_TOKEN or GITHUB_TOKEN is set and takes precedence over stored GitHub CLI credentials." >&2
@@ -164,7 +205,7 @@ auth() {
       return 0
     fi
     echo "A stored GitHub credential exists but is not currently usable." >&2
-    echo "Not replacing it automatically: diagnose network/credential state with 'agent-env github' first." >&2
+    echo "Not replacing it automatically: diagnose credential state with 'agent-env github' first." >&2
     return 1
   fi
 
@@ -185,14 +226,15 @@ case "$MODE" in
     cat <<'USAGE'
 Usage: github.sh [status|auth|git]
 
-status  Validate credential presence, GitHub API access, and current-repo access.
-auth    Start browser/device OAuth when no environment token overrides it, then verify.
+status  Probe shell GitHub reachability, then validate auth/API and current-repo access.
+auth    Start browser/device OAuth only when shell GitHub networking is usable, then verify.
 git     Configure current-repo Git transport safely and verify push with --dry-run --no-verify.
 
-Exit status from status:
-  0  GitHub API is ready (and current repo is accessible when in a Git worktree)
+Exit status from status/auth/git:
+  0  Requested GitHub capability is ready
   1  A credential/tool exists but access is unusable or could not be verified
-  2  No GitHub credential source exists; interactive authentication is appropriate
+  2  GitHub is reachable but required local credential/repository state is missing
+  3  Shell GitHub networking is unavailable; do not retry shell gh/GitHub Git in this session
 USAGE
     ;;
   *) echo "Unknown mode: $MODE" >&2; exit 2 ;;

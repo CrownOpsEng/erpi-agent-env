@@ -42,8 +42,8 @@ Exact versions, sources and hashes are under `manifest/`.
 
 ```text
 agent-env doctor [--json]  Diagnose local bundle, host commands, and current repository
-agent-env github            Validate GitHub auth/API and current-repository access
-agent-env github-auth       Run browser/device GitHub OAuth when needed, then verify it
+agent-env github            Probe shell GitHub reachability, auth/API, and repo access
+agent-env github-auth       Run browser/device GitHub OAuth when reachable, then verify it
 agent-env github-git        Configure current-repo Git auth safely and verify push dry-run
 agent-env git ARGS...       Run host Git with the environment active
 agent-env selftest          Exercise bundled capabilities and portability invariants
@@ -55,17 +55,21 @@ agent-env exec CMD ...      Run a command with the environment active
 agent-env root              Print the resolved bundle root
 ```
 
-## GitHub authentication
+## GitHub authentication and shell access
 
 Credentials are deliberately **not bundled**. `gh` uses host/session authentication, including `GH_TOKEN`, `GITHUB_TOKEN`, or the normal GitHub CLI credential/config store.
 
-For a GitHub-dependent task, validate access before substantial dependent work:
+For a GitHub-dependent task, validate shell access before substantial dependent work:
 
 ```bash
 agent-env github
 ```
 
-If it reports that no credential source exists, authenticate while the user is present:
+This command first performs a short HTTPS reachability probe to GitHub before it recommends authentication. That distinction matters in constrained chat/agent sandboxes: the shell may have a working bundled `gh` binary while the host still blocks direct GitHub networking, even when the platform separately provides a GitHub connector/app.
+
+If the command reports `Shell GitHub network: unavailable` and exits `3`, treat remote GitHub access from shell commands as unavailable for the rest of that session unless the host/network changes. Do **not** keep retrying `gh auth`, `gh api`, or GitHub `git fetch/push`; local Git operations remain usable. Use the platform GitHub connector/app when one is available. This is detected at runtime rather than hardcoded as an assumption about every ChatGPT or agent host.
+
+If shell GitHub networking is reachable but no credential source exists, authenticate while the user is present:
 
 ```bash
 agent-env github-auth
@@ -73,7 +77,7 @@ agent-env github-auth
 
 The command starts GitHub CLI's normal browser/device OAuth flow with terminal prompting disabled, then verifies the API and the current repository when one is detected. This prevents GitHub CLI from persisting this relocatable bundle's current absolute `gh` path into global Git configuration. Do not paste access tokens into chat when this flow is available.
 
-If `GH_TOKEN` or `GITHUB_TOKEN` is already set, it takes precedence over stored credentials. `agent-env github-auth` therefore refuses to start a competing stored-login flow until that environment token is fixed or unset. If a stored credential exists but is unusable, the command also refuses to overwrite it blindly; diagnose network/credential state with `agent-env github` first.
+If `GH_TOKEN` or `GITHUB_TOKEN` is already set, it takes precedence over stored credentials. `agent-env github-auth` therefore refuses to start a competing stored-login flow until that environment token is fixed or unset. If a stored credential exists but is unusable, the command also refuses to overwrite it blindly; diagnose credential/account state with `agent-env github` first.
 
 Do not pre-request broader OAuth scopes. If a concrete GitHub operation requires an additional scope, add only that scope with the normal `gh auth refresh` flow while the user is engaged, verify the operation, and continue.
 
@@ -93,7 +97,7 @@ From a Magnet Photos checkout:
 
 ```bash
 source /path/to/magnet-agent-env/activate
-agent-env github      # only when GitHub is relevant to the turn
+agent-env github      # once when GitHub is relevant to the turn/session
 make doctor
 make bootstrap
 make check-fast
