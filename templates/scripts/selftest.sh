@@ -29,12 +29,12 @@ case "$real_python" in
   *) echo "Venv interpreter escapes bundled runtime: $real_python" >&2; exit 1 ;;
 esac
 uv --version
-gh --version | head -1
+gh --version
 node --version
 npm --version
 jq --version
 yq --version
-rg --version | head -1
+rg --version
 actionlint --version
 gitleaks version
 printf '{"a":1}\n' | jq -e '.a == 1' >/dev/null

@@ -25,7 +25,7 @@ status() {
   command -v gh >/dev/null 2>&1 || { echo "GitHub CLI is unavailable." >&2; return 1; }
   local source account repo_info
   source="$(credential_source)"
-  printf 'GitHub CLI: %s\n' "$(gh --version | head -1)"
+  printf 'GitHub CLI: %s\n' "$(gh --version | sed -n '1p')"
   printf 'Credential source: %s\n' "$source"
 
   if [[ "$source" == none ]]; then

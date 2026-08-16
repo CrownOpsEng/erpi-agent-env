@@ -167,14 +167,9 @@ verify_one "$JQ_BIN" "$JQ_SHA256"
 install -m 0755 "$JQ_BIN" "$BUILD/bin/jq"
 
 log "yq $YQ_VERSION"
-YQ_SUMS="$DL/yq-${YQ_VERSION}-checksums"
-fetch "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/checksums" "$YQ_SUMS"
-verify_one "$YQ_SUMS" "$YQ_CHECKSUMS_SHA256"
-YQ_HASH="$(awk '$2 == "yq_linux_amd64" {print $1; exit}' "$YQ_SUMS")"
-[[ "$YQ_HASH" =~ ^[0-9a-f]{64}$ ]] || { echo "Could not resolve yq_linux_amd64 checksum" >&2; exit 1; }
 YQ_BIN="$DL/yq_linux_amd64-${YQ_VERSION}"
 fetch "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" "$YQ_BIN"
-verify_one "$YQ_BIN" "$YQ_HASH"
+verify_one "$YQ_BIN" "$YQ_SHA256"
 install -m 0755 "$YQ_BIN" "$BUILD/bin/yq"
 
 log "ripgrep $RIPGREP_VERSION"
@@ -237,8 +232,7 @@ uv\t$UV_VERSION\thttps://releases.astral.sh/github/uv/releases/download/$UV_VERS
 node\t$NODE_VERSION\thttps://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz\t$NODE_SHA256
 gh\t$GH_VERSION\thttps://github.com/cli/cli/releases/download/v$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz\t$GH_SHA256
 jq\t$JQ_VERSION\thttps://github.com/jqlang/jq/releases/download/jq-$JQ_VERSION/jq-linux-amd64\t$JQ_SHA256
-yq-checksums\t$YQ_VERSION\thttps://github.com/mikefarah/yq/releases/download/v$YQ_VERSION/checksums\t$YQ_CHECKSUMS_SHA256
-yq\t$YQ_VERSION\thttps://github.com/mikefarah/yq/releases/download/v$YQ_VERSION/yq_linux_amd64\t$YQ_HASH
+yq\t$YQ_VERSION\thttps://github.com/mikefarah/yq/releases/download/v$YQ_VERSION/yq_linux_amd64\t$YQ_SHA256
 ripgrep\t$RIPGREP_VERSION\thttps://github.com/BurntSushi/ripgrep/releases/download/$RIPGREP_VERSION/ripgrep-$RIPGREP_VERSION-x86_64-unknown-linux-musl.tar.gz\t$RIPGREP_SHA256
 actionlint\t$ACTIONLINT_VERSION\thttps://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz\t$ACTIONLINT_SHA256
 gitleaks\t$GITLEAKS_VERSION\thttps://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz\t$GITLEAKS_SHA256

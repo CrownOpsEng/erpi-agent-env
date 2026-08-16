@@ -57,7 +57,7 @@ returns green.
 Pins were reviewed against current upstream release information as of the audit date. Two draft defects were caught and corrected before first hydration:
 
 - nonexistent CPython `3.13.15` -> `3.13.14`;
-- yq release checksum asset identity corrected so the builder verifies the exact `checksums` asset it downloads.
+- yq verification simplified to the direct SHA-256 digest published for `yq_linux_amd64` in GitHub immutable release metadata; the multi-algorithm rhash checksum-table parser was removed.
 
 Node.js `24.19.0` Linux x64 and its pinned SHA-256 were rechecked against Node's signed release SHASUMS. `uv 0.12.5` and ripgrep `15.2.0` Linux assets were rechecked against their release metadata. Other native pins remain fail-closed because the builder verifies each downloaded artifact before extraction/install.
 
@@ -135,3 +135,10 @@ Corrected design:
 - static checks now reject reintroduction of the brittle pattern.
 
 The corrected builder passed its static suite and was runtime-probed far enough to enter the uv download stage, proving that the Linux/x86-64/glibc preflight accepts the intended host class. Full hydrated validation remains pending the connected build.
+
+
+### 2026-08-16 real hydration: yq checksum-table parser
+
+The build progressed successfully through uv 0.12.5, CPython 3.13.14, creation and population of the relocatable Python environment and offline wheelhouse, Node.js 24.19.0, GitHub CLI 2.97.0, and jq 1.8.2. It then stopped before downloading yq because the builder incorrectly treated yq's multi-algorithm `rhash` `checksums` table as a two-column SHA-256 manifest.
+
+The correction removes the checksum-table dependency entirely and pins `yq_linux_amd64` directly to GitHub's immutable v4.53.3 release-asset SHA-256 (`fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4`). The same pass removed remaining `| head` pipelines from runtime scripts under `set -o pipefail` and made broken-symlink verification consistently ignore mutable `state/`.

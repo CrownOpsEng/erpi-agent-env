@@ -33,11 +33,15 @@ grep -F 'NPM_CONFIG_PREFIX="$MAGNET_AGENT_ENV/state/npm-global"' "$ROOT/template
 # Mutable state is outside immutable payload verification/topology.
 grep -F "! -path './state/*'" "$ROOT/templates/scripts/verify.sh" >/dev/null
 grep -F '! -path "$ROOT/state/*"' "$ROOT/templates/scripts/selftest.sh" >/dev/null
-# Host preflight probes must not use early-closing pipelines under `set -o pipefail`.
-if grep -nE '(ldd|tar) --version[^\n]*\|[[:space:]]*head' "$ROOT/build.sh"; then
-  echo "Host-version probes must capture output instead of piping through head under pipefail." >&2
+# No shipped shell path may use an early-closing `head` pipeline under `set -o pipefail`.
+if grep -R -nE '\|[[:space:]]*head([[:space:]]|$)' "$ROOT/build.sh" "$ROOT/templates" "$ROOT/tests"; then
+  echo "Avoid early-closing head pipelines under pipefail; capture output or consume it fully." >&2
   exit 1
 fi
 grep -F 'getconf GNU_LIBC_VERSION' "$ROOT/build.sh" >/dev/null
+# yq is verified directly against the immutable GitHub release-asset digest; do not parse rhash columns.
+grep -F 'YQ_SHA256="fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4"' "$ROOT/versions.env" >/dev/null
+! grep -R -nE 'YQ_CHECKSUMS_SHA256|YQ_HASH|yq-checksums|awk.*yq_linux_amd64' "$ROOT/build.sh" "$ROOT/versions.env"
+grep -F "find . -xtype l ! -path './state/*'" "$ROOT/templates/scripts/verify.sh" >/dev/null
 "$ROOT/tests/github-auth-check.sh"
 echo "Builder static checks passed."
