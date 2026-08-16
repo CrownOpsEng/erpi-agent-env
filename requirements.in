@@ -1,0 +1,10 @@
+# Generic agent-analysis layer only. These are not Magnet Photos application dependencies.
+httpx==0.28.1
+jsonschema==4.26.0
+packaging==26.2
+PyYAML==6.0.3
+tomlkit==0.15.1
+pytest==9.1.1
+pip==26.1.2
+setuptools==83.0.0
+wheel==0.47.0

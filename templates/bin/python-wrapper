@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+ROOT=$(CDPATH= cd -- "$HERE/../.." && pwd -P)
+mkdir -p "$ROOT/state/pycache" 2>/dev/null || true
+: "${PYTHONPYCACHEPREFIX:=$ROOT/state/pycache}"
+export PYTHONPYCACHEPREFIX
+"$ROOT/scripts/repair-python.sh" --quiet
+exec "$HERE/.python-real" "$@"

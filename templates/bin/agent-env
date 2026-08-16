@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+export MAGNET_AGENT_ENV="$ROOT"
+export VIRTUAL_ENV="$ROOT/env"
+export UV_CACHE_DIR="$ROOT/state/uv-cache"
+export UV_PYTHON_INSTALL_DIR="$ROOT/runtime/python"
+export UV_TOOL_DIR="$ROOT/state/uv-tools"
+export UV_TOOL_BIN_DIR="$ROOT/state/uv-tool-bin"
+export UV_LINK_MODE=copy
+export PIP_CACHE_DIR="$ROOT/state/pip-cache"
+export NPM_CONFIG_CACHE="$ROOT/state/npm-cache"
+export PYTHONPYCACHEPREFIX="$ROOT/state/pycache"
+mkdir -p "$UV_CACHE_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$PIP_CACHE_DIR" "$NPM_CONFIG_CACHE" "$PYTHONPYCACHEPREFIX" 2>/dev/null || true
+export PATH="$ROOT/env/bin:$ROOT/bin:$UV_TOOL_BIN_DIR:$PATH"
+
+usage() {
+  cat <<'USAGE'
+Usage: agent-env COMMAND [ARGS...]
+
+Commands:
+  doctor [--json]    Diagnose bundle, GitHub auth, host capabilities, and current repo
+  selftest           Exercise every bundled capability and portability invariant
+  verify             Verify the immutable payload checksum manifest
+  repair             Repair relocation-sensitive Python venv metadata
+  rebuild-python      Recreate the Python venv entirely offline from wheelhouse
+  versions           Print the pinned environment manifest
+  exec CMD [ARGS...] Run a command with this environment active
+  root               Print the resolved current bundle root
+USAGE
+}
+
+cmd="${1:-help}"
+case "$cmd" in
+  help|-h|--help) usage ;;
+  doctor) shift; exec "$ROOT/env/bin/python" "$ROOT/scripts/doctor.py" "$@" ;;
+  selftest) shift; exec "$ROOT/scripts/selftest.sh" "$@" ;;
+  verify) shift; exec "$ROOT/scripts/verify.sh" "$@" ;;
+  repair) shift; exec "$ROOT/scripts/repair-python.sh" "$@" ;;
+  rebuild-python) shift; exec "$ROOT/scripts/rebuild-python.sh" "$@" ;;
+  versions) cat "$ROOT/manifest/environment.json" ;;
+  root) printf '%s\n' "$ROOT" ;;
+  exec)
+    shift
+    [[ $# -gt 0 ]] || { echo "agent-env exec requires a command" >&2; exit 2; }
+    exec "$@"
+    ;;
+  *) echo "Unknown command: $cmd" >&2; usage >&2; exit 2 ;;
+esac

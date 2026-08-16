@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+ROOT=$(CDPATH= cd -- "$HERE/.." && pwd -P)
+exec "$ROOT/runtime/node/bin/node" "$ROOT/runtime/node/lib/node_modules/npm/bin/npx-cli.js" "$@"
