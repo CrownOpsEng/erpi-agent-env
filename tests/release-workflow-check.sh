@@ -21,6 +21,8 @@ grep -F -- '--verify-tag' "$PUBLISH" >/dev/null
 grep -F -- '--draft' "$PUBLISH" >/dev/null
 grep -F 'Realigned draft release' "$PUBLISH" >/dev/null
 grep -F 'Reusing matching draft release' "$PUBLISH" >/dev/null
+grep -F 'already published at the accepted tag/SHA; no action is required' "$PUBLISH" >/dev/null
+grep -F "if: steps.release.outputs.published != 'true'" "$PUBLISH" >/dev/null
 grep -F 'gh workflow run build-dist.yml' "$PUBLISH" >/dev/null
 
 # Tag lookups must branch on gh's exit status. A 404 JSON error body must never

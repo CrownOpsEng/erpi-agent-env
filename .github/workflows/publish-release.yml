@@ -75,6 +75,7 @@ jobs:
           source ./versions.env
           target_sha="$(git rev-parse HEAD)"
           release_tag="v${BUNDLE_VERSION}"
+          published=false
 
           if [[ -n "$REQUESTED_VERSION" && "$REQUESTED_VERSION" != "$BUNDLE_VERSION" ]]; then
             echo "Release request version $REQUESTED_VERSION does not match target BUNDLE_VERSION $BUNDLE_VERSION." >&2
@@ -109,18 +110,19 @@ jobs:
             --jq ".[] | select(.tag_name == \"$release_tag\") | [.draft,.target_commitish] | @tsv" | sed -n '1p')"
           if [[ -n "$existing" ]]; then
             IFS=$'\t' read -r is_draft release_target <<<"$existing"
-            [[ "$is_draft" == true ]] || {
-              echo "Release $release_tag is already published; refusing to recreate or modify it." >&2
-              exit 1
-            }
-            if [[ "$release_target" != "$target_sha" ]]; then
-              gh release edit "$release_tag" \
-                --repo "$GITHUB_REPOSITORY" \
-                --target "$target_sha" \
-                --draft=true >/dev/null
-              echo "Realigned draft release $release_tag metadata to accepted target $target_sha."
+            if [[ "$is_draft" == true ]]; then
+              if [[ "$release_target" != "$target_sha" ]]; then
+                gh release edit "$release_tag" \
+                  --repo "$GITHUB_REPOSITORY" \
+                  --target "$target_sha" \
+                  --draft=true >/dev/null
+                echo "Realigned draft release $release_tag metadata to accepted target $target_sha."
+              fi
+              echo "Reusing matching draft release $release_tag."
+            else
+              published=true
+              echo "Release $release_tag is already published at the accepted tag/SHA; no action is required."
             fi
-            echo "Reusing matching draft release $release_tag."
           else
             gh release create "$release_tag" \
               --repo "$GITHUB_REPOSITORY" \
@@ -133,8 +135,10 @@ jobs:
 
           echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
           echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+          echo "published=$published" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch release distribution build
+        if: steps.release.outputs.published != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
