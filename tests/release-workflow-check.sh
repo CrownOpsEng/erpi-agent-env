@@ -22,8 +22,8 @@ grep -F 'Reusing matching draft release' "$PUBLISH" >/dev/null
 grep -F 'gh workflow run build-dist.yml' "$PUBLISH" >/dev/null
 
 tag_line="$(grep -nF '"ref=refs/tags/$release_tag"' "$PUBLISH" | cut -d: -f1)"
-draft_line="$(grep -nF -- '--draft' "$PUBLISH" | cut -d: -f1)"
-[[ -n "$tag_line" && -n "$draft_line" && "$tag_line" -lt "$draft_line" ]] || {
+create_line="$(grep -nF 'gh release create "$release_tag"' "$PUBLISH" | cut -d: -f1)"
+[[ -n "$tag_line" && -n "$create_line" && "$tag_line" -lt "$create_line" ]] || {
   echo "Release tag must be created/verified before draft Release creation." >&2
   exit 1
 }
