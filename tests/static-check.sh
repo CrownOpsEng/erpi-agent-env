@@ -33,5 +33,11 @@ grep -F 'NPM_CONFIG_PREFIX="$MAGNET_AGENT_ENV/state/npm-global"' "$ROOT/template
 # Mutable state is outside immutable payload verification/topology.
 grep -F "! -path './state/*'" "$ROOT/templates/scripts/verify.sh" >/dev/null
 grep -F '! -path "$ROOT/state/*"' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+# Host preflight probes must not use early-closing pipelines under `set -o pipefail`.
+if grep -nE '(ldd|tar) --version[^\n]*\|[[:space:]]*head' "$ROOT/build.sh"; then
+  echo "Host-version probes must capture output instead of piping through head under pipefail." >&2
+  exit 1
+fi
+grep -F 'getconf GNU_LIBC_VERSION' "$ROOT/build.sh" >/dev/null
 "$ROOT/tests/github-auth-check.sh"
 echo "Builder static checks passed."

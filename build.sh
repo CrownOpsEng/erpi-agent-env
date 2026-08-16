@@ -31,10 +31,15 @@ done
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Required build command missing: $1" >&2; exit 1; }; }
 for cmd in bash curl tar xz sha256sum find grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname; do need "$cmd"; done
-tar --version 2>/dev/null | head -1 | grep -q 'GNU tar' || { echo "GNU tar is required by this builder." >&2; exit 1; }
+TAR_VERSION="$(tar --version 2>/dev/null || true)"
+grep -q 'GNU tar' <<<"$TAR_VERSION" || { echo "GNU tar is required by this builder." >&2; exit 1; }
 [[ "$(uname -s)" == Linux ]] || { echo "Builder target is Linux only." >&2; exit 1; }
 [[ "$(uname -m)" == x86_64 ]] || { echo "Builder target is x86_64 only; found $(uname -m)." >&2; exit 1; }
-ldd --version 2>&1 | head -1 | grep -qi 'glibc\|GNU libc' || { echo "A glibc-based build host is required." >&2; exit 1; }
+LIBC_INFO="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"
+if [[ -z "$LIBC_INFO" ]]; then
+  LIBC_INFO="$(ldd --version 2>&1 || true)"
+fi
+grep -Eqi 'glibc|GNU C Library|GNU libc' <<<"$LIBC_INFO" || { echo "A glibc-based build host is required. Detected: ${LIBC_INFO:-unknown}" >&2; exit 1; }
 
 mkdir -p "$OUT_DIR" "$CACHE_DIR"
 OUT_DIR="$(CDPATH= cd -- "$OUT_DIR" && pwd -P)"

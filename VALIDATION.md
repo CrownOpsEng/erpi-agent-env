@@ -121,3 +121,17 @@ agent-env github
 ```
 
 and invoke `agent-env github-auth` only when the status explicitly reports that no credential source exists.
+
+## 2026-08-16 connected-host preflight correction
+
+The first real build attempt on Ubuntu x86-64 with glibc 2.39 exposed a false-negative host check. The original probe used `ldd --version | head -1 | grep ...` while the builder enables `set -o pipefail`; an early-closing pipeline can report failure even when glibc is correctly present.
+
+Corrected design:
+
+- capture GNU tar version output before testing it;
+- detect glibc primarily with `getconf GNU_LIBC_VERSION`;
+- fall back to captured `ldd --version` output;
+- never use an early-closing `head` pipeline for these host probes;
+- static checks now reject reintroduction of the brittle pattern.
+
+The corrected builder passed its static suite and was runtime-probed far enough to enter the uv download stage, proving that the Linux/x86-64/glibc preflight accepts the intended host class. Full hydrated validation remains pending the connected build.
