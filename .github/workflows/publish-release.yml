@@ -1,0 +1,77 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Accepted ref/commit to release
+        required: true
+        default: main
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish accepted runtime
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.target_ref }}
+
+      - name: Verify acceptance and create release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source ./versions.env
+          target_sha="$(git rev-parse HEAD)"
+          release_tag="v${BUNDLE_VERSION}"
+
+          accepted="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$target_sha&per_page=100" \
+            --jq 'any(.workflow_runs[]; .name == "Accept runtime" and .status == "completed" and .conclusion == "success")')"
+          [[ "$accepted" == true ]] || {
+            echo "Target $target_sha has no successful completed Accept runtime run." >&2
+            echo "Push/accept the intended release commit before publishing it." >&2
+            exit 1
+          }
+
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $release_tag already exists; refusing to recreate it." >&2
+            exit 1
+          fi
+
+          gh release create "$release_tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$target_sha" \
+            --title "$release_tag" \
+            --generate-notes
+
+          echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch release distribution build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run build-dist.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f release_tag="$RELEASE_TAG"
+          echo "Dispatched Build distribution for $RELEASE_TAG."

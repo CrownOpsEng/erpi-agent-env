@@ -12,5 +12,6 @@ Before changing builder/runtime source:
 6. Use the commit convention in `CONTRIBUTING.md`.
 7. The default change flow is direct to `main`. Do not create a pull request unless the user explicitly asks for review or isolation; make coherent commits and inspect the resulting CI instead.
 8. Do not manually copy current candidate versions, run IDs, or artifact hashes into `VALIDATION.md`. CI-generated `acceptance.json` evidence is authoritative for accepted builds; GitHub Release assets are authoritative for published builds. Update `VALIDATION.md` only if that authority/validation contract itself changes.
+9. To publish, update `BUNDLE_VERSION`, require that exact source commit to pass **Accept runtime**, then use the permanent **Publish release** workflow. Do not invent a separate tag/release path; the publisher creates the matching tag and dispatches the release distribution build.
 
-Keep this file short. Detailed behavior belongs in the code, tests, `README.md`, `BUILD-REVIEW.md`, and `VALIDATION.md`.
+Keep this file short. Detailed behavior belongs in the code, tests, `README.md`, `BUILD-REVIEW.md`, `CONTRIBUTING.md`, and `VALIDATION.md`.

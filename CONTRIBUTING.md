@@ -6,7 +6,7 @@ This repository is intentionally direct-to-`main`. It is a small, single-purpose
 
 Use one coherent commit per change when practical and inspect the resulting GitHub Actions runs after pushing. Pull requests remain available when explicit review, temporary isolation, or multi-contributor coordination is useful; they are not the default path.
 
-Payload-affecting pushes to `main` automatically run the full runtime acceptance build. Distribution publishing remains separate and happens through the **Build distribution** workflow manually or when a GitHub Release is published.
+Payload-affecting pushes to `main` automatically run the full runtime acceptance build. Distribution publishing remains separate.
 
 ## Commit messages
 
@@ -51,8 +51,18 @@ A payload-affecting direct push to `main` runs that full acceptance sequence aut
 
 ## Releases
 
-`BUNDLE_VERSION` in `versions.env` is the source version. Release tags must be exactly `v$BUNDLE_VERSION`; the distribution workflow rejects a mismatch.
+`BUNDLE_VERSION` in `versions.env` is the source version. Release tags are exactly `v$BUNDLE_VERSION`.
 
-Before publishing a release, make the intended version change on `main` and require its normal **Validate** and **Accept runtime** runs to succeed. Publishing the matching GitHub Release then triggers a fresh, independent **Build distribution** run from the tag and attaches the accepted archive, checksum sidecar, and `acceptance.json` to the Release.
+Normal release flow:
+
+1. change `BUNDLE_VERSION` on `main` as part of the intended release source;
+2. require that exact commit's **Validate** and **Accept runtime** workflows to succeed;
+3. run the permanent **Publish release** workflow, normally with `target_ref=main` (or an explicit already-accepted commit/ref when needed);
+4. **Publish release** verifies the target acceptance result, creates the matching GitHub Release/tag, and explicitly dispatches **Build distribution**; and
+5. **Build distribution** checks out the release tag, re-runs the complete acceptance build, then attaches the runtime archive, checksum sidecar, and `acceptance.json` to the Release.
+
+The explicit dispatch in step 4 is intentional: GitHub suppresses most follow-on workflow events caused by actions performed with `GITHUB_TOKEN`, so an Actions-created Release cannot rely on its own `release: published` event to start another workflow. The release trigger remains supported for Releases published directly through GitHub's UI/API by a user.
+
+**Build distribution** can also be run manually without a release tag to produce a short-lived Actions artifact, or with an existing `release_tag` to rebuild/attach that release.
 
 Pre-1.0 versions are appropriate while the environment is still accumulating real-world usage evidence. A `1.0.0` tag should signal a deliberately proven/stable compatibility contract rather than merely the first working package.

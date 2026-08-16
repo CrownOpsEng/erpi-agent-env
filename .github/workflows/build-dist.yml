@@ -2,6 +2,11 @@ name: Build distribution
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to build and attach (optional)
+        required: false
+        type: string
   release:
     types: [published]
 
@@ -17,13 +22,15 @@ jobs:
     name: Linux x86-64 runtime
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag || github.sha }}
 
       - name: Restore builder download cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -37,16 +44,18 @@ jobs:
         run: ./tests/static-check.sh
 
       - name: Validate release version
-        if: github.event_name == 'release'
+        if: env.RELEASE_TAG != ''
         shell: bash
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
           source ./versions.env
           expected="v${BUNDLE_VERSION}"
           [[ "$RELEASE_TAG" == "$expected" ]] || {
             echo "Release tag $RELEASE_TAG does not match bundle version $expected." >&2
+            exit 1
+          }
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null || {
+            echo "Release $RELEASE_TAG does not exist." >&2
             exit 1
           }
 
@@ -56,17 +65,16 @@ jobs:
       - name: Write acceptance metadata
         id: metadata
         shell: bash
-        env:
-          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
         run: |
           set -euo pipefail
           source ./versions.env
           echo "name=magnet-agent-env-linux-x64-${BUNDLE_VERSION}" >> "$GITHUB_OUTPUT"
           sidecar="$(printf '%s\n' dist/*.tar.gz.sha256)"
+          source_sha="$(git rev-parse HEAD)"
           python3 scripts/write-acceptance-metadata.py \
             --sidecar "$sidecar" \
             --output dist/acceptance.json \
-            --source-sha "$GITHUB_SHA" \
+            --source-sha "$source_sha" \
             --repository "$GITHUB_REPOSITORY" \
             --workflow "$GITHUB_WORKFLOW" \
             --run-id "$GITHUB_RUN_ID" \
@@ -93,8 +101,7 @@ jobs:
           retention-days: 14
 
       - name: Attach distribution to GitHub Release
-        if: github.event_name == 'release'
+        if: env.RELEASE_TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/*.tar.gz.sha256 dist/acceptance.json --clobber
