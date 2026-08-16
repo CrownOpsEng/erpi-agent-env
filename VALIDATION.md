@@ -63,12 +63,12 @@ Node.js `24.19.0` Linux x64 and its pinned SHA-256 were rechecked against Node's
 
 ## Full acceptance sequence encoded in the builder
 
-On an internet-connected Linux x86-64 glibc build host, `build.sh` must complete all of these before reporting success:
+On an internet-connected supported GNU/Linux x86-64 build host (kernel >= 4.18, glibc >= 2.28, Node-compatible libstdc++), `build.sh` must complete all of these before reporting success:
 
 1. verify every direct native release artifact before extraction/use;
 2. install the exact managed CPython version and record its resolved distribution ID;
 3. create a `uv --relocatable` venv;
-4. generate a hashed Python lock with the build cutoff;
+4. verify the source-frozen hashed Python lock (including its pinned lock-file SHA-256) without resolving versions during hydration;
 5. create a wheel-only offline recovery set and sync from it;
 6. repair relocation-sensitive Python metadata;
 7. reject any remaining original build-root reference anywhere in the payload;
@@ -148,3 +148,18 @@ The correction removes the checksum-table dependency entirely and pins `yq_linux
 A connected Ubuntu 24.04 / glibc 2.39 x86-64 hydration run successfully completed Python 3.13.14, the hashed wheelhouse and environment sync, Node 24.19.0, gh 2.97.0, jq 1.8.2, yq 4.53.3, ripgrep 15.2.0, actionlint 1.7.12, and gitleaks 8.30.1. The pre-relocation residue gate then correctly exposed three absolute-path locations: the uv-annotated requirements lock, uv-installed Python `_sysconfigdata_*.py`, and the deliberately mutable `env/pyvenv.cfg`.
 
 The builder was revised to make the lock annotation-free, normalize uv's install-prefix sysconfig data into an immutable location-neutral form, and model `pyvenv.cfg` correctly as relocation metadata: permitted to name the current location before a move, repaired immediately after a move, and then included in stale-path rejection. The archive/extraction proof now also rejects any surviving reference to the archive-build location.
+
+
+## FIXED4 approved implementation checks — 2026-08-16
+
+After the second portability red-team, the builder was simplified and strengthened before another hydration attempt. Static/behavioral validation now additionally proves:
+
+- the frozen 21-package lock matches every direct `requirements.in` pin, contains no prior build path/annotation, and matches the lock SHA-256 pinned in `versions.env`;
+- uv builder/recovery isolation clears project/user Python artifact-selection overrides while preserving proxy and CA/system-certificate transport settings;
+- `repair-python.sh` changes only the single `home` entry in `pyvenv.cfg`, preserves arbitrary uv metadata, is idempotent, and refuses to reconstruct a missing immutable `runtime/python/current` link;
+- sysconfig normalization still survives a physical spaces/Unicode relocation;
+- runtime self-test directly runs uv-generated `pytest` and `pip` console entrypoints and imports compiled `rpds` and PyYAML `CLoader`;
+- supported runtime floor is recorded as Linux x86-64, kernel >= 4.18, glibc >= 2.28, with Node's `GLIBCXX_3.4.25` requirement; and
+- the pip bootstrap wheel is exact-URL/SHA-256 pinned and verified before any pip code executes.
+
+The next unresolved validation gate remains the only one that matters: a connected full `build.sh` run must reach relocation, offline venv destruction/rebuild, immutable-manifest verification, and fresh archive extraction without bypasses.

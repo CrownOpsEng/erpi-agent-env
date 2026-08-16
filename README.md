@@ -10,7 +10,9 @@ The design target is high-leverage asymmetry: solve recurring agent-environment 
 
 The runtime has a short root `AGENTS.md` router. Agents do not need to load the build history or this manual for ordinary project work. Detailed operation remains discoverable through `agent-env help`, `README.md`, and `manifest/` only when needed.
 
-The J2911 portable venv was used as a reference. Its strongest idea—self-repairing venv metadata around a bundled CPython runtime—is preserved. Its main portability weakness is not: a stale absolute path was found in an installed console script after relocation. This builder therefore treats **old build-root residue as a hard failure** and combines the repair pattern with `uv venv --relocatable`.
+The J2911 portable venv was used as a reference. Its strongest idea—self-locating repair of the venv's base-Python `home` after a move—is preserved. Its main portability weakness is not: a stale absolute path was found in an installed console script after relocation. This builder therefore lets `uv venv --relocatable` own standard entrypoint/activation portability, patches only the one `pyvenv.cfg` value uv cannot keep valid when the bundled base interpreter itself moves, and treats **old build-root residue as a hard failure**.
+
+The bundled uv-managed python-build-standalone runtime is kept intact under `runtime/python/`; the venv reaches it through a relative internal link. uv's install-time sysconfig prefix is normalized once into a location-derived form so the base runtime can move without making sysconfig mutable.
 
 ## Payload
 
@@ -42,7 +44,7 @@ The short runtime `AGENTS.md` requires agents to validate GitHub access early wh
 
 ## Build
 
-Prerequisites: Linux x86-64 with glibc, Bash, curl, tar, xz, sha256sum, find, sed/awk/grep and internet access. WSL2 x86-64 is suitable. No sudo is used. The finished runtime assumes ordinary Linux base utilities such as `find`, `sha256sum`, `cmp`, and `diff`; these are diagnosed rather than duplicated.
+Prerequisites: supported GNU/Linux x86-64 with **kernel >= 4.18, glibc >= 2.28**, Bash, curl, GNU tar, xz, sha256sum, find, sed/awk/grep and internet access. The Node 24.19.0 official x64 binary also requires libstdc++ exposing **GLIBCXX_3.4.25** (libstdc++ >= 6.0.25). Ubuntu 20.04+/Debian 10+/RHEL 8+ class hosts and suitable WSL2 x86-64 environments meet this target. No sudo is used. The finished runtime assumes ordinary Linux base utilities such as `find`, `sha256sum`, `cmp`, and `diff`; these are diagnosed rather than duplicated.
 
 ```bash
 ./tests/static-check.sh
@@ -65,14 +67,21 @@ The builder does not report success unless it:
 1. verifies downloaded native artifacts;
 2. creates the environment under a path containing spaces;
 3. builds the Python venv with native uv relocation support;
-4. creates an offline hashed Python recovery set;
+4. verifies the source-frozen hashed Python lock and creates an offline wheelhouse without resolving dependency versions;
 5. rejects absolute symlinks and old build-root residue;
 6. relocates to a deep path containing spaces and Unicode and self-tests;
 7. destroys/rebuilds the Python venv offline and self-tests again;
 8. emits and verifies immutable-file and symlink manifests;
-9. archives, freshly extracts, self-tests and verifies the final artifact.
+9. directly exercises uv-generated `pip`/`pytest` console entrypoints and compiled Python extensions after relocation/rebuild;
+10. archives, freshly extracts, self-tests and verifies the final artifact.
 
 See `VALIDATION.md` for what was and was not executable in the ChatGPT construction sandbox.
+
+## Python lock and build isolation
+
+`requirements.lock` is an input to v1, not generated during hydration. It is the exact 21-package hashed resolution captured from the first connected build under the recorded cutoff, and its own SHA-256 is pinned in `versions.env`. Updating that lock is therefore an intentional builder-version change rather than an ambient resolver event.
+
+Builder/recovery uv invocations run through a small isolation wrapper that ignores project/user uv configuration and Python artifact-selection overrides while preserving ordinary proxy and CA/system-certificate transport settings. The one temporary pip bootstrap wheel is fetched from its exact PyPI file URL and SHA-256 verified before any pip code executes; it then remains in the offline wheelhouse.
 
 ## Security boundary
 

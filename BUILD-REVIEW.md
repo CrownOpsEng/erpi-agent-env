@@ -1,6 +1,6 @@
 # Magnet Agent Environment — design audit and red-team record
 
-Status: **draft accepted for first hydration test**  
+Status: **FIXED4 design approved; pending complete hydrated acceptance run**  
 Audit date: 2026-08-15 (America/Toronto)
 
 ## Decision
@@ -12,7 +12,7 @@ The retained design is intentionally asymmetric: a modest portable payload remov
 ## Architecture that survives review
 
 - External to Magnet Photos and its dependency model.
-- Linux x86-64 glibc first; no false claim of cross-OS or cross-architecture portability.
+- Supported GNU/Linux x86-64 first: kernel >= 4.18, glibc >= 2.28, and Node's GLIBCXX_3.4.25 host-runtime floor; no false claim of cross-OS/cross-architecture/musl portability.
 - Short root `AGENTS.md` router; detailed material is loaded only on demand.
 - `agent-env` is the small executable command surface.
 - Magnet Photos still owns Supabase/PGLS versions and database operations through `package.json`, `package-lock.json`, and `Makefile`.
@@ -97,7 +97,7 @@ These were considered and rejected for v1 because they do not earn their cost ye
 ## Remaining honest limitations
 
 - The payload cannot create network access, credentials, Docker daemon access, filesystem execute permission, or kernel capabilities denied by the host sandbox.
-- Linux x86-64 glibc portability is not Windows/macOS/ARM portability; those would be separate builds if ever justified.
+- Supported GNU/Linux x86-64 portability is not Windows/macOS/ARM/musl portability; those would be separate builds if ever justified.
 - GitHub OAuth persistence depends on the host credential/config environment. On hosts without a credential store, GitHub CLI may fall back to its normal plaintext config behavior; credentials still remain outside the portable payload.
 - The final hydrated third-party runtime has not been built inside this ChatGPT shell because outbound download/DNS is unavailable here. The builder fails closed and runs the full acceptance sequence on the connected build host.
 
@@ -113,4 +113,20 @@ The first live hydration run reached the portability gate and surfaced three abs
 - `env/pyvenv.cfg` correctly contained the current absolute base-Python location, but the pre-move gate had incorrectly begun treating that declared mutable relocation metadata as immutable residue;
 - uv-managed python-build-standalone `_sysconfigdata_*.py` contained the Python installation prefix. This is expected from uv's install-time sysconfig patching, but it would become stale after moving the complete Python installation.
 
-Corrections are deliberately narrow: compile locks with `--no-annotate`; exclude only `pyvenv.cfg` from the pre-move stale-root scan and require it clean after repair; normalize the installed Python prefix inside `_sysconfigdata_*.py` to a location-neutral sentinel resolved from that module's current location at import time. The normalized sysconfig file remains immutable and checksum-covered. Runtime self-test now proves `BINDIR` and `LIBDIR` resolve to the relocated bundled Python root, and fresh archive extraction must contain no reference to the archive-build location.
+Corrections are deliberately narrow: freeze the already-resolved annotation-free 21-package lock as builder input; exclude only `pyvenv.cfg` from the pre-move stale-root scan and require it clean after repair; normalize the installed Python prefix inside `_sysconfigdata_*.py` to a location-neutral sentinel resolved from that module's current location at import time. The normalized sysconfig file remains immutable and checksum-covered. Runtime self-test proves `BINDIR` and `LIBDIR` resolve to the relocated bundled Python root, and fresh archive extraction must contain no reference to the archive-build location.
+
+
+## FIXED4 foundational portability audit — 2026-08-16
+
+The architecture was re-audited against current uv 0.12.5 source, python-build-standalone behavior, the working J2911 implementation, uv's still-open interpreter-bundling/export gap, and the live hydration failures. The result reduced custom authority rather than adding machinery.
+
+- `uv venv --relocatable` remains the native owner of standard console/gui entrypoint and activation portability. Current uv still links a Unix venv to an external/base interpreter and writes an absolute `home`, so a bundled-moving-interpreter bridge is genuinely outside the native guarantee.
+- The J2911 self-location/`pyvenv.cfg` repair pattern is retained, but repair now changes **only `home`** and preserves all uv-generated metadata. Missing `runtime/python/current` is immutable-topology corruption and fails closed instead of being recreated.
+- uv's python-build-standalone sysconfig install-prefix patch becomes stale only because this bundle subsequently moves the complete managed-Python install. The existing narrow location-derived sysconfig normalization remains the smallest robust correction and stays checksum-covered.
+- The Python dependency lock is frozen into builder v1 and SHA-256 pinned. Hydration no longer resolves dependency versions.
+- uv build/recovery commands ignore ambient project/user config and Python artifact-selection overrides while preserving proxy/CA transport settings.
+- pip's temporary bootstrap wheel is exact-URL and SHA-256 verified before execution.
+- Relocation self-tests now directly exercise uv-generated `pip`/`pytest` scripts and compiled `rpds`/PyYAML code, covering the stale-console-script and native-extension failure classes.
+- The runtime contract is explicit: GNU/Linux x86-64, kernel >= 4.18, glibc >= 2.28, and a Node-compatible libstdc++ exposing GLIBCXX_3.4.25.
+
+Rejected again: direct `uv pip --system` installation (would make relocatable package entrypoints our problem), conda/conda-pack, generic relocators, runtime-Python reconstruction, and broader custom repair frameworks. One narrow metadata repair plus uv's native relocation remains the higher-leverage design.

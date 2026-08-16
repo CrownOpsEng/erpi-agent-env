@@ -1,6 +1,6 @@
 # Magnet Agent Environment
 
-A portable **Linux x86-64 glibc AI-agent execution environment** built for working on Magnet Photos and similar repositories from constrained shell sessions.
+A portable **supported GNU/Linux x86-64 AI-agent execution environment** built for working on Magnet Photos and similar repositories from constrained shell sessions.
 
 This environment is external tooling. It is **not part of the Magnet Photos application architecture**, and it does not replace repository-owned dependencies or safety policy.
 
@@ -108,9 +108,11 @@ Do not copy tokens, SSH keys, `.npmrc` credentials, cloud credentials or product
 
 ## Portability contract
 
-The bundle may be moved to a different pathname on a **compatible Linux x86-64 glibc host**. It is not cross-OS or cross-architecture.
+The bundle may be moved to a different pathname on a compatible **GNU/Linux x86-64 host with kernel >= 4.18 and glibc >= 2.28**. The bundled Node 24 official binary also requires libstdc++ exposing `GLIBCXX_3.4.25` (libstdc++ >= 6.0.25). It is not cross-OS, cross-architecture, or musl/Alpine portability.
 
-The environment combines `uv venv --relocatable` with a location-aware Python wrapper because the venv still needs to identify its bundled base interpreter after relocation. The builder also normalizes uv-managed Python sysconfig install-prefix metadata into a location-neutral form, so `sysconfig` continues to resolve the relocated bundled runtime correctly without making that file mutable. Build-time tests reject absolute symlinks and stale references to prior build locations, then move, self-test, destroy/rebuild the Python venv offline, archive, extract and test again.
+The environment uses `uv venv --relocatable` for standard activation/entrypoint portability. A tiny location-aware wrapper repairs only the `home` line in uv's `pyvenv.cfg` because the bundled base interpreter moves with the payload; all other uv-generated venv metadata is preserved. The immutable `runtime/python/current` relative link is validated and never reconstructed as "repair".
+
+The builder also normalizes uv-managed Python sysconfig install-prefix metadata into a location-neutral form, so `sysconfig` continues to resolve the relocated bundled runtime correctly without making that file mutable. Build-time tests reject absolute symlinks and stale references to prior build locations, directly execute uv-generated `pip` and `pytest` entrypoints, import compiled Python extensions, then move, self-test, destroy/rebuild the Python venv offline, archive, extract and test again.
 
 Prefer the supplied `.tar.gz` artifact. Tar reliably preserves executable permissions and symlinks; ZIP extraction behavior varies across hosts.
 
@@ -126,7 +128,7 @@ If the Python environment is damaged:
 agent-env rebuild-python
 ```
 
-That rebuild is designed to work without PyPI/network access using `manifest/requirements.lock` and `wheelhouse/`.
+That rebuild is designed to work without PyPI/network access using the source-frozen hashed `manifest/requirements.lock` and `wheelhouse/`. Recovery uv commands ignore ambient project/user uv configuration and artifact-selection overrides.
 
 ## Boundary
 

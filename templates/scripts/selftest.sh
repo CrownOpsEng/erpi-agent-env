@@ -26,7 +26,9 @@ libdir = pathlib.Path(sysconfig.get_config_var('LIBDIR')).resolve()
 assert bindir == base / 'bin', (bindir, base)
 assert libdir == base / 'lib', (libdir, base)
 assert '__MAGNET_AGENT_PYTHON_PREFIX__' not in repr(sysconfig.get_config_vars())
-import httpx, jsonschema, packaging, yaml, tomlkit, pytest  # noqa: F401
+import httpx, jsonschema, packaging, yaml, tomlkit, pytest, rpds  # noqa: F401
+from yaml import CLoader
+assert CLoader is not None
 print('python-ok', sys.version.split()[0])
 PY
 real_python="$(readlink -f "$ROOT/env/bin/.python-real")"
@@ -47,7 +49,10 @@ printf '{"a":1}\n' | jq -e '.a == 1' >/dev/null
 printf 'a: 1\n' | yq -e '.a == 1' >/dev/null
 printf 'magnet\n' | rg -q magnet
 node -e 'if (process.versions.node.split(".")[0] !== "24") process.exit(1)'
-python -m pytest --version >/dev/null
+# Exercise uv-generated console entrypoints directly. This catches the stale-shebang
+# failure class observed in the J2911 reference environment.
+pytest --version >/dev/null
+pip --version >/dev/null
 
 # Every script in env/bin must either be a portable shell launcher, a relative
 # symlink, or one of our explicit Python binaries/wrappers. Absolute build-root

@@ -15,7 +15,7 @@ usage() {
 Usage: ./build.sh [--out DIR] [--cache DIR] [--keep-work]
 
 Build Magnet Agent Environment ${BUNDLE_VERSION} for ${TARGET}.
-Requires an internet-connected Linux x86-64 glibc host. No sudo is used.
+Requires an internet-connected supported Linux x86-64 host (kernel >= ${MIN_KERNEL_VERSION}, glibc >= ${MIN_GLIBC_VERSION}). No sudo is used.
 USAGE
 }
 
@@ -30,7 +30,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Required build command missing: $1" >&2; exit 1; }; }
-for cmd in bash curl tar xz sha256sum find grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname; do need "$cmd"; done
+for cmd in bash curl tar xz sha256sum find grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname env; do need "$cmd"; done
 TAR_VERSION="$(tar --version 2>/dev/null || true)"
 grep -q 'GNU tar' <<<"$TAR_VERSION" || { echo "GNU tar is required by this builder." >&2; exit 1; }
 [[ "$(uname -s)" == Linux ]] || { echo "Builder target is Linux only." >&2; exit 1; }
@@ -40,6 +40,22 @@ if [[ -z "$LIBC_INFO" ]]; then
   LIBC_INFO="$(ldd --version 2>&1 || true)"
 fi
 grep -Eqi 'glibc|GNU C Library|GNU libc' <<<"$LIBC_INFO" || { echo "A glibc-based build host is required. Detected: ${LIBC_INFO:-unknown}" >&2; exit 1; }
+version_at_least() {
+  awk -v actual="$1" -v minimum="$2" 'BEGIN {
+    split(actual, a, "."); split(minimum, m, ".");
+    for (i = 1; i <= 3; i++) {
+      av = (a[i] == "" ? 0 : a[i] + 0); mv = (m[i] == "" ? 0 : m[i] + 0);
+      if (av > mv) exit 0; if (av < mv) exit 1;
+    }
+    exit 0
+  }'
+}
+GLIBC_VERSION="$(awk 'NR == 1 { for (i = NF; i >= 1; i--) if ($i ~ /^[0-9]+([.][0-9]+)+$/) { print $i; exit } }' <<<"$LIBC_INFO")"
+[[ -n "$GLIBC_VERSION" ]] || { echo "Could not determine glibc version from: ${LIBC_INFO:-unknown}" >&2; exit 1; }
+KERNEL_VERSION="${KERNEL_VERSION_OVERRIDE:-$(uname -r)}"
+KERNEL_VERSION="${KERNEL_VERSION%%-*}"
+version_at_least "$GLIBC_VERSION" "$MIN_GLIBC_VERSION" || { echo "glibc >= $MIN_GLIBC_VERSION is required; found $GLIBC_VERSION." >&2; exit 1; }
+version_at_least "$KERNEL_VERSION" "$MIN_KERNEL_VERSION" || { echo "Linux kernel >= $MIN_KERNEL_VERSION is required; found $KERNEL_VERSION." >&2; exit 1; }
 
 mkdir -p "$OUT_DIR" "$CACHE_DIR"
 OUT_DIR="$(CDPATH= cd -- "$OUT_DIR" && pwd -P)"
@@ -91,6 +107,8 @@ extract_single() {
 
 cp "$SELF_DIR/versions.env" "$BUILD/manifest/versions.env"
 cp "$SELF_DIR/requirements.in" "$BUILD/manifest/requirements.in"
+verify_one "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"
+cp "$SELF_DIR/requirements.lock" "$BUILD/manifest/requirements.lock"
 cp "$SELF_DIR/templates/RUNTIME-README.md" "$BUILD/README.md"
 cp "$SELF_DIR/templates/AGENTS.md" "$BUILD/AGENTS.md"
 cp "$SELF_DIR/templates/THIRD-PARTY.md" "$BUILD/THIRD-PARTY.md"
@@ -106,7 +124,7 @@ ln -s uv "$BUILD/bin/uvx"
 "$BUILD/bin/uv" --version | grep -F "uv $UV_VERSION" >/dev/null
 
 log "CPython $PYTHON_VERSION via pinned uv"
-UV_CACHE_DIR="$BUILD/state/uv-cache" "$BUILD/bin/uv" python install "$PYTHON_VERSION" --install-dir "$BUILD/runtime/python" --no-bin --managed-python
+UV_CACHE_DIR="$BUILD/state/uv-cache" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" python install "$PYTHON_VERSION" --install-dir "$BUILD/runtime/python" --no-bin --managed-python
 BASE_PY="$(find "$BUILD/runtime/python" -mindepth 2 -maxdepth 4 -path "*/bin/python${PYTHON_MINOR}" -print -quit)"
 [[ -n "$BASE_PY" && -x "$BASE_PY" ]] || { echo "uv did not install expected Python $PYTHON_VERSION" >&2; exit 1; }
 BASE_ROOT="$(CDPATH= cd -- "$(dirname -- "$BASE_PY")/.." && pwd -P)"
@@ -114,7 +132,7 @@ PYTHON_DIST_ID="$(basename -- "$BASE_ROOT")"
 ln -s "$PYTHON_DIST_ID" "$BUILD/runtime/python/current"
 
 log "Relocatable Python environment"
-UV_CACHE_DIR="$BUILD/state/uv-cache" UV_LINK_MODE=copy "$BUILD/bin/uv" venv --relocatable --python "$BASE_PY" "$BUILD/env"
+UV_CACHE_DIR="$BUILD/state/uv-cache" UV_LINK_MODE=copy "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" venv --relocatable --python "$BASE_PY" "$BUILD/env"
 rm -f "$BUILD/env/bin/python" "$BUILD/env/bin/python3" "$BUILD/env/bin/python${PYTHON_MINOR}" "$BUILD/env/bin/.python-real"
 # Keep the real interpreter as a root-relative symlink. Copying a managed Python
 # executable can break $ORIGIN-relative runtime-library lookup after relocation.
@@ -128,16 +146,20 @@ chmod 0755 "$BUILD/scripts/repair-python.sh"
 "$BUILD/scripts/repair-python.sh" --quiet
 "$BUILD/env/bin/python" -c "import sys; assert sys.version.startswith('$PYTHON_VERSION'); print(sys.version.split()[0])"
 
-log "Locked Python analysis layer and offline wheelhouse"
-UV_CACHE_DIR="$BUILD/state/uv-cache" "$BUILD/bin/uv" pip compile "$BUILD/manifest/requirements.in" \
-  --python "$BUILD/env/bin/python" --python-version "$PYTHON_VERSION" --generate-hashes --no-header --no-annotate --exclude-newer "$BUILD_CUTOFF" \
-  --output-file "$BUILD/manifest/requirements.lock"
-# Bootstrap pip only long enough to download the exact hashed wheel set. The final sync is from wheelhouse only.
-UV_CACHE_DIR="$BUILD/state/uv-cache" "$BUILD/bin/uv" pip install --python "$BUILD/env/bin/python" "pip==26.1.2"
+log "Frozen Python analysis layer and offline wheelhouse"
+# v1 ships the exact hashed lock captured from the first connected resolution.
+# Hydration does not resolve Python dependency versions.
+# Bootstrap pip only from its exact PyPI wheel, verified before any pip code executes.
+# The same wheel remains in wheelhouse as part of the offline recovery set.
+PIP_BOOT_WHEEL="$BUILD/wheelhouse/pip-26.1.2-py3-none-any.whl"
+fetch "$PIP_BOOTSTRAP_WHEEL_URL" "$PIP_BOOT_WHEEL"
+verify_one "$PIP_BOOT_WHEEL" "$PIP_BOOTSTRAP_WHEEL_SHA256"
+UV_CACHE_DIR="$BUILD/state/uv-cache" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip install --python "$BUILD/env/bin/python" \
+  --no-index --find-links "$BUILD/wheelhouse" "pip==26.1.2"
 "$BUILD/env/bin/python" -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: --dest "$BUILD/wheelhouse" -r "$BUILD/manifest/requirements.lock"
-UV_CACHE_DIR="$BUILD/state/uv-cache" UV_LINK_MODE=copy "$BUILD/bin/uv" pip sync --python "$BUILD/env/bin/python" \
+UV_CACHE_DIR="$BUILD/state/uv-cache" UV_LINK_MODE=copy "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip sync --python "$BUILD/env/bin/python" \
   --require-hashes --no-index --find-links "$BUILD/wheelhouse" "$BUILD/manifest/requirements.lock"
-UV_CACHE_DIR="$BUILD/state/uv-cache" "$BUILD/bin/uv" pip check --python "$BUILD/env/bin/python"
+UV_CACHE_DIR="$BUILD/state/uv-cache" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip check --python "$BUILD/env/bin/python"
 
 log "Node.js $NODE_VERSION"
 NODE_AR="$DL/node-v${NODE_VERSION}-linux-x64.tar.xz"
@@ -153,6 +175,7 @@ cp "$SELF_DIR/templates/bin/node-wrapper" "$BUILD/bin/node"
 cp "$SELF_DIR/templates/bin/npm-wrapper" "$BUILD/bin/npm"
 cp "$SELF_DIR/templates/bin/npx-wrapper" "$BUILD/bin/npx"
 chmod 0755 "$BUILD/bin/node" "$BUILD/bin/npm" "$BUILD/bin/npx"
+"$BUILD/bin/node" -e 'if (process.versions.node !== process.argv[1]) process.exit(1)' "$NODE_VERSION"
 
 log "GitHub CLI $GH_VERSION"
 GH_AR="$DL/gh_${GH_VERSION}_linux_amd64.tar.gz"
@@ -198,8 +221,9 @@ cp "$SELF_DIR/templates/scripts/github.sh" "$BUILD/scripts/github.sh"
 cp "$SELF_DIR/templates/scripts/selftest.sh" "$BUILD/scripts/selftest.sh"
 cp "$SELF_DIR/templates/scripts/verify.sh" "$BUILD/scripts/verify.sh"
 cp "$SELF_DIR/templates/scripts/rebuild-python.sh" "$BUILD/scripts/rebuild-python.sh"
+cp "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/scripts/uv-isolated-exec.sh"
 cp "$SELF_DIR/templates/bin/python-wrapper" "$BUILD/scripts/python-wrapper.template"
-chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/github.sh" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh"
+chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/github.sh" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh" "$BUILD/scripts/uv-isolated-exec.sh"
 mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache"
 
 cat > "$BUILD/manifest/environment.json" <<JSON
@@ -207,7 +231,8 @@ cat > "$BUILD/manifest/environment.json" <<JSON
   "bundle": "Magnet Agent Environment",
   "bundle_version": "$BUNDLE_VERSION",
   "target": "$TARGET",
-  "build_cutoff": "$BUILD_CUTOFF",
+  "python_lock_resolution_cutoff": "$BUILD_CUTOFF",
+  "python_lock_sha256": "$PYTHON_LOCK_SHA256",
   "purpose": "Portable AI-agent execution capability layer; external to Magnet Photos project architecture",
   "runtimes": {"python": "$PYTHON_VERSION", "python_distribution": "$PYTHON_DIST_ID", "node": "$NODE_VERSION"},
   "tools": {
@@ -219,6 +244,7 @@ cat > "$BUILD/manifest/environment.json" <<JSON
     "actionlint": "$ACTIONLINT_VERSION",
     "gitleaks": "$GITLEAKS_VERSION"
   },
+  "runtime_contract": {"os": "Linux", "architecture": "x86_64", "kernel_min": "$MIN_KERNEL_VERSION", "glibc_min": "$MIN_GLIBC_VERSION", "libstdcxx_symbol_min": "$MIN_GLIBCXX_SYMBOL"},
   "credentials_bundled": false,
   "github_auth": "host/session credentials; validate on demand with agent-env github",
   "mutable_paths": ["env/pyvenv.cfg", "state/"],
@@ -233,6 +259,7 @@ node\t$NODE_VERSION\thttps://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-
 gh\t$GH_VERSION\thttps://github.com/cli/cli/releases/download/v$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz\t$GH_SHA256
 jq\t$JQ_VERSION\thttps://github.com/jqlang/jq/releases/download/jq-$JQ_VERSION/jq-linux-amd64\t$JQ_SHA256
 yq\t$YQ_VERSION\thttps://github.com/mikefarah/yq/releases/download/v$YQ_VERSION/yq_linux_amd64\t$YQ_SHA256
+pip-bootstrap\t26.1.2\t$PIP_BOOTSTRAP_WHEEL_URL\t$PIP_BOOTSTRAP_WHEEL_SHA256
 ripgrep\t$RIPGREP_VERSION\thttps://github.com/BurntSushi/ripgrep/releases/download/$RIPGREP_VERSION/ripgrep-$RIPGREP_VERSION-x86_64-unknown-linux-musl.tar.gz\t$RIPGREP_SHA256
 actionlint\t$ACTIONLINT_VERSION\thttps://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz\t$ACTIONLINT_SHA256
 gitleaks\t$GITLEAKS_VERSION\thttps://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz\t$GITLEAKS_SHA256

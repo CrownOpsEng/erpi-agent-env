@@ -12,6 +12,6 @@ The Magnet Agent Environment redistributes or downloads the following upstream c
 - actionlint — https://github.com/rhysd/actionlint
 - gitleaks — https://github.com/gitleaks/gitleaks
 
-The Python analysis layer is resolved from the exact hash-locked `manifest/requirements.lock`; installed package metadata and bundled wheel metadata carry package-specific licensing information.
+The Python analysis layer is installed from the source-frozen exact hash-locked `manifest/requirements.lock`; installed package metadata and bundled wheel metadata carry package-specific licensing information.
 
 This notice is informational and does not replace the license files or terms supplied by each upstream project.

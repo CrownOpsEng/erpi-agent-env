@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,20 @@ def version(command: str, args: list[str] | None = None) -> dict[str, Any]:
         return {"available": False}
     rc, output = run([path, *(args or ["--version"])])
     return {"available": rc == 0, "path": path, "version": output.splitlines()[0] if output else "", "returncode": rc}
+
+def version_tuple(value: str) -> tuple[int, ...]:
+    match = re.match(r"^(\d+(?:\.\d+)*)", value or "")
+    if not match:
+        return ()
+    return tuple(int(part) for part in match.group(1).split("."))
+
+def at_least(actual: str, minimum: str) -> bool:
+    a = version_tuple(actual)
+    m = version_tuple(minimum)
+    if not a or not m:
+        return False
+    width = max(len(a), len(m))
+    return a + (0,) * (width - len(a)) >= m + (0,) * (width - len(m))
 
 def git_root() -> pathlib.Path | None:
     if not shutil.which("git"):
@@ -62,6 +77,31 @@ def main() -> int:
         "actionlint": ["--version"], "gitleaks": ["version"], "pytest": ["--version"],
     }.items():
         data["bundled_tools"][tool] = version(tool, args)
+
+    manifest = json.loads((ROOT / "manifest/environment.json").read_text(encoding="utf-8"))
+    expected = manifest.get("runtime_contract", {})
+    kernel_actual = platform.release()
+    glibc_actual = libc_version if libc_name.lower() in {"glibc", "gnu libc"} else ""
+    contract = {
+        "expected": expected,
+        "actual": {
+            "os": platform.system(),
+            "architecture": platform.machine(),
+            "kernel": kernel_actual,
+            "glibc": glibc_actual or f"{libc_name} {libc_version}".strip(),
+        },
+    }
+    contract["checks"] = {
+        "os": platform.system() == expected.get("os", "Linux"),
+        "architecture": platform.machine() == expected.get("architecture", "x86_64"),
+        "kernel": at_least(kernel_actual, str(expected.get("kernel_min", "4.18"))),
+        "glibc": bool(glibc_actual) and at_least(glibc_actual, str(expected.get("glibc_min", "2.28"))),
+        # Successful execution of the pinned official Node binary is the practical
+        # proof that its host C++ runtime requirement (including GLIBCXX floor) is met.
+        "node_runtime": bool(data["bundled_tools"]["node"].get("available")),
+    }
+    contract["compatible"] = all(contract["checks"].values())
+    data["runtime_contract"] = contract
     for tool in ("git", "make", "docker", "podman", "shellcheck", "curl", "sha256sum", "find", "cmp", "diff"):
         data["host_commands"][tool] = version(tool, ["--version"])
 
@@ -93,6 +133,10 @@ def main() -> int:
         print(f"Target: {env['platform']} {env['machine']} | {env['libc']}")
         print(f"Python: {env['python']} | prefix={env['python_prefix']}")
         print(f"Mutable state: {'✓ writable' if env['state_writable'] else '✗ not writable'}")
+        contract = data["runtime_contract"]
+        mark = "✓" if contract["compatible"] else "✗"
+        expected = contract["expected"]
+        print(f"Runtime contract: {mark} kernel>={expected.get('kernel_min')} glibc>={expected.get('glibc_min')} {expected.get('libstdcxx_symbol_min')}")
         print("\nBundled tools")
         for name, info in data["bundled_tools"].items():
             mark = "✓" if info.get("available") else "✗"
@@ -112,7 +156,7 @@ def main() -> int:
                 print("  Repository tooling remains authoritative: use make help / make doctor / make check-fast.")
                 print("  Full database checks still require a working Docker/Podman-compatible runtime.")
     required = [v for v in data["bundled_tools"].values() if not v.get("available")]
-    return 1 if required else 0
+    return 1 if required or not data["runtime_contract"]["compatible"] else 0
 
 def platform_node_major() -> str | None:
     rc, out = run(["node", "-p", "process.versions.node.split('.')[0]"])
