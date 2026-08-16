@@ -4,15 +4,15 @@
 
 This repository is intentionally direct-to-`main`. It is a small, single-purpose builder repository with immediate automated validation, so mandatory pull requests would add ceremony without creating a meaningful approval boundary.
 
-Use one coherent commit per change when practical and inspect the resulting GitHub Actions runs after pushing. Pull requests remain available when explicit review, temporary isolation, or multi-contributor coordination is useful; they are not the default path. Optional PRs receive lightweight **Validate** coverage and should be squash/rebase-merged into one compliant detailed commit rather than relying on a generic merge message.
+Use one coherent commit per change when practical and inspect the resulting GitHub Actions runs after pushing. Pull requests remain available when explicit review, temporary isolation, or multi-contributor coordination is useful; they are not the default path. Optional PRs receive lightweight **Validate** coverage and the same detailed commit-history policy as direct pushes.
 
 Payload-affecting pushes to `main` automatically run the full **Accept runtime** build. Distribution publishing remains separate.
 
 ## Commit messages
 
-The commit history is part of this repository's engineering record. A terse Conventional Commit subject is **not enough** for direct-to-`main` work.
+The commit history is part of this repository's engineering record. A terse Conventional Commit subject is **not enough**.
 
-Every new direct-to-`main` commit must use this structure:
+Every new commit—whether pushed directly to `main` or introduced through a PR—must use this structure:
 
 ```text
 type(scope): imperative summary
@@ -29,7 +29,7 @@ State the evidence available at commit time: local checks that ran, or the exact
 
 The subject must be at most 72 characters and use a Conventional Commit type. Preferred types are `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `ci`, and `chore`. Use a focused lowercase scope such as `builder`, `runtime`, `python`, `github`, `dist`, `ci`, `repo`, `release`, or `validation`.
 
-The body is not filler. `Why:`, `What:`, and `Validation:` must each contain useful detail. The repository's **Validate** workflow enforces this contract on `main` pushes.
+The body is not filler. `Why:`, `What:`, and `Validation:` must each contain useful detail. **Validate** checks every commit newly introduced by a direct push and every commit in the PR range, not only the current tip. A PR with one terse intermediate commit therefore fails even if its latest commit is detailed. If using a PR, keep its commits compliant as you work or squash/rebase before asking for merge.
 
 Example:
 
@@ -60,7 +60,7 @@ For changes that may alter the produced runtime or its portability/integrity beh
 
 A connector-only agent may not have a usable shell checkout. In that case it must not claim local validation: make the coherent direct-to-`main` commit, inspect **Validate**, and for payload-affecting changes require **Accept runtime** to succeed. GitHub Actions is an intentional supported acceptance host, not a fallback of last resort.
 
-Do **not** manually refresh candidate hashes, run IDs, or versions in `VALIDATION.md`. That file defines the stable validation authority/contract. Successful **Accept runtime** runs upload a small `acceptance.json` plus SHA sidecar for the exact commit; published Releases carry their own runtime archive, checksum and `acceptance.json`. Historical chronology is under `docs/validation-history.md`.
+Do **not** manually refresh candidate hashes, run IDs, or versions in `VALIDATION.md`. That file defines the stable validation authority/contract. Successful **Accept runtime** runs upload a small `acceptance.json` plus SHA sidecar for the exact commit; published Releases carry their own runtime archive, checksum and `acceptance.json`. Historical engineering chronology is preserved in `docs/validation-history.md` and `BUILD-REVIEW.md`; GitHub's native commit history plus Actions runs/artifacts are the supplemental change/execution history. Do not create another manually synchronized per-run ledger.
 
 ## Releases
 
