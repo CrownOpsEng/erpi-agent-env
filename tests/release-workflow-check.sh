@@ -4,9 +4,11 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PUBLISH="$ROOT/.github/workflows/publish-release.yml"
 BUILD="$ROOT/.github/workflows/build-dist.yml"
 README="$ROOT/README.md"
+VALIDATION="$ROOT/VALIDATION.md"
 AGENTS="$ROOT/AGENTS.md"
+CONTRIBUTING="$ROOT/CONTRIBUTING.md"
 
-for file in "$PUBLISH" "$BUILD" "$README" "$AGENTS"; do
+for file in "$PUBLISH" "$BUILD" "$README" "$VALIDATION" "$AGENTS" "$CONTRIBUTING"; do
   [[ -s "$file" ]] || { echo "Required release-routing source missing: $file" >&2; exit 1; }
 done
 
@@ -52,10 +54,19 @@ publish_line="$(grep -nF 'gh release edit "$RELEASE_TAG" --draft=false' "$BUILD"
   exit 1
 }
 
-# Keep operator/agent docs version-neutral and aware of the durable publisher.
+# Keep operator/agent docs version-neutral, current, and free of references to
+# retired manual history ledgers.
 ! grep -F 'v1.0.0' "$README"
 grep -F '**Publish release**' "$README" >/dev/null
 grep -F '.github/release-request.json' "$AGENTS" >/dev/null
 grep -F 'connector-only session' "$AGENTS" >/dev/null
+for retired in 'BUILD-REVIEW.md' 'docs/validation-history.md'; do
+  if grep -nF "$retired" "$README" "$VALIDATION" "$AGENTS" "$CONTRIBUTING"; then
+    echo "Live authority docs reference retired history ledger: $retired" >&2
+    exit 1
+  fi
+done
+[[ ! -e "$ROOT/BUILD-REVIEW.md" ]] || { echo 'Retired BUILD-REVIEW.md must not return to the live tree.' >&2; exit 1; }
+[[ ! -e "$ROOT/docs/validation-history.md" ]] || { echo 'Retired docs/validation-history.md must not return to the live tree.' >&2; exit 1; }
 
 echo "Release workflow and AI-routing checks passed."

@@ -7,9 +7,9 @@ This file defines **how validation is authoritative**. It is intentionally not a
 Use these sources in order:
 
 1. **Source validation** — the `Validate` workflow result for the commit in question.
-2. **Accepted runtime on `main`** — the latest successful `Accept runtime` run for that `main` commit. Every successful run uploads a small `acceptance-<commit>` evidence artifact containing `acceptance.json` and the generated archive SHA-256 sidecar; the 154 MB runtime archive itself is not retained by this workflow.
-3. **Published distribution** — the GitHub Release is authoritative. The `Build distribution` workflow rebuilds and re-runs the complete acceptance sequence from the release tag, then attaches the runtime archive, SHA-256 sidecar, and `acceptance.json` to that Release.
-4. **Validation implementation** — `./tests/static-check.sh` and `./build.sh` define the actual gates. Documentation never overrides a failing gate.
+2. **Accepted runtime on `main`** — the latest successful `Accept runtime` run for that `main` commit. Every successful run uploads a small `acceptance-<commit>` evidence artifact containing `acceptance.json` and the generated archive SHA-256 sidecar; the runtime archive itself is not retained by this workflow.
+3. **Published distribution** — the GitHub Release is authoritative. The `Build distribution` workflow rebuilds and re-runs the complete acceptance sequence from the release tag, then attaches the runtime archive, SHA-256 sidecar, and `acceptance.json` to that Release before publication.
+4. **Validation implementation** — `./tests/static-check.sh`, the repository validation checks, and `./build.sh` define the actual gates. Documentation never overrides a failing gate.
 
 This means there is **no manual validation-record refresh step after normal development**. Push the coherent change to `main`; CI records the resulting evidence automatically. When a release is intentionally published, its attached evidence becomes the published truth.
 
@@ -34,6 +34,6 @@ GitHub-specific checks also distinguish shell-network availability from authenti
 
 ## When to update this file
 
-Update `VALIDATION.md` only when the **authority model, evidence format, or required validation contract changes**. Do not add individual run IDs or candidate hashes here.
+Update `VALIDATION.md` only when the **authority model, evidence format, or required validation contract changes**. Do not add individual run IDs, candidate hashes, archive sizes, or execution chronology here.
 
-The detailed engineering chronology that led to the current gates is preserved in [`docs/validation-history.md`](docs/validation-history.md). Historical candidate names, versions, hashes, and run IDs there are evidence from their time and are not current authority.
+Historical reasoning belongs in Git commit history; execution chronology and machine evidence belong in GitHub Actions; published evidence belongs on GitHub Releases. Superseded narrative records should be removed from the live tree once they no longer serve current operation or authority—their prior contents remain recoverable from Git history.

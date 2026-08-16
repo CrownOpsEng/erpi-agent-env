@@ -8,7 +8,7 @@ The design target is high-leverage asymmetry: solve recurring execution-environm
 
 ## Agent routing
 
-The shipped runtime has a short root `AGENTS.md`. Agents should read that router first; they do not need the build history or this manual for ordinary work. The router preserves target-project authority, diagnoses uncertain host capability with `agent-env doctor`, and routes GitHub-dependent work through `agent-env github` before substantial remote work.
+The shipped runtime has a short root `AGENTS.md`. Agents should read that router first; they do not need build archaeology or this manual for ordinary work. The router preserves target-project authority, diagnoses uncertain host capability with `agent-env doctor`, and routes GitHub-dependent work through `agent-env github` before substantial remote work.
 
 A working bundled `gh` binary does **not** imply the shell can reach GitHub. `agent-env github` probes shell reachability first. If the host/sandbox blocks GitHub, it returns exit `3`, tells the agent not to keep retrying shell `gh`/GitHub Git, preserves local Git as usable, and points to a platform GitHub connector/app when available.
 
@@ -59,7 +59,7 @@ Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed
 
 The builder does not report success unless it verifies native assets; creates the environment under hostile pathnames; builds the venv with uv relocation support; uses the source-frozen hashed Python lock; rejects absolute symlinks and old build-root residue; relocates to a deep Unicode/spaces path; exercises compiled Python code and uv-generated console entrypoints; destroys/rebuilds Python offline; canonicalizes uv's optional timestamp metadata; verifies immutable files and symlink topology; resets mutable state; archives; freshly extracts; and verifies again.
 
-`VALIDATION.md` defines the current evidence/authority model. It is intentionally **not** a per-build ledger. Successful **Accept runtime** runs generate machine-readable `acceptance.json` evidence; published GitHub Releases carry the authoritative archive, checksum sidecar, and acceptance metadata. Historical engineering chronology lives in `docs/validation-history.md` and `BUILD-REVIEW.md`.
+`VALIDATION.md` defines the current evidence/authority model. It is intentionally **not** a per-build ledger. Successful **Accept runtime** runs generate machine-readable `acceptance.json` evidence; published GitHub Releases carry the authoritative archive, checksum sidecar, and acceptance metadata. Change rationale remains in Git history, execution evidence remains in GitHub Actions, and superseded narrative records are removed from the live tree once they stop serving current operation.
 
 ## Python lock and build isolation
 
@@ -93,8 +93,8 @@ This repository is intentionally direct-to-`main`; PRs remain optional for expli
 
 - **Validate** — cheap source/static checks on every `main` push, optional PRs, and manual runs.
 - **Accept runtime** — full hydration/relocation/offline-rebuild/archive acceptance after payload-affecting `main` changes; retains only small checksum/`acceptance.json` evidence.
-- **Publish release** — manual or connector-triggered release gate. It resolves an exact accepted source commit, verifies **Accept runtime**, and prepares the matching draft Release/tag.
-- **Build distribution** — full tagged release build. It attaches the archive, checksum and `acceptance.json` to the draft Release and only then publishes it; it can also build a short-lived Actions artifact without a release tag.
+- **Publish release** — manual or connector-triggered release gate. It resolves an exact accepted source commit, verifies **Accept runtime**, creates or verifies the exact release Git tag, and then creates or reuses the matching draft Release.
+- **Build distribution** — full tagged release build. It verifies the checked-out tag and mutable draft, attaches the archive, checksum and `acceptance.json`, and only then publishes the Release; it can also build a short-lived Actions artifact without a release tag.
 
 For connector-only AI sessions, `.github/release-request.json` is the durable release command. `CONTRIBUTING.md` documents its exact schema and the release flow.
 
