@@ -4,13 +4,16 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 export MAGNET_AGENT_ENV="$ROOT"
 export VIRTUAL_ENV="$ROOT/env"
 export UV_CACHE_DIR="$ROOT/state/uv-cache"
-export UV_PYTHON_INSTALL_DIR="$ROOT/runtime/python"
+export UV_PYTHON_INSTALL_DIR="$ROOT/state/uv-python"
 export UV_TOOL_DIR="$ROOT/state/uv-tools"
 export UV_TOOL_BIN_DIR="$ROOT/state/uv-tool-bin"
+export PIP_CACHE_DIR="$ROOT/state/pip-cache"
+export NPM_CONFIG_CACHE="$ROOT/state/npm-cache"
+export NPM_CONFIG_PREFIX="$ROOT/state/npm-global"
 export UV_LINK_MODE=copy
 export PYTHONPYCACHEPREFIX="$ROOT/state/pycache"
-mkdir -p "$PYTHONPYCACHEPREFIX"
-export PATH="$ROOT/env/bin:$ROOT/bin:$UV_TOOL_BIN_DIR:$PATH"
+mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$PIP_CACHE_DIR" "$NPM_CONFIG_CACHE" "$NPM_CONFIG_PREFIX" "$PYTHONPYCACHEPREFIX"
+export PATH="$ROOT/env/bin:$ROOT/bin:$UV_TOOL_BIN_DIR:$NPM_CONFIG_PREFIX/bin:$PATH"
 
 "$ROOT/scripts/repair-python.sh" --quiet
 python - <<'PY'
@@ -49,6 +52,6 @@ while IFS= read -r -d '' link; do
     echo "Absolute symlink is not portable: $link -> $target" >&2
     exit 1
   fi
-done < <(find "$ROOT" -type l -print0)
+done < <(find "$ROOT" -type l ! -path "$ROOT/state/*" -print0)
 
 echo "Runtime self-test passed."

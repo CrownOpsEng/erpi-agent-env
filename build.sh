@@ -31,7 +31,7 @@ done
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Required build command missing: $1" >&2; exit 1; }; }
 for cmd in bash curl tar xz sha256sum find grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname; do need "$cmd"; done
-tar --version 2>/dev/null | head -1 | grep -q 'GNU tar' || { echo "GNU tar is required for deterministic archive metadata." >&2; exit 1; }
+tar --version 2>/dev/null | head -1 | grep -q 'GNU tar' || { echo "GNU tar is required by this builder." >&2; exit 1; }
 [[ "$(uname -s)" == Linux ]] || { echo "Builder target is Linux only." >&2; exit 1; }
 [[ "$(uname -m)" == x86_64 ]] || { echo "Builder target is x86_64 only; found $(uname -m)." >&2; exit 1; }
 ldd --version 2>&1 | head -1 | grep -qi 'glibc\|GNU libc' || { echo "A glibc-based build host is required." >&2; exit 1; }
@@ -44,8 +44,8 @@ WORK="$WORK_PARENT/Build Root With Spaces [relocation source]"
 BUILD="$WORK/magnet-agent-env"
 DL="$CACHE_DIR"
 mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/env" "$BUILD/wheelhouse" \
-  "$BUILD/state/uv-cache" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" "$BUILD/state/npm-cache" "$BUILD/state/pycache" \
-  "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
+  "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" \
+  "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
 ORIGINAL_BUILD_ROOT="$BUILD"
 cleanup() { if (( KEEP_WORK )); then echo "Work tree retained: $WORK_PARENT"; else rm -rf "$WORK_PARENT"; fi; }
 trap cleanup EXIT
@@ -87,7 +87,7 @@ extract_single() {
 cp "$SELF_DIR/versions.env" "$BUILD/manifest/versions.env"
 cp "$SELF_DIR/requirements.in" "$BUILD/manifest/requirements.in"
 cp "$SELF_DIR/templates/RUNTIME-README.md" "$BUILD/README.md"
-cp "$SELF_DIR/BUILD-REVIEW.md" "$BUILD/BUILD-REVIEW.md"
+cp "$SELF_DIR/templates/AGENTS.md" "$BUILD/AGENTS.md"
 cp "$SELF_DIR/templates/THIRD-PARTY.md" "$BUILD/THIRD-PARTY.md"
 printf '%s\n' "$BUNDLE_VERSION" > "$BUILD/VERSION"
 
@@ -105,7 +105,8 @@ UV_CACHE_DIR="$BUILD/state/uv-cache" "$BUILD/bin/uv" python install "$PYTHON_VER
 BASE_PY="$(find "$BUILD/runtime/python" -mindepth 2 -maxdepth 4 -path "*/bin/python${PYTHON_MINOR}" -print -quit)"
 [[ -n "$BASE_PY" && -x "$BASE_PY" ]] || { echo "uv did not install expected Python $PYTHON_VERSION" >&2; exit 1; }
 BASE_ROOT="$(CDPATH= cd -- "$(dirname -- "$BASE_PY")/.." && pwd -P)"
-ln -s "$(basename -- "$BASE_ROOT")" "$BUILD/runtime/python/current"
+PYTHON_DIST_ID="$(basename -- "$BASE_ROOT")"
+ln -s "$PYTHON_DIST_ID" "$BUILD/runtime/python/current"
 
 log "Relocatable Python environment"
 UV_CACHE_DIR="$BUILD/state/uv-cache" UV_LINK_MODE=copy "$BUILD/bin/uv" venv --relocatable --python "$BASE_PY" "$BUILD/env"
@@ -128,9 +129,9 @@ UV_CACHE_DIR="$BUILD/state/uv-cache" "$BUILD/bin/uv" pip compile "$BUILD/manifes
   --output-file "$BUILD/manifest/requirements.lock"
 # Bootstrap pip only long enough to download the exact hashed wheel set. The final sync is from wheelhouse only.
 UV_CACHE_DIR="$BUILD/state/uv-cache" "$BUILD/bin/uv" pip install --python "$BUILD/env/bin/python" "pip==26.1.2"
-"$BUILD/env/bin/python" -m pip download --disable-pip-version-check --only-binary=:all: --dest "$BUILD/wheelhouse" -r "$BUILD/manifest/requirements.lock"
+"$BUILD/env/bin/python" -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: --dest "$BUILD/wheelhouse" -r "$BUILD/manifest/requirements.lock"
 UV_CACHE_DIR="$BUILD/state/uv-cache" UV_LINK_MODE=copy "$BUILD/bin/uv" pip sync --python "$BUILD/env/bin/python" \
-  --no-index --find-links "$BUILD/wheelhouse" "$BUILD/manifest/requirements.lock"
+  --require-hashes --no-index --find-links "$BUILD/wheelhouse" "$BUILD/manifest/requirements.lock"
 UV_CACHE_DIR="$BUILD/state/uv-cache" "$BUILD/bin/uv" pip check --python "$BUILD/env/bin/python"
 
 log "Node.js $NODE_VERSION"
@@ -193,12 +194,13 @@ log "Runtime control surface"
 cp "$SELF_DIR/templates/activate" "$BUILD/activate"
 cp "$SELF_DIR/templates/bin/agent-env" "$BUILD/bin/agent-env"
 cp "$SELF_DIR/templates/scripts/doctor.py" "$BUILD/scripts/doctor.py"
+cp "$SELF_DIR/templates/scripts/github.sh" "$BUILD/scripts/github.sh"
 cp "$SELF_DIR/templates/scripts/selftest.sh" "$BUILD/scripts/selftest.sh"
 cp "$SELF_DIR/templates/scripts/verify.sh" "$BUILD/scripts/verify.sh"
 cp "$SELF_DIR/templates/scripts/rebuild-python.sh" "$BUILD/scripts/rebuild-python.sh"
 cp "$SELF_DIR/templates/bin/python-wrapper" "$BUILD/scripts/python-wrapper.template"
-chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh"
-mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" "$BUILD/state/npm-cache" "$BUILD/state/pycache"
+chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/github.sh" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh"
+mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache"
 
 cat > "$BUILD/manifest/environment.json" <<JSON
 {
@@ -207,7 +209,7 @@ cat > "$BUILD/manifest/environment.json" <<JSON
   "target": "$TARGET",
   "build_cutoff": "$BUILD_CUTOFF",
   "purpose": "Portable AI-agent execution capability layer; external to Magnet Photos project architecture",
-  "runtimes": {"python": "$PYTHON_VERSION", "node": "$NODE_VERSION"},
+  "runtimes": {"python": "$PYTHON_VERSION", "python_distribution": "$PYTHON_DIST_ID", "node": "$NODE_VERSION"},
   "tools": {
     "uv": "$UV_VERSION",
     "gh": "$GH_VERSION",
@@ -218,6 +220,7 @@ cat > "$BUILD/manifest/environment.json" <<JSON
     "gitleaks": "$GITLEAKS_VERSION"
   },
   "credentials_bundled": false,
+  "github_auth": "host/session credentials; validate on demand with agent-env github",
   "mutable_paths": ["env/pyvenv.cfg", "state/"],
   "project_authority_note": "Magnet Photos repository Makefile/package-lock remain authoritative for project tooling such as Supabase and PGLS."
 }
@@ -240,16 +243,15 @@ log "Sanitize generated bytecode and mutable state"
 find "$BUILD" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$BUILD" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 # Caches are useful during build but are not required for first-use operation; wheelhouse is the recovery source.
-rm -rf "$BUILD/state/uv-cache"/* "$BUILD/state/pip-cache"/* "$BUILD/state/npm-cache"/* 2>/dev/null || true
+rm -rf "$BUILD/state/uv-cache"/* "$BUILD/state/uv-python"/* "$BUILD/state/uv-tools"/* "$BUILD/state/uv-tool-bin"/* "$BUILD/state/pip-cache"/* "$BUILD/state/npm-cache"/* "$BUILD/state/npm-global"/* "$BUILD/state/pycache"/* 2>/dev/null || true
 
-log "Portability gate: no original build-root residue"
-if grep -r -a -F -l --exclude='pyvenv.cfg' "$ORIGINAL_BUILD_ROOT" "$BUILD" > "$WORK/residue.txt" 2>/dev/null; then
+log "Portability gate: repair metadata, then reject all original build-root residue"
+"$BUILD/scripts/repair-python.sh" --quiet
+if grep -r -a -F -l "$ORIGINAL_BUILD_ROOT" "$BUILD" > "$WORK/residue.txt" 2>/dev/null; then
   echo "Absolute original build path remains in portable payload:" >&2
   cat "$WORK/residue.txt" >&2
   exit 1
 fi
-# pyvenv.cfg is intentionally repaired before relocation test, then mutable at runtime.
-"$BUILD/scripts/repair-python.sh" --quiet
 
 log "Portability gate: no absolute symlinks"
 absolute_links=0
@@ -271,7 +273,7 @@ log "Offline Python destruction/rebuild proof"
 "$BUILD/bin/agent-env" selftest >/dev/null
 
 # Scan the moved tree again for the original source root, including generated console scripts.
-if grep -r -a -F -l --exclude='pyvenv.cfg' "$ORIGINAL_BUILD_ROOT" "$BUILD" > "$WORK/residue-after-move.txt" 2>/dev/null; then
+if grep -r -a -F -l "$ORIGINAL_BUILD_ROOT" "$BUILD" > "$WORK/residue-after-move.txt" 2>/dev/null; then
   echo "Relocation left original path residue:" >&2
   cat "$WORK/residue-after-move.txt" >&2
   exit 1
@@ -279,7 +281,7 @@ fi
 
 log "Immutable payload checksum manifest"
 cd "$BUILD"
-find . -type l -printf '%p\t%l\n' | LC_ALL=C sort > manifest/SYMLINKS
+find . -type l ! -path './state/*' -printf '%p\t%l\n' | LC_ALL=C sort > manifest/SYMLINKS
 find . -type f \
   ! -path './state/*' \
   ! -path './env/pyvenv.cfg' \
@@ -294,7 +296,8 @@ rm -f "$TMP_ART" "$ARTIFACT"
 # Normalize owner metadata; preserve modes and symlinks.
 tar --numeric-owner --owner=0 --group=0 -czf "$TMP_ART" -C "$(dirname -- "$BUILD")" "$(basename -- "$BUILD")"
 mv "$TMP_ART" "$ARTIFACT"
-sha256sum "$ARTIFACT" > "$ARTIFACT.sha256"
+(cd "$OUT_DIR" && sha256sum "$(basename -- "$ARTIFACT")") > "$ARTIFACT.sha256"
+(cd "$OUT_DIR" && sha256sum -c "$(basename -- "$ARTIFACT.sha256")") >/dev/null
 
 EXTRACT_TEST="$WORK_PARENT/final extraction proof"
 mkdir -p "$EXTRACT_TEST"

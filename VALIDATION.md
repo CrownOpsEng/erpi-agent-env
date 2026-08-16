@@ -1,77 +1,111 @@
 # Validation record
 
-Date: 2026-08-15 (America/Toronto)
+Date: 2026-08-15 (America/Toronto)  
+Status: **builder/source validation complete; hydrated runtime validation pending first connected build**
 
-## Evidence inspected
+## Reference evidence
 
-The uploaded `J2911_venv_v2.zip` was extracted and inspected as a reference implementation.
+The uploaded `J2911_venv_v2.zip` was extracted and inspected.
 
-Observed useful mechanisms:
+Useful mechanisms confirmed:
 
 - bundled CPython runtime;
 - location-aware Python launchers;
-- `pyvenv.cfg` repair after relocation;
-- native executables exposed beside the Python environment;
-- environment/capability manifests and checksum checking.
+- `pyvenv.cfg` relocation repair;
+- native executables beside the Python environment;
+- capability/checksum manifests.
 
-Observed defect relevant to this design:
+Relevant portability defect confirmed:
 
-- the J2911 archive retained its old build path in at least one installed console script (`bin/opc`), even though the wrapped Python launcher worked after relocation.
+- at least one J2911 console script (`bin/opc`) retained the old absolute build path after relocation.
 
-This is why the Magnet builder has a whole-tree original-build-root residue gate rather than treating a successful Python launch as sufficient portability proof.
+This is the reason the Magnet builder scans the entire shipped payload for the original build root rather than accepting a Python-only smoke test.
 
-## Validation completed in this sandbox
+## Source/builder checks executed here
 
-- builder shell syntax checked for all shell templates;
-- Python `doctor.py` compiled successfully;
-- pinned native SHA-256 values validated for correct hash shape;
-- required builder/runtime source files checked present and non-empty;
-- source tree scanned for accidental `/mnt`, `/tmp`, `/home`, `/usr` or `/opt` build-path assumptions beyond portable interpreter shebangs;
-- builder `--help` executed successfully;
-- TAR.GZ builder handoff archive created, extracted to a fresh directory and static checks rerun successfully;
-- ZIP builder handoff archive created, extracted to a fresh directory and static checks rerun successfully;
-- a local relocation experiment confirmed that a root-relative interpreter symlink behind a launcher preserves venv `sys.prefix` after moving the tree when `pyvenv.cfg` is repaired.
+Passed:
 
-## Validation not executable in this sandbox
+- Bash syntax for builder, runtime shell scripts, and test scripts;
+- POSIX-shell syntax for Python/Node/npm/npx launchers;
+- Python compilation of `doctor.py`;
+- required runtime/router source presence;
+- compact-router size gate (`AGENTS.md` remains below 3 KB);
+- native SHA-256 pin shape checks;
+- source scan for accidental fixed `/mnt`, `/tmp`, `/home`, `/usr`, or `/opt` build-root assumptions;
+- guard against redirecting `GH_CONFIG_DIR` into the portable payload;
+- guard that ad-hoc UV Python installs and npm globals are routed to mutable `state/`;
+- guard that immutable symlink verification excludes mutable `state/` consistently;
+- GitHub authentication state-machine mock checks:
+  - no credential -> status 2 and OAuth path permitted;
+  - stored but unusable credential -> no blind OAuth replacement;
+  - environment token override -> OAuth refused and test token not leaked;
+  - successful mock OAuth -> API readiness verified;
+- local `uv --relocatable` behavior experiments;
+- local minimal repaired `pyvenv.cfg` semantics against CPython 3.13/uv, including correct `sys.prefix` and `uv pip check`;
+- root-relative interpreter symlink behavior after relocation.
 
-The shell execution environment used to construct this handoff has outbound DNS/download access disabled. Therefore the final third-party payload could not be hydrated here from upstream release assets.
+Current static command:
 
-This is an execution-environment limitation, not hidden as a successful test. The builder is designed to perform the following acceptance tests automatically on an internet-connected Linux x86-64 glibc build host:
+```bash
+./tests/static-check.sh
+```
 
-1. SHA-256 verification of every downloaded native artifact.
-2. Exact Python dependency resolution with generated hashes.
-3. Wheel-only offline recovery set creation.
-4. Initial runtime self-test.
-5. Whole-tree rejection of the original build root.
-6. Rejection of absolute symlinks.
-7. Relocation from a build path containing spaces to a deep path containing spaces and Unicode.
-8. Complete runtime self-test after relocation.
-9. Destruction and full offline recreation of the Python venv.
-10. Runtime self-test after offline recreation.
-11. Second old-build-root residue scan after recreation.
-12. Immutable-file and symlink-topology manifest generation and verification.
-13. TAR.GZ creation.
-14. Fresh archive extraction followed by self-test and integrity verification.
+returns green.
 
-A build is not reported successful unless all of those gates pass.
+## Release-pin audit
 
-## Acceptance command
+Pins were reviewed against current upstream release information as of the audit date. Two draft defects were caught and corrected before first hydration:
 
-On a suitable build host:
+- nonexistent CPython `3.13.15` -> `3.13.14`;
+- yq release checksum asset identity corrected so the builder verifies the exact `checksums` asset it downloads.
+
+Node.js `24.19.0` Linux x64 and its pinned SHA-256 were rechecked against Node's signed release SHASUMS. `uv 0.12.5` and ripgrep `15.2.0` Linux assets were rechecked against their release metadata. Other native pins remain fail-closed because the builder verifies each downloaded artifact before extraction/install.
+
+## Full acceptance sequence encoded in the builder
+
+On an internet-connected Linux x86-64 glibc build host, `build.sh` must complete all of these before reporting success:
+
+1. verify every direct native release artifact before extraction/use;
+2. install the exact managed CPython version and record its resolved distribution ID;
+3. create a `uv --relocatable` venv;
+4. generate a hashed Python lock with the build cutoff;
+5. create a wheel-only offline recovery set and sync from it;
+6. repair relocation-sensitive Python metadata;
+7. reject any remaining original build-root reference anywhere in the payload;
+8. reject absolute symlinks in the shipped payload;
+9. move the environment from a source path containing spaces to a deep path containing spaces and Unicode;
+10. run the complete runtime self-test after relocation;
+11. destroy the Python venv completely;
+12. rebuild that venv with network-independent bundled artifacts only;
+13. run the complete runtime self-test again;
+14. scan again for original build-root residue;
+15. emit immutable file hashes and immutable symlink topology (excluding declared mutable state and relocation metadata);
+16. verify those manifests;
+17. create the final TAR.GZ;
+18. extract the archive into a new path;
+19. self-test and integrity-verify the freshly extracted copy.
+
+A failed gate terminates the build.
+
+## Not falsely claimed as validated here
+
+The current ChatGPT shell cannot download the third-party release payload because outbound shell DNS/network access is disabled. Therefore this record does **not** claim that the final hydrated runtime archive has already passed the encoded full acceptance sequence.
+
+That proof occurs on the first connected Linux x86-64 build host by running:
 
 ```bash
 ./tests/static-check.sh
 ./build.sh
 ```
 
-The expected final artifacts are:
+Expected artifacts:
 
 ```text
 dist/magnet-agent-env-linux-x64-v1.0.0.tar.gz
 dist/magnet-agent-env-linux-x64-v1.0.0.tar.gz.sha256
 ```
 
-The extracted runtime should then pass:
+The freshly extracted runtime must then pass:
 
 ```bash
 source magnet-agent-env/activate
@@ -79,3 +113,11 @@ agent-env doctor
 agent-env selftest
 agent-env verify
 ```
+
+For a GitHub-dependent task, additionally run:
+
+```bash
+agent-env github
+```
+
+and invoke `agent-env github-auth` only when the status explicitly reports that no credential source exists.

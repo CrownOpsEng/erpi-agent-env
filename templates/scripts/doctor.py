@@ -50,10 +50,10 @@ def main() -> int:
             "python_executable": sys.executable,
             "python_prefix": sys.prefix,
             "python_base_prefix": sys.base_prefix,
+            "state_writable": os.access(ROOT / "state", os.W_OK),
         },
         "bundled_tools": {},
-        "host_capabilities": {},
-        "github": {},
+        "host_commands": {},
         "repository": {},
     }
     for tool, args in {
@@ -63,13 +63,7 @@ def main() -> int:
     }.items():
         data["bundled_tools"][tool] = version(tool, args)
     for tool in ("git", "make", "docker", "podman", "shellcheck", "curl", "sha256sum", "find", "cmp", "diff"):
-        data["host_capabilities"][tool] = version(tool, ["--version"])
-
-    gh = data["bundled_tools"]["gh"]
-    if gh.get("available"):
-        rc, out = run(["gh", "auth", "status"])
-        # Deliberately don't preserve the full output: auth diagnostics can include account/context details.
-        data["github"] = {"authenticated": rc == 0, "status": "authenticated" if rc == 0 else "not authenticated or inaccessible"}
+        data["host_commands"][tool] = version(tool, ["--version"])
 
     root = git_root()
     if root:
@@ -98,16 +92,15 @@ def main() -> int:
         print(f"Magnet Agent Environment: {env['root']}")
         print(f"Target: {env['platform']} {env['machine']} | {env['libc']}")
         print(f"Python: {env['python']} | prefix={env['python_prefix']}")
+        print(f"Mutable state: {'✓ writable' if env['state_writable'] else '✗ not writable'}")
         print("\nBundled tools")
         for name, info in data["bundled_tools"].items():
             mark = "✓" if info.get("available") else "✗"
             print(f"  {mark} {name:<11} {info.get('version','')}")
-        print("\nHost capabilities")
-        for name, info in data["host_capabilities"].items():
+        print("\nHost commands")
+        for name, info in data["host_commands"].items():
             mark = "✓" if info.get("available") else "○"
             print(f"  {mark} {name:<11} {info.get('version','')}")
-        if data["github"]:
-            print(f"\nGitHub auth: {data['github']['status']}")
         if data["repository"]:
             repo = data["repository"]
             print(f"\nRepository: {repo['root']}")

@@ -4,6 +4,8 @@ A portable **Linux x86-64 glibc AI-agent execution environment** built for worki
 
 This environment is external tooling. It is **not part of the Magnet Photos application architecture**, and it does not replace repository-owned dependencies or safety policy.
 
+Agents should read the root `AGENTS.md` first. It is intentionally short and routes environment use without loading this manual into every task.
+
 ## Start here
 
 From any extraction location:
@@ -11,15 +13,16 @@ From any extraction location:
 ```bash
 source /path/to/magnet-agent-env/activate
 agent-env doctor
-agent-env selftest
 ```
 
 Activation is convenient but optional:
 
 ```bash
-/path/to/magnet-agent-env/bin/agent-env exec gh auth status
+/path/to/magnet-agent-env/bin/agent-env exec gh --version
 /path/to/magnet-agent-env/bin/agent-env doctor --json
 ```
+
+Run `agent-env selftest` after moving/extracting the bundle, after recovery, or when environment integrity is in doubt. It is not intended as per-turn ceremony.
 
 ## What is bundled
 
@@ -38,15 +41,41 @@ Exact versions, sources and hashes are under `manifest/`.
 ## Commands
 
 ```text
-agent-env doctor [--json]  Diagnose the bundle, host capabilities, GitHub auth and current repository
-agent-env selftest         Exercise bundled runtimes/tools and relocation invariants
-agent-env verify           Verify immutable-file checksums and symlink topology
-agent-env repair           Repair relocation-sensitive Python metadata
-agent-env rebuild-python   Destroy/recreate the Python venv offline from bundled artifacts
-agent-env versions         Print the environment manifest
-agent-env exec CMD ...     Run a command with the environment active
-agent-env root             Print the resolved bundle root
+agent-env doctor [--json]  Diagnose local bundle, host commands, and current repository
+agent-env github            Validate GitHub auth/API and current-repository access
+agent-env github-auth       Run interactive GitHub OAuth when needed, then verify it
+agent-env selftest          Exercise bundled capabilities and portability invariants
+agent-env verify            Verify immutable-file checksums and symlink topology
+agent-env repair            Repair relocation-sensitive Python metadata
+agent-env rebuild-python    Destroy/recreate the Python venv offline from bundled artifacts
+agent-env versions          Print the environment manifest
+agent-env exec CMD ...      Run a command with the environment active
+agent-env root              Print the resolved bundle root
 ```
+
+## GitHub authentication
+
+Credentials are deliberately **not bundled**. `gh` uses host/session authentication, including `GH_TOKEN`, `GITHUB_TOKEN`, or the normal GitHub CLI credential/config store.
+
+For a GitHub-dependent task, validate access before substantial dependent work:
+
+```bash
+agent-env github
+```
+
+If it reports that no credential source exists, authenticate while the user is present:
+
+```bash
+agent-env github-auth
+```
+
+The command starts GitHub CLI's normal browser/device OAuth flow, then verifies the API and the current repository when one is detected. Do not paste access tokens into chat when this flow is available.
+
+If `GH_TOKEN` or `GITHUB_TOKEN` is already set, it takes precedence over stored credentials. `agent-env github-auth` therefore refuses to start a competing stored-login flow until that environment token is fixed or unset. If a stored credential exists but is unusable, the command also refuses to overwrite it blindly; diagnose network/credential state with `agent-env github` first.
+
+Do not pre-request broader OAuth scopes. If a concrete GitHub operation requires an additional scope, add only that scope with the normal `gh auth refresh` flow while the user is engaged, verify the operation, and continue. Git credential-helper configuration is intentionally separate; authentication does not silently rewrite host Git configuration.
+
+A stored GitHub CLI token may fall back to plaintext storage when the host has no credential store. That is GitHub CLI behavior, not portable-bundle state. Review the host/session if persistence matters.
 
 ## Magnet Photos workflow
 
@@ -54,7 +83,7 @@ From a Magnet Photos checkout:
 
 ```bash
 source /path/to/magnet-agent-env/activate
-agent-env doctor
+agent-env github      # only when GitHub is relevant to the turn
 make doctor
 make bootstrap
 make check-fast
@@ -64,9 +93,16 @@ The bundle supplies the Node major required by the repository. `make bootstrap` 
 
 Full database checks still require a host-provided working Docker/Podman-compatible runtime.
 
-## GitHub authentication
+## Mutable state
 
-Credentials are deliberately not stored in the bundle. `gh` uses credentials made available by the host/session, such as `GH_TOKEN`, `GITHUB_TOKEN`, or the normal host GitHub CLI configuration.
+The verified payload is intended to stay stable. Runtime mutation belongs under `state/`:
+
+- UV cache and ad-hoc UV tools
+- ad-hoc UV-managed Python installations
+- npm cache and global installs
+- Python bytecode/cache state
+
+This keeps experimentation from silently modifying the bundled Python or Node runtimes. Project dependencies still belong to the project itself.
 
 Do not copy tokens, SSH keys, `.npmrc` credentials, cloud credentials or production database secrets into this directory.
 

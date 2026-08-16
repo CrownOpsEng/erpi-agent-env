@@ -4,11 +4,11 @@ Builds a **portable Linux x86-64 agent execution environment** intended to be up
 
 It is deliberately **not part of the Magnet Photos application or dependency model**. Magnet's repository remains authoritative for its own Supabase CLI, Postgres language tooling, checks, schemas, migrations, and future application stack.
 
-## Why this exists
+The design target is high-leverage asymmetry: solve recurring agent-environment limitations once, while keeping the permanent control surface small.
 
-AI execution sandboxes are inconsistent. A session may have Python but lack `gh`, have the wrong Node major, lack YAML/JSON/search tooling, or have no convenient way to perform broad GitHub API inspection. This bundle supplies a known capability surface without requiring root access or first-use downloads.
+## Design
 
-See `VALIDATION.md` for the exact distinction between tests completed in the construction sandbox and acceptance tests executed by a fully hydrated build.
+The runtime has a short root `AGENTS.md` router. Agents do not need to load the build history or this manual for ordinary project work. Detailed operation remains discoverable through `agent-env help`, `README.md`, and `manifest/` only when needed.
 
 The J2911 portable venv was used as a reference. Its strongest idea—self-repairing venv metadata around a bundled CPython runtime—is preserved. Its main portability weakness is not: a stale absolute path was found in an installed console script after relocation. This builder therefore treats **old build-root residue as a hard failure** and combines the repair pattern with `uv venv --relocatable`.
 
@@ -17,7 +17,7 @@ The J2911 portable venv was used as a reference. Its strongest idea—self-repai
 The finished bundle pins and verifies:
 
 - `uv` 0.12.5
-- uv-managed CPython 3.13.15
+- uv-managed CPython 3.13.14
 - Node.js 24.19.0 LTS + npm/npx
 - GitHub CLI 2.97.0
 - jq 1.8.2
@@ -25,9 +25,20 @@ The finished bundle pins and verifies:
 - ripgrep 15.2.0
 - actionlint 1.7.12
 - gitleaks 8.30.1
-- a small locked Python analysis layer: httpx, jsonschema, packaging, PyYAML, tomlkit, pytest, pip, setuptools, wheel (all exact-pinned and hash-locked)
+- a small locked Python analysis layer: httpx, jsonschema, packaging, PyYAML, tomlkit, pytest, pip, setuptools and wheel
 
 It intentionally does **not** bundle Supabase, the Postgres language server, Git, Make, Docker/Podman, or PostgreSQL client tooling. Supabase/PGLS are repo-owned; Git/Make are basic host prerequisites; a Docker client without a usable daemon is false capability; direct database tooling would bypass the repository's deliberately safe Make surface.
+
+## GitHub auth model
+
+GitHub authentication is demand-driven rather than part of every environment check:
+
+```bash
+agent-env github
+agent-env github-auth   # only when no usable credential exists
+```
+
+The short runtime `AGENTS.md` requires agents to validate GitHub access early when a task will need it and to complete the interactive OAuth sequence while the user is engaged. Credentials remain host/session state and are never packaged into the portable artifact.
 
 ## Build
 
@@ -47,60 +58,24 @@ magnet-agent-env-linux-x64-v1.0.0.tar.gz.sha256
 
 Use `./build.sh --help` for output/cache options. Downloads are cached separately from the finished environment so a failed build can be resumed without trusting partial payload files.
 
-## Use
+## Acceptance
 
-Extract with a tar implementation that preserves executable bits and symlinks:
+The builder does not report success unless it:
 
-```bash
-tar -xzf magnet-agent-env-linux-x64-v1.0.0.tar.gz
-source magnet-agent-env/activate
-agent-env doctor
-agent-env selftest
-```
+1. verifies downloaded native artifacts;
+2. creates the environment under a path containing spaces;
+3. builds the Python venv with native uv relocation support;
+4. creates an offline hashed Python recovery set;
+5. rejects absolute symlinks and old build-root residue;
+6. relocates to a deep path containing spaces and Unicode and self-tests;
+7. destroys/rebuilds the Python venv offline and self-tests again;
+8. emits and verifies immutable-file and symlink manifests;
+9. archives, freshly extracts, self-tests and verifies the final artifact.
 
-Activation is optional. You can instead run:
-
-```bash
-/path/to/magnet-agent-env/bin/agent-env exec gh auth status
-/path/to/magnet-agent-env/bin/agent-env doctor --json
-```
-
-GitHub credentials are **not bundled**. `gh` uses the host/session authentication (`GH_TOKEN`, `GITHUB_TOKEN`, or the normal host GitHub CLI config). The environment never copies GitHub credentials into its portable state.
-
-## Portability contract
-
-The bundle is portable **between compatible Linux x86-64 glibc environments**, not between operating systems or CPU architectures. The build intentionally:
-
-1. creates the environment under a path containing spaces;
-2. uses native `uv --relocatable` console-script generation;
-3. wraps the venv Python so `pyvenv.cfg` self-repairs to the current bundled CPython location;
-4. stores Node and all native tools using root-relative wrappers/links;
-5. rejects absolute symlinks;
-6. rejects any remaining reference to the original build root;
-7. moves the completed tree to a second, differently named path and runs the complete self-test there;
-8. builds a wheelhouse so the Python layer can be reconstructed without PyPI access;
-9. emits a SHA-256 manifest for all immutable files.
-
-`state/` and `env/pyvenv.cfg` are mutable and excluded from the immutable manifest. Everything else is expected to verify byte-for-byte.
+See `VALIDATION.md` for what was and was not executable in the ChatGPT construction sandbox.
 
 ## Security boundary
 
 This increases the commands an agent can execute **inside permissions the sandbox already grants**. It cannot create network access, a Docker daemon, credentials, kernel capabilities, or filesystem permissions that the host denies.
 
-Do not place tokens, SSH keys, `.npmrc` credentials, GitHub CLI auth files, cloud credentials, or production database credentials inside this bundle.
-
-## Magnet Photos usage
-
-From a Magnet checkout:
-
-```bash
-source /path/to/magnet-agent-env/activate
-agent-env doctor
-make doctor
-make bootstrap
-make check-fast
-```
-
-`make bootstrap` uses the bundle's correct Node 24 runtime but installs the **repository-pinned** Supabase and SQL tooling from Magnet's `package-lock.json`. Continue to use the repo's Make targets rather than raw Supabase commands.
-
-Full database validation still requires a host-provided Docker/Podman-compatible runtime.
+Ad-hoc UV Python installs, UV tools, npm globals and caches are redirected to `state/` so they do not mutate the verified bundled runtimes. Do not place credentials or production secrets inside the bundle.

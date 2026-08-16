@@ -1,25 +1,106 @@
-# J2911 reference review and Magnet design response
+# Magnet Agent Environment — design audit and red-team record
 
-## Useful J2911 mechanisms retained
+Status: **draft accepted for first hydration test**  
+Audit date: 2026-08-15 (America/Toronto)
 
-- Bundled CPython base runtime rather than assuming the host Python is sufficient.
-- A Python launcher that discovers its current location and repairs `pyvenv.cfg` after relocation.
-- Native tools exposed beside the Python environment rather than pretending every useful command is a Python package.
-- Static checksum manifest with relocation-mutated metadata excluded.
-- A deterministic environment-check command.
+## Decision
 
-## J2911 weaknesses deliberately corrected
+The environment is justified, but only as a small external capability layer for agents. It must not become a second application stack, a parallel Magnet Photos toolchain, or an agent framework.
 
-- The uploaded J2911 archive contains an old absolute build path in `bin/opc`; therefore successful `python` execution alone is not sufficient proof of portability.
-- J2911's environment definition is not reconstructable from its repository because `.venv` is ignored and there is no committed lock describing that local environment. This builder emits exact environment metadata, a hashed Python lock, a wheelhouse, source URLs/checksums and a complete immutable checksum manifest.
-- J2911 relies on several host document-rendering tools. Magnet does not currently need that document-production surface, so it is not copied into this bundle.
-- Python alone does not solve Magnet's execution mismatch: the Magnet repository requires Node major 24. Node 24 is therefore a first-class bundled runtime.
+The retained design is intentionally asymmetric: a modest portable payload removes recurring execution blockers (`gh`, the correct Node major, structured-data/search/security tools, and dependable Python), while project-specific behavior remains owned by the target repository.
 
-## Explicit non-goals
+## Architecture that survives review
 
-- Cross-OS portability. Linux/macOS/Windows require separate payloads.
-- Cross-architecture portability. This payload is Linux x86-64.
-- Replacing Magnet repository tooling or policy.
-- Bundling credentials.
-- Pretending Docker is portable as a client-only binary when no daemon/socket exists.
-- Using direct `psql`/Supabase shortcuts around repository safety targets.
+- External to Magnet Photos and its dependency model.
+- Linux x86-64 glibc first; no false claim of cross-OS or cross-architecture portability.
+- Short root `AGENTS.md` router; detailed material is loaded only on demand.
+- `agent-env` is the small executable command surface.
+- Magnet Photos still owns Supabase/PGLS versions and database operations through `package.json`, `package-lock.json`, and `Makefile`.
+- Credentials are host/session state, never payload state.
+- Verified payload is stable; ad-hoc UV/npm tools, extra managed Pythons, caches, and bytecode go under mutable `state/`.
+- Bundled CPython is retained for completeness/recovery, but Python is not introduced as Magnet application architecture.
+
+## Red-team findings corrected
+
+### 1. J2911 was not comprehensively relocatable
+
+The uploaded J2911 environment successfully relocated for its wrapped Python path, but at least one installed console script (`bin/opc`) retained the original absolute build root. A successful `python` smoke test is therefore insufficient portability proof.
+
+**Correction:** Magnet uses `uv venv --relocatable`, repairs the small remaining base-interpreter metadata boundary, rejects absolute symlinks, and scans the whole payload for the original build root before and after relocation/offline rebuild.
+
+### 2. Draft Python pin was impossible
+
+The first draft specified CPython `3.13.15`, which did not exist at the audit date. Python `3.13.14` is the current 3.13 maintenance release available to the intended managed-Python source.
+
+**Correction:** pin changed to `3.13.14` and all documentation aligned.
+
+### 3. yq checksum asset identity was briefly mismatched
+
+The builder downloads the release asset named `checksums`. Its SHA-256 is different from `checksums-bsd.bundle`; using the latter digest would fail a legitimate build.
+
+**Correction:** the pin now verifies the exact `checksums` asset first, then resolves and verifies the `yq_linux_amd64` digest from that trusted list.
+
+### 4. GitHub auth was too eager
+
+An early draft allowed `github-auth` to start OAuth after any failed GitHub readiness check, including an existing credential with a network/API problem.
+
+**Correction:** OAuth is initiated automatically only when no credential source exists. Environment-token override, stored-but-unusable credentials, and valid auth are distinct states. A local mock state-machine test enforces this behavior and checks that an environment token is never echoed.
+
+### 5. Generic `doctor` mixed local diagnostics with network/auth state
+
+Running GitHub authentication checks on every diagnostic invocation adds latency, side effects, and unnecessary dependency on network state.
+
+**Correction:** `agent-env doctor` is local. `agent-env github` is the explicit demand-driven readiness check used at the start of a GitHub-dependent turn.
+
+### 6. Mutable install paths could have contaminated the verified payload
+
+An early draft pointed ad-hoc UV Python installs at the bundled Python directory. npm global installs also needed an explicit non-payload home.
+
+**Correction:** extra UV Pythons, UV tools, npm globals, caches, and Python bytecode are redirected to `state/`.
+
+### 7. Mutable state was inconsistently excluded from integrity topology
+
+File hashes excluded `state/`, but symlink verification originally did not. A legitimate ad-hoc UV/npm tool could therefore make an otherwise healthy bundle fail verification.
+
+**Correction:** mutable state is excluded consistently from immutable hashes and symlink topology. Portability checks still cover the shipped immutable payload.
+
+### 8. Copying the managed Python executable was unsafe
+
+Some standalone Python distributions use executable-relative (`$ORIGIN`) library lookup. Copying the ELF into `env/bin` can break that relationship.
+
+**Correction:** the venv uses a relative `.python-real` symlink back into the bundled managed-Python tree, behind a self-repairing launcher.
+
+### 9. Archive reproducibility was overclaimed
+
+GNU tar ownership normalization does not by itself make a gzip archive bit-for-bit reproducible.
+
+**Correction:** the builder no longer describes this as deterministic/reproducible archive metadata. The actual guarantees are integrity, relocation, offline reconstruction, and archive-extraction proof.
+
+## GitHub authentication policy
+
+For a turn that may need GitHub, the router requires `agent-env github` before substantial dependent work. If no credential exists and the user is engaged, `agent-env github-auth` starts the normal browser/device OAuth flow immediately, verifies API access, and the agent resumes the original task.
+
+The environment does **not** pre-request extra OAuth scopes. Additional scopes are requested only after a concrete operation proves they are needed. Git credential-helper setup is also separate because it mutates host Git configuration.
+
+## Deliberate omissions
+
+These were considered and rejected for v1 because they do not earn their cost yet:
+
+- Supabase CLI or Postgres language server: Magnet already pins them.
+- `psql` or raw database convenience commands: they create a path around Magnet's safe Make targets.
+- Docker client: a client binary cannot provide the daemon/socket/kernel capability agents actually need.
+- Git and Make: ordinary host prerequisites; bundling them creates disproportionate native dependency complexity.
+- `fd`, `tree`, `rich`, `ruff`, `requests`, `sqlite3` CLI, pandoc, document-production tools: existing primitives cover current needs; promote only after an observed repeated need.
+- MCP/agent framework/orchestration layer: no demonstrated need.
+- Portable credentials: unacceptable security tradeoff.
+
+## Remaining honest limitations
+
+- The payload cannot create network access, credentials, Docker daemon access, filesystem execute permission, or kernel capabilities denied by the host sandbox.
+- Linux x86-64 glibc portability is not Windows/macOS/ARM portability; those would be separate builds if ever justified.
+- GitHub OAuth persistence depends on the host credential/config environment. On hosts without a credential store, GitHub CLI may fall back to its normal plaintext config behavior; credentials still remain outside the portable payload.
+- The final hydrated third-party runtime has not been built inside this ChatGPT shell because outbound download/DNS is unavailable here. The builder fails closed and runs the full acceptance sequence on the connected build host.
+
+## Acceptance threshold
+
+Do not call a hydrated v1 bundle accepted unless `build.sh` completes every native checksum, relocation, offline Python destruction/rebuild, old-build-path scan, immutable verification, and fresh archive-extraction proof without bypasses.
