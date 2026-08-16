@@ -1,6 +1,6 @@
 # Magnet Agent Environment — design audit and red-team record
 
-Status: **FIXED4 design approved; pending complete hydrated acceptance run**  
+Status: **v1.0.0 design and hydrated runtime accepted**  
 Audit date: 2026-08-15 (America/Toronto)
 
 ## Decision

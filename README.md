@@ -75,7 +75,7 @@ The builder does not report success unless it:
 9. directly exercises uv-generated `pip`/`pytest` console entrypoints and compiled Python extensions after relocation/rebuild;
 10. archives, freshly extracts, self-tests and verifies the final artifact.
 
-See `VALIDATION.md` for what was and was not executable in the ChatGPT construction sandbox.
+See `VALIDATION.md` for source-level evidence, connected-host acceptance, and the accepted v1.0.0 artifact checksum.
 
 ## Python lock and build isolation
 

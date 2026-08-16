@@ -1,7 +1,7 @@
 # Validation record
 
 Date: 2026-08-15 (America/Toronto)  
-Status: **builder/source validation complete; hydrated runtime validation pending first connected build**
+Status: **accepted: builder/source validation complete and v1.0.0 hydrated runtime passed full connected acceptance**
 
 ## Reference evidence
 
@@ -87,11 +87,9 @@ On an internet-connected supported GNU/Linux x86-64 build host (kernel >= 4.18, 
 
 A failed gate terminates the build.
 
-## Not falsely claimed as validated here
+## Connected-host acceptance
 
-The current ChatGPT shell cannot download the third-party release payload because outbound shell DNS/network access is disabled. Therefore this record does **not** claim that the final hydrated runtime archive has already passed the encoded full acceptance sequence.
-
-That proof occurs on the first connected Linux x86-64 build host by running:
+The construction sandbox could not perform the network hydration itself, so full acceptance was intentionally deferred to a connected Linux x86-64 host. That acceptance has now completed successfully by running:
 
 ```bash
 ./tests/static-check.sh
@@ -134,7 +132,7 @@ Corrected design:
 - never use an early-closing `head` pipeline for these host probes;
 - static checks now reject reintroduction of the brittle pattern.
 
-The corrected builder passed its static suite and was runtime-probed far enough to enter the uv download stage, proving that the Linux/x86-64/glibc preflight accepts the intended host class. Full hydrated validation remains pending the connected build.
+The corrected builder passed its static suite and was runtime-probed far enough to enter the uv download stage, proving that the Linux/x86-64/glibc preflight accepts the intended host class. This corrected host preflight was subsequently exercised by the successful connected build recorded below.
 
 
 ### 2026-08-16 real hydration: yq checksum-table parser
@@ -176,3 +174,32 @@ FIXED5 moves builder-only uv and managed-Python archive caches plus pip's downlo
 A connected Linux x86-64 run of FIXED5 passed all source checks, hydrated every native component, passed the relocation torture test at a deep path containing spaces and Unicode, and passed the full offline Python destruction/rebuild proof from the bundled wheelhouse. The remaining archive-extraction failure was confined to declared mutable `state/`: `PYTHONPYCACHEPREFIX` and uv runtime caches created path-bearing `.pyc`/cache files while the tests executed. No immutable payload file was reported.
 
 FIXED6 adds a distribution-boundary invariant: after all relocation/offline proofs but before immutable manifests and archive creation, `state/` is deleted and recreated with only its empty documented directories. A static guard enforces that this reset exists, and build-time packaging asserts no state files or symlinks survive. The final extraction proof remains strict and scans the whole extracted tree for the former archive-build root after first-use self-test.
+
+
+## v1.0.0 successful connected acceptance — 2026-08-16
+
+The FIXED6 connected build completed the full encoded acceptance sequence without bypasses. The run passed:
+
+- source/static validation;
+- pinned CPython 3.13.14 installation and relocatable venv creation;
+- frozen hashed Python environment sync and compatibility check;
+- all bundled native/runtime tool checks;
+- build-root residue and absolute-symlink portability gates;
+- relocation to a deep path containing spaces and Unicode;
+- complete runtime self-test after relocation;
+- full offline Python venv destruction/rebuild;
+- mutable-state reset before distribution;
+- immutable payload manifest generation; and
+- fresh archive extraction proof.
+
+The accepted artifact is:
+
+```text
+magnet-agent-env-linux-x64-v1.0.0.tar.gz
+SHA-256: ddd3f395b7da087d6cc62cca102af05d67a9199a1bc9fc588fd2410bb77e444e
+Size: 154M
+```
+
+The delivered artifact was independently re-extracted and rechecked. `agent-env selftest` and `agent-env verify` both passed, and `agent-env doctor --json` reported a compatible Linux x86-64 runtime with every bundled tool available.
+
+The v1.0.0 runtime is therefore accepted. Future source changes that can affect payload behavior must repeat the full build acceptance before release.
