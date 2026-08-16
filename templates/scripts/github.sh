@@ -115,8 +115,8 @@ git_ready() {
   case "$remote" in
     https://github.com/*)
       # Scope this helper to the current repository and keep it location-neutral.
-      # `gh auth setup-git` writes an absolute gh path into global Git config,
-      # which is inappropriate for a relocatable bundle.
+      # GitHub CLI's global Git-helper setup persists the current gh executable
+      # path, which is inappropriate for a relocatable bundle.
       git config --local --replace-all credential.https://github.com.helper ''
       git config --local --add credential.https://github.com.helper '!gh auth git-credential'
       helpers="$(git config --local --get-all credential.https://github.com.helper 2>/dev/null || true)"
