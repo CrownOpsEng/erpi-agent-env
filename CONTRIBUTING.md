@@ -45,4 +45,14 @@ For changes that may alter the produced runtime or its portability/integrity beh
 ./build.sh
 ```
 
-A payload-affecting direct push to `main` runs that full acceptance sequence automatically in CI, so local hydration is optional when the GitHub runner is the intended proof. The full builder acceptance sequence is intentionally stronger than the lightweight source checks; see `VALIDATION.md`.
+A payload-affecting direct push to `main` runs that full acceptance sequence automatically in CI, so local hydration is optional when the GitHub runner is the intended proof.
+
+**Do not manually refresh candidate hashes, run IDs, or versions in `VALIDATION.md`.** That file defines the stable validation authority and contract. Every successful **Accept runtime** run automatically uploads a tiny `acceptance.json` plus the archive SHA-256 sidecar as the current machine-readable evidence for that commit. Published Releases carry their own runtime archive, checksum, and `acceptance.json` and are authoritative for published state. The historical engineering chronology lives under `docs/validation-history.md`.
+
+## Releases
+
+`BUNDLE_VERSION` in `versions.env` is the source version. Release tags must be exactly `v$BUNDLE_VERSION`; the distribution workflow rejects a mismatch.
+
+Before publishing a release, make the intended version change on `main` and require its normal **Validate** and **Accept runtime** runs to succeed. Publishing the matching GitHub Release then triggers a fresh, independent **Build distribution** run from the tag and attaches the accepted archive, checksum sidecar, and `acceptance.json` to the Release.
+
+Pre-1.0 versions are appropriate while the environment is still accumulating real-world usage evidence. A `1.0.0` tag should signal a deliberately proven/stable compatibility contract rather than merely the first working package.

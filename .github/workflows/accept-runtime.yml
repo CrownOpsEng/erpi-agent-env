@@ -46,10 +46,34 @@ jobs:
       - name: Build and accept runtime
         run: ./build.sh
 
-      - name: Record accepted artifact digest
+      - name: Write acceptance metadata
         shell: bash
         run: |
           set -euo pipefail
-          digest="$(cat dist/*.sha256)"
-          printf '%s\n' "$digest"
-          printf '%s\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
+          sidecar="$(printf '%s\n' dist/*.tar.gz.sha256)"
+          python3 scripts/write-acceptance-metadata.py \
+            --sidecar "$sidecar" \
+            --output dist/acceptance.json \
+            --source-sha "$GITHUB_SHA" \
+            --repository "$GITHUB_REPOSITORY" \
+            --workflow "$GITHUB_WORKFLOW" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --event "$GITHUB_EVENT_NAME"
+          cat "$sidecar"
+          {
+            echo '```json'
+            cat dist/acceptance.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload acceptance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: acceptance-${{ github.sha }}
+          path: |
+            dist/acceptance.json
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90

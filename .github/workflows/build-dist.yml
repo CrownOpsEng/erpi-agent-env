@@ -53,16 +53,32 @@ jobs:
       - name: Build and accept distribution
         run: ./build.sh
 
-      - name: Read artifact metadata
+      - name: Write acceptance metadata
         id: metadata
         shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
         run: |
           set -euo pipefail
           source ./versions.env
           echo "name=magnet-agent-env-linux-x64-${BUNDLE_VERSION}" >> "$GITHUB_OUTPUT"
-          digest="$(cat dist/*.sha256)"
-          printf '%s\n' "$digest"
-          printf '%s\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
+          sidecar="$(printf '%s\n' dist/*.tar.gz.sha256)"
+          python3 scripts/write-acceptance-metadata.py \
+            --sidecar "$sidecar" \
+            --output dist/acceptance.json \
+            --source-sha "$GITHUB_SHA" \
+            --repository "$GITHUB_REPOSITORY" \
+            --workflow "$GITHUB_WORKFLOW" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --event "$GITHUB_EVENT_NAME" \
+            --release-tag "$RELEASE_TAG"
+          cat "$sidecar"
+          {
+            echo '```json'
+            cat dist/acceptance.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload distribution
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -71,6 +87,7 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
+            dist/acceptance.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
@@ -80,4 +97,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/*.tar.gz.sha256 --clobber
+        run: gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/*.tar.gz.sha256 dist/acceptance.json --clobber

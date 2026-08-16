@@ -9,6 +9,7 @@ for file in "$ROOT/templates/bin/python-wrapper" "$ROOT/templates/bin/node-wrapp
 done
 python3 -m py_compile "$ROOT/templates/scripts/doctor.py"
 python3 -m py_compile "$ROOT/scripts/normalize-python-sysconfig.py"
+python3 -m py_compile "$ROOT/scripts/write-acceptance-metadata.py"
 python3 - <<'PY' "$ROOT/versions.env" "$ROOT/requirements.in" "$ROOT/requirements.lock"
 import hashlib, pathlib, re, sys
 versions = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
@@ -33,7 +34,7 @@ for line in requirements_in.splitlines():
 print('hash-and-lock-shapes-ok')
 PY
 rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
-for file in requirements.lock templates/AGENTS.md templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/bin/agent-env scripts/uv-isolated-exec.sh; do
+for file in requirements.lock templates/AGENTS.md templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime/build source missing: $file" >&2; exit 1; }
 done
 # The router is intentionally compact; large operational detail belongs in README/commands.
@@ -118,6 +119,7 @@ if grep -R -nE 'git[[:space:]]+config[[:space:]]+--global.*credential' "$ROOT/te
   exit 1
 fi
 "$ROOT/tests/github-auth-check.sh"
+"$ROOT/tests/acceptance-metadata-check.sh"
 "$ROOT/tests/uv-isolation-check.sh"
 "$ROOT/tests/repair-python-check.sh"
 "$ROOT/tests/python-link-relocation-check.sh"
