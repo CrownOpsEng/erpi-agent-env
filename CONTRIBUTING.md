@@ -57,11 +57,24 @@ Normal release flow:
 
 1. change `BUNDLE_VERSION` on `main` as part of the intended release source;
 2. require that exact commit's **Validate** and **Accept runtime** workflows to succeed;
-3. run the permanent **Publish release** workflow, normally with `target_ref=main` (or an explicit already-accepted commit/ref when needed);
-4. **Publish release** verifies the target acceptance result, creates the matching GitHub Release/tag, and explicitly dispatches **Build distribution**; and
-5. **Build distribution** checks out the release tag, re-runs the complete acceptance build, then attaches the runtime archive, checksum sidecar, and `acceptance.json` to the Release.
+3. publish that accepted source through the permanent **Publish release** workflow; and
+4. **Publish release** verifies acceptance, creates the matching GitHub Release/tag, and explicitly dispatches **Build distribution**, which checks out the tag, repeats the complete acceptance build, and attaches the runtime archive, checksum sidecar, and `acceptance.json`.
 
-The explicit dispatch in step 4 is intentional: GitHub suppresses most follow-on workflow events caused by actions performed with `GITHUB_TOKEN`, so an Actions-created Release cannot rely on its own `release: published` event to start another workflow. The release trigger remains supported for Releases published directly through GitHub's UI/API by a user.
+There are two durable ways to invoke **Publish release**:
+
+- **GitHub UI / workflow-dispatch capable client:** run **Publish release** and provide the accepted `target_ref` (normally the exact release commit or `main` when `main` itself is the accepted commit).
+- **Connector-only agent session:** create or update `.github/release-request.json` on `main` with the exact already-accepted commit SHA and version:
+
+```json
+{
+  "version": "0.2.0",
+  "target_sha": "0123456789abcdef0123456789abcdef01234567"
+}
+```
+
+Changing only that request file triggers the same permanent publisher. The workflow requires a 40-character exact commit SHA, verifies its `BUNDLE_VERSION`, and refuses to publish unless that commit already has a successful **Accept runtime** run. The request file is therefore an auditable release command, not a source-of-truth version file; `versions.env` remains authoritative.
+
+The publisher explicitly dispatches **Build distribution** after creating a Release. This is intentional: GitHub suppresses most follow-on workflow events caused by actions performed with `GITHUB_TOKEN`, so an Actions-created Release cannot rely on its own `release: published` event to start another workflow. The release trigger remains supported for Releases published directly through GitHub's UI/API by a user.
 
 **Build distribution** can also be run manually without a release tag to produce a short-lived Actions artifact, or with an existing `release_tag` to rebuild/attach that release.
 

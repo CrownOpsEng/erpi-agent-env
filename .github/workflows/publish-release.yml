@@ -8,6 +8,10 @@ on:
         required: true
         default: main
         type: string
+  push:
+    branches: [main]
+    paths:
+      - .github/release-request.json
 
 permissions:
   actions: write
@@ -22,22 +26,60 @@ jobs:
     name: Publish accepted runtime
     runs-on: ubuntu-24.04
     steps:
+      - name: Resolve requested target
+        id: request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_TARGET: ${{ inputs.target_ref }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            request_json="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "/repos/$GITHUB_REPOSITORY/contents/.github/release-request.json?ref=$GITHUB_SHA" \
+              --jq .content | base64 --decode)"
+            target_ref="$(jq -er '.target_sha' <<<"$request_json")"
+            requested_version="$(jq -er '.version' <<<"$request_json")"
+            [[ "$target_ref" =~ ^[0-9a-f]{40}$ ]] || {
+              echo 'release-request.json target_sha must be an exact 40-character lowercase commit SHA.' >&2
+              exit 1
+            }
+            [[ "$requested_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]] || {
+              echo 'release-request.json version is not a valid release version.' >&2
+              exit 1
+            }
+          else
+            target_ref="$MANUAL_TARGET"
+            requested_version=''
+          fi
+
+          printf 'target_ref=%s\n' "$target_ref" >> "$GITHUB_OUTPUT"
+          printf 'requested_version=%s\n' "$requested_version" >> "$GITHUB_OUTPUT"
+
       - name: Check out target
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.target_ref }}
+          ref: ${{ steps.request.outputs.target_ref }}
 
       - name: Verify acceptance and create release
         id: release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ steps.request.outputs.requested_version }}
         run: |
           set -euo pipefail
           source ./versions.env
           target_sha="$(git rev-parse HEAD)"
           release_tag="v${BUNDLE_VERSION}"
+
+          if [[ -n "$REQUESTED_VERSION" && "$REQUESTED_VERSION" != "$BUNDLE_VERSION" ]]; then
+            echo "Release request version $REQUESTED_VERSION does not match target BUNDLE_VERSION $BUNDLE_VERSION." >&2
+            exit 1
+          fi
 
           accepted="$(gh api \
             -H 'Accept: application/vnd.github+json' \
