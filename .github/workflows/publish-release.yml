@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish accepted runtime
+    name: Prepare accepted release
     runs-on: ubuntu-24.04
     steps:
       - name: Resolve requested target
@@ -64,7 +64,7 @@ jobs:
           persist-credentials: false
           ref: ${{ steps.request.outputs.target_ref }}
 
-      - name: Verify acceptance and create release
+      - name: Verify acceptance and prepare draft release
         id: release
         shell: bash
         env:
@@ -91,16 +91,26 @@ jobs:
             exit 1
           }
 
-          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $release_tag already exists; refusing to recreate it." >&2
-            exit 1
-          fi
+          existing="$(gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,targetCommitish \
+            --jq '[.isDraft,.targetCommitish] | @tsv' 2>/dev/null || true)"
 
-          gh release create "$release_tag" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$target_sha" \
-            --title "$release_tag" \
-            --generate-notes
+          if [[ -n "$existing" ]]; then
+            IFS=$'\t' read -r is_draft release_target <<<"$existing"
+            [[ "$is_draft" == true && "$release_target" == "$target_sha" ]] || {
+              echo "Release $release_tag already exists but is not the matching recoverable draft for $target_sha." >&2
+              exit 1
+            }
+            echo "Reusing matching draft release $release_tag."
+          else
+            gh release create "$release_tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$target_sha" \
+              --title "$release_tag" \
+              --generate-notes \
+              --draft
+            echo "Prepared draft release $release_tag for $target_sha."
+          fi
 
           echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
           echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
@@ -116,4 +126,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f release_tag="$RELEASE_TAG"
-          echo "Dispatched Build distribution for $RELEASE_TAG."
+          echo "Dispatched Build distribution for draft $RELEASE_TAG."

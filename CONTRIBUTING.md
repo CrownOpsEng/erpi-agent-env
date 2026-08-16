@@ -4,9 +4,9 @@
 
 This repository is intentionally direct-to-`main`. It is a small, single-purpose builder repository with immediate automated validation, so mandatory pull requests would add ceremony without creating a meaningful approval boundary.
 
-Use one coherent commit per change when practical and inspect the resulting GitHub Actions runs after pushing. Pull requests remain available when explicit review, temporary isolation, or multi-contributor coordination is useful; they are not the default path.
+Use one coherent commit per change when practical and inspect the resulting GitHub Actions runs after pushing. Pull requests remain available when explicit review, temporary isolation, or multi-contributor coordination is useful; they are not the default path. Optional PRs receive lightweight **Validate** coverage.
 
-Payload-affecting pushes to `main` automatically run the full runtime acceptance build. Distribution publishing remains separate.
+Payload-affecting pushes to `main` automatically run the full **Accept runtime** build. Distribution publishing remains separate.
 
 ## Commit messages
 
@@ -20,34 +20,21 @@ Preferred types: `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `ci`, `chore
 
 Preferred scopes: `builder`, `runtime`, `python`, `github`, `dist`, `ci`, `repo`.
 
-Examples:
-
-```text
-feat(builder): add portable agent environment builder
-fix(python): normalize relocatable sysconfig metadata
-perf(builder): persist managed Python download cache
-ci(dist): build portable runtime on demand
-```
-
-Keep the subject concise and describe one coherent change. Use the body when the reason, failure mode, or tradeoff is not obvious from the diff. Mark breaking changes with `!` and a `BREAKING CHANGE:` footer when applicable.
+Use the body when the reason, failure mode, or tradeoff is not obvious from the diff. Mark breaking changes with `!` and a `BREAKING CHANGE:` footer when applicable.
 
 ## Validation
 
-For every source change:
+When a shell checkout is available, run:
 
 ```bash
 ./tests/static-check.sh
 ```
 
-For changes that may alter the produced runtime or its portability/integrity behavior, also run:
+For changes that may alter the produced runtime or its portability/integrity behavior, `./build.sh` is useful locally when practical.
 
-```bash
-./build.sh
-```
+A connector-only agent may not have a usable shell checkout. In that case it must not claim local validation: make the coherent direct-to-`main` commit, inspect **Validate**, and for payload-affecting changes require **Accept runtime** to succeed. GitHub Actions is an intentional supported acceptance host, not a fallback of last resort.
 
-A payload-affecting direct push to `main` runs that full acceptance sequence automatically in CI, so local hydration is optional when the GitHub runner is the intended proof.
-
-**Do not manually refresh candidate hashes, run IDs, or versions in `VALIDATION.md`.** That file defines the stable validation authority and contract. Every successful **Accept runtime** run automatically uploads a tiny `acceptance.json` plus the archive SHA-256 sidecar as the current machine-readable evidence for that commit. Published Releases carry their own runtime archive, checksum, and `acceptance.json` and are authoritative for published state. The historical engineering chronology lives under `docs/validation-history.md`.
+Do **not** manually refresh candidate hashes, run IDs, or versions in `VALIDATION.md`. That file defines the stable validation authority/contract. Successful **Accept runtime** runs upload a small `acceptance.json` plus SHA sidecar for the exact commit; published Releases carry their own runtime archive, checksum and `acceptance.json`. Historical chronology is under `docs/validation-history.md`.
 
 ## Releases
 
@@ -56,13 +43,15 @@ A payload-affecting direct push to `main` runs that full acceptance sequence aut
 Normal release flow:
 
 1. change `BUNDLE_VERSION` on `main` as part of the intended release source;
-2. require that exact commit's **Validate** and **Accept runtime** workflows to succeed;
-3. publish that accepted source through the permanent **Publish release** workflow; and
-4. **Publish release** verifies acceptance, creates the matching GitHub Release/tag, and explicitly dispatches **Build distribution**, which checks out the tag, repeats the complete acceptance build, and attaches the runtime archive, checksum sidecar, and `acceptance.json`.
+2. require that exact commit's **Validate** and **Accept runtime** runs to succeed;
+3. invoke permanent **Publish release** for that exact accepted source;
+4. **Publish release** verifies acceptance and creates/reuses only a matching **draft** Release/tag;
+5. it dispatches **Build distribution** for that tag;
+6. **Build distribution** checks out the tag, repeats the complete acceptance build, uploads the archive/checksum/`acceptance.json` to the draft, then publishes the Release.
 
 There are two durable ways to invoke **Publish release**:
 
-- **GitHub UI / workflow-dispatch capable client:** run **Publish release** and provide the accepted `target_ref` (normally the exact release commit or `main` when `main` itself is the accepted commit).
+- **GitHub UI / workflow-dispatch capable client:** run **Publish release** and provide the accepted `target_ref`.
 - **Connector-only agent session:** create or update `.github/release-request.json` on `main` with the exact already-accepted commit SHA and version:
 
 ```json
@@ -72,10 +61,18 @@ There are two durable ways to invoke **Publish release**:
 }
 ```
 
-Changing only that request file triggers the same permanent publisher. The workflow requires a 40-character exact commit SHA, verifies its `BUNDLE_VERSION`, and refuses to publish unless that commit already has a successful **Accept runtime** run. The request file is therefore an auditable release command, not a source-of-truth version file; `versions.env` remains authoritative.
+Changing that request file triggers the same permanent publisher. The workflow requires an exact 40-character lowercase commit SHA, verifies its `BUNDLE_VERSION`, and refuses to publish unless that commit already has a successful **Accept runtime** result. The request file is an auditable release command, not version authority; `versions.env` remains authoritative.
 
-The publisher explicitly dispatches **Build distribution** after creating a Release. This is intentional: GitHub suppresses most follow-on workflow events caused by actions performed with `GITHUB_TOKEN`, so an Actions-created Release cannot rely on its own `release: published` event to start another workflow. The release trigger remains supported for Releases published directly through GitHub's UI/API by a user.
+If a release build fails after the draft was prepared, the draft is intentionally recoverable: rerun **Build distribution** with its `release_tag`. The build may replace partial assets while the Release is still draft, but publication happens only after all release assets are attached successfully.
 
-**Build distribution** can also be run manually without a release tag to produce a short-lived Actions artifact, or with an existing `release_tag` to rebuild/attach that release.
+**Build distribution** can also be run without a release tag to produce a short-lived Actions artifact without publishing anything.
 
-Pre-1.0 versions are appropriate while the environment is still accumulating real-world usage evidence. A `1.0.0` tag should signal a deliberately proven/stable compatibility contract rather than merely the first working package.
+The explicit workflow dispatch from **Publish release** to **Build distribution** is intentional. GitHub suppresses most follow-on events caused by actions performed with `GITHUB_TOKEN`, while `workflow_dispatch` is explicitly allowed to start another workflow.
+
+### Release immutability
+
+The release pipeline is intentionally draft-first so GitHub release immutability can be enabled safely. GitHub recommends attaching all assets to a draft and publishing only afterward; once immutability is enabled, future published release tags/assets are locked and GitHub creates a release attestation.
+
+Recommended repository setting for future releases: **Settings → General → Releases → Enable release immutability**. This setting is administrative and is not changed by the build workflows themselves. It applies to future releases, so the initial `v0.1.0` release remains historical even if the setting is enabled afterward.
+
+Pre-1.0 versions are appropriate while the environment accumulates real-world usage evidence. `1.0.0` should signal a deliberately proven/stable compatibility contract, not merely a working package.

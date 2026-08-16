@@ -1,17 +1,17 @@
 # Repository agent router
 
-This repository owns the source and validation for the portable Magnet Agent Environment. It does not own Magnet Photos application dependencies or architecture.
+This repository owns the source, validation, and release automation for the portable Magnet Agent Environment. It does not own Magnet Photos application dependencies or architecture.
 
 Before changing builder/runtime source:
 
 1. Read `README.md` and the directly affected files.
-2. Preserve the fail-closed portability, integrity, credential-isolation, and offline-recovery boundaries already encoded by the tests.
-3. Run `./tests/static-check.sh` after every source change.
-4. For changes that can affect the hydrated payload, run `./build.sh` or rely on the repository runtime-acceptance workflow before release.
+2. Preserve the fail-closed portability, integrity, credential-isolation, offline-recovery, and host-capability boundaries already encoded by the tests.
+3. If a shell checkout is available, run `./tests/static-check.sh` after source changes. In a connector-only session, make one coherent direct-to-`main` commit and inspect the resulting **Validate** run instead; do not pretend a local check ran.
+4. For payload-affecting changes, require the resulting **Accept runtime** run to pass before release. A local `./build.sh` is useful when available but is not required when GitHub Actions is the intended acceptance host.
 5. Never commit `dist/`, `.download-cache/`, credentials, or runtime-generated state.
 6. Use the commit convention in `CONTRIBUTING.md`.
-7. The default change flow is direct to `main`. Do not create a pull request unless the user explicitly asks for review or isolation; make coherent commits and inspect the resulting CI instead.
+7. The default change flow is direct to `main`. Do not create a pull request unless the user explicitly asks for review or isolation; make coherent commits and inspect resulting CI. Optional PRs receive lightweight **Validate** coverage.
 8. Do not manually copy current candidate versions, run IDs, or artifact hashes into `VALIDATION.md`. CI-generated `acceptance.json` evidence is authoritative for accepted builds; GitHub Release assets are authoritative for published builds. Update `VALIDATION.md` only if that authority/validation contract itself changes.
-9. To publish, update `BUNDLE_VERSION`, require that exact source commit to pass **Accept runtime**, then use the permanent **Publish release** workflow. If workflow dispatch is unavailable but repository writes are available, create/update `.github/release-request.json` with the exact accepted commit SHA and version; that file is the durable connector-trigger for the same publisher. Do not invent another tag/release path.
+9. To publish, update `BUNDLE_VERSION`, require that exact source commit to pass **Accept runtime**, then use the permanent **Publish release** workflow. If workflow dispatch is unavailable but repository writes are available, create/update `.github/release-request.json` with the exact accepted commit SHA and version; that is the durable connector trigger. The publisher prepares a draft Release and **Build distribution** attaches accepted assets before publishing it. Do not invent another tag/release path.
 
-Keep this file short. Detailed behavior belongs in the code, tests, `README.md`, `BUILD-REVIEW.md`, `CONTRIBUTING.md`, and `VALIDATION.md`.
+Keep this file short. Operational details belong in `README.md`, `CONTRIBUTING.md`, and `VALIDATION.md`. `BUILD-REVIEW.md` and `docs/validation-history.md` are historical engineering records, not current-state authority.

@@ -3,13 +3,14 @@ name: Validate
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: validate-main
+  group: validate-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -19,6 +20,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Run builder static checks
-        run: ./tests/static-check.sh
+        run: |
+          ./tests/static-check.sh
+          ./tests/release-workflow-check.sh
