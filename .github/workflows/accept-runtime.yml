@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - .gitattributes
       - build.sh
       - versions.env
       - requirements.in
@@ -49,4 +50,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat dist/*.sha256 >> "$GITHUB_STEP_SUMMARY"
+          digest="$(cat dist/*.sha256)"
+          printf '%s\n' "$digest"
+          printf '%s\n' "$digest" >> "$GITHUB_STEP_SUMMARY"

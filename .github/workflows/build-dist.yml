@@ -33,6 +33,20 @@ jobs:
       - name: Run source validation
         run: ./tests/static-check.sh
 
+      - name: Validate release version
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          source ./versions.env
+          expected="v${BUNDLE_VERSION}"
+          [[ "$RELEASE_TAG" == "$expected" ]] || {
+            echo "Release tag $RELEASE_TAG does not match bundle version $expected." >&2
+            exit 1
+          }
+
       - name: Build and accept distribution
         run: ./build.sh
 
@@ -43,7 +57,9 @@ jobs:
           set -euo pipefail
           source ./versions.env
           echo "name=magnet-agent-env-linux-x64-${BUNDLE_VERSION}" >> "$GITHUB_OUTPUT"
-          cat dist/*.sha256 >> "$GITHUB_STEP_SUMMARY"
+          digest="$(cat dist/*.sha256)"
+          printf '%s\n' "$digest"
+          printf '%s\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload distribution
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
