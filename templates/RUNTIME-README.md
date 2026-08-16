@@ -43,7 +43,9 @@ Exact versions, sources and hashes are under `manifest/`.
 ```text
 agent-env doctor [--json]  Diagnose local bundle, host commands, and current repository
 agent-env github            Validate GitHub auth/API and current-repository access
-agent-env github-auth       Run interactive GitHub OAuth when needed, then verify it
+agent-env github-auth       Run browser/device GitHub OAuth when needed, then verify it
+agent-env github-git        Configure current-repo Git auth safely and verify push dry-run
+agent-env git ARGS...       Run host Git with the environment active
 agent-env selftest          Exercise bundled capabilities and portability invariants
 agent-env verify            Verify immutable-file checksums and symlink topology
 agent-env repair            Repair relocation-sensitive Python metadata
@@ -69,11 +71,19 @@ If it reports that no credential source exists, authenticate while the user is p
 agent-env github-auth
 ```
 
-The command starts GitHub CLI's normal browser/device OAuth flow, then verifies the API and the current repository when one is detected. Do not paste access tokens into chat when this flow is available.
+The command starts GitHub CLI's normal browser/device OAuth flow with terminal prompting disabled, then verifies the API and the current repository when one is detected. This prevents GitHub CLI from persisting this relocatable bundle's current absolute `gh` path into global Git configuration. Do not paste access tokens into chat when this flow is available.
 
 If `GH_TOKEN` or `GITHUB_TOKEN` is already set, it takes precedence over stored credentials. `agent-env github-auth` therefore refuses to start a competing stored-login flow until that environment token is fixed or unset. If a stored credential exists but is unusable, the command also refuses to overwrite it blindly; diagnose network/credential state with `agent-env github` first.
 
-Do not pre-request broader OAuth scopes. If a concrete GitHub operation requires an additional scope, add only that scope with the normal `gh auth refresh` flow while the user is engaged, verify the operation, and continue. Git credential-helper configuration is intentionally separate; authentication does not silently rewrite host Git configuration.
+Do not pre-request broader OAuth scopes. If a concrete GitHub operation requires an additional scope, add only that scope with the normal `gh auth refresh` flow while the user is engaged, verify the operation, and continue.
+
+GitHub API authentication and HTTPS Git transport are separate layers. In a GitHub worktree that will fetch or push over HTTPS, run:
+
+```bash
+agent-env github-git
+```
+
+This configures only that repository with the location-neutral helper `!gh auth git-credential`, then performs `git push --dry-run --no-verify` against the current branch. It does not store a token, does not write the bundle path, and does not rewrite global Git configuration. The helper works while this environment is active because the bundled `gh` is on `PATH`; without activation, use `agent-env git ...`. SSH GitHub remotes continue to use host SSH credentials. Do not use `gh auth setup-git` from this portable bundle because GitHub CLI persists the current absolute `gh` executable path globally.
 
 A stored GitHub CLI token may fall back to plaintext storage when the host has no credential store. That is GitHub CLI behavior, not portable-bundle state. Review the host/session if persistence matters.
 
@@ -104,11 +114,13 @@ The verified payload is intended to stay stable. The shipped archive starts with
 
 This keeps experimentation from silently modifying the bundled Python or Node runtimes. Project dependencies still belong to the project itself.
 
+`state/` is intentionally not part of the relocation guarantee once populated. Some third-party installers (notably ad-hoc `uv tool` environments) may create location-specific links inside mutable state. After physically moving an already-used bundle, recreate any affected ad-hoc state rather than treating it as authoritative. The distributed archive always starts with pristine empty state.
+
 Do not copy tokens, SSH keys, `.npmrc` credentials, cloud credentials or production database secrets into this directory.
 
 ## Portability contract
 
-The bundle may be moved to a different pathname on a compatible **GNU/Linux x86-64 host with kernel >= 4.18 and glibc >= 2.28**. The bundled Node 24 official binary also requires libstdc++ exposing `GLIBCXX_3.4.25` (libstdc++ >= 6.0.25). It is not cross-OS, cross-architecture, or musl/Alpine portability.
+The bundle may be moved to a different pathname on a compatible **GNU/Linux x86-64 host with kernel >= 4.18 and glibc >= 2.28**. The bundled Node 24 official binary also requires libstdc++ exposing **GLIBCXX_3.4.25** (libstdc++ >= 6.0.25). It is not cross-OS, cross-architecture, or musl/Alpine portability.
 
 The environment uses `uv venv --relocatable` for standard activation/entrypoint portability. A tiny location-aware wrapper repairs only the `home` line in uv's `pyvenv.cfg` because the bundled base interpreter moves with the payload; all other uv-generated venv metadata is preserved. The immutable `runtime/python/current` relative link is validated and never reconstructed as "repair".
 

@@ -22,14 +22,16 @@ Usage: agent-env COMMAND [ARGS...]
 Commands:
   doctor [--json]    Diagnose local bundle, host commands, and current repository
   github             Validate GitHub auth/API and current-repository access
-  github-auth        Run interactive GitHub OAuth when needed, then verify it
+  github-auth        Run browser/device GitHub OAuth when needed, then verify it
+  github-git         Configure current-repo Git auth safely and verify push dry-run
+  git [ARGS...]      Run host Git with this environment active
   selftest           Exercise bundled capabilities and portability invariants
   verify             Verify immutable payload checksums and symlink topology
   repair             Repair relocation-sensitive Python venv metadata
   rebuild-python     Recreate the Python venv entirely offline from wheelhouse
   versions           Print the pinned environment manifest
   exec CMD [ARGS...] Run a command with this environment active
-  root               Print the resolved current bundle root
+  root               Print the resolved bundle root
   help               Show this command surface
 USAGE
 }
@@ -40,6 +42,12 @@ case "$cmd" in
   doctor) shift; exec "$ROOT/env/bin/python" "$ROOT/scripts/doctor.py" "$@" ;;
   github) shift; exec "$ROOT/scripts/github.sh" status "$@" ;;
   github-auth) shift; exec "$ROOT/scripts/github.sh" auth "$@" ;;
+  github-git) shift; exec "$ROOT/scripts/github.sh" git "$@" ;;
+  git)
+    shift
+    command -v git >/dev/null 2>&1 || { echo "Host Git is unavailable." >&2; exit 1; }
+    exec git "$@"
+    ;;
   selftest) shift; exec "$ROOT/scripts/selftest.sh" "$@" ;;
   verify) shift; exec "$ROOT/scripts/verify.sh" "$@" ;;
   repair) shift; exec "$ROOT/scripts/repair-python.sh" "$@" ;;

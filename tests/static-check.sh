@@ -103,6 +103,20 @@ verify_line="$(grep -nF '"$ROOT/scripts/verify.sh"' "$ROOT/templates/scripts/reb
 grep -F -- "--exclude='pyvenv.cfg' \"\$ORIGINAL_BUILD_ROOT\"" "$ROOT/build.sh" >/dev/null
 ! grep -F 'executable = $PYROOT_LINK' "$ROOT/templates/scripts/repair-python.sh"
 grep -F 'Fresh extraction retained its archive-build location' "$ROOT/build.sh" >/dev/null
+# GitHub OAuth must not persist a relocatable gh path into host-global Git config.
+grep -F 'GH_PROMPT_DISABLED=1 gh auth login --hostname "$HOST" --git-protocol https --web' "$ROOT/templates/scripts/github.sh" >/dev/null
+grep -F "git config --local --add credential.https://github.com.helper '!gh auth git-credential'" "$ROOT/templates/scripts/github.sh" >/dev/null
+grep -F 'git push --dry-run --no-verify' "$ROOT/templates/scripts/github.sh" >/dev/null
+grep -F 'github-git' "$ROOT/templates/bin/agent-env" >/dev/null
+grep -F 'github-git' "$ROOT/templates/AGENTS.md" >/dev/null
+if grep -R -nF 'gh auth setup-git' "$ROOT/templates/scripts" "$ROOT/templates/bin"; then
+  echo "Do not persist the portable gh path with gh auth setup-git." >&2
+  exit 1
+fi
+if grep -R -nE 'git[[:space:]]+config[[:space:]]+--global.*credential' "$ROOT/templates/scripts" "$ROOT/templates/bin"; then
+  echo "Do not write Git credential helpers globally from the portable bundle." >&2
+  exit 1
+fi
 "$ROOT/tests/github-auth-check.sh"
 "$ROOT/tests/uv-isolation-check.sh"
 "$ROOT/tests/repair-python-check.sh"
