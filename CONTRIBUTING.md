@@ -4,23 +4,49 @@
 
 This repository is intentionally direct-to-`main`. It is a small, single-purpose builder repository with immediate automated validation, so mandatory pull requests would add ceremony without creating a meaningful approval boundary.
 
-Use one coherent commit per change when practical and inspect the resulting GitHub Actions runs after pushing. Pull requests remain available when explicit review, temporary isolation, or multi-contributor coordination is useful; they are not the default path. Optional PRs receive lightweight **Validate** coverage.
+Use one coherent commit per change when practical and inspect the resulting GitHub Actions runs after pushing. Pull requests remain available when explicit review, temporary isolation, or multi-contributor coordination is useful; they are not the default path. Optional PRs receive lightweight **Validate** coverage and should be squash/rebase-merged into one compliant detailed commit rather than relying on a generic merge message.
 
 Payload-affecting pushes to `main` automatically run the full **Accept runtime** build. Distribution publishing remains separate.
 
 ## Commit messages
 
-Use Conventional Commits:
+The commit history is part of this repository's engineering record. A terse Conventional Commit subject is **not enough** for direct-to-`main` work.
+
+Every new direct-to-`main` commit must use this structure:
 
 ```text
 type(scope): imperative summary
+
+Why:
+Explain the problem, decision, failure mode, or reason this change exists.
+
+What:
+Explain the material implementation and behavior/authority that changed.
+
+Validation:
+State the evidence available at commit time: local checks that ran, or the exact post-push CI proof that is required. Do not claim a check passed before it actually ran.
 ```
 
-Preferred types: `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `ci`, `chore`.
+The subject must be at most 72 characters and use a Conventional Commit type. Preferred types are `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `ci`, and `chore`. Use a focused lowercase scope such as `builder`, `runtime`, `python`, `github`, `dist`, `ci`, `repo`, `release`, or `validation`.
 
-Preferred scopes: `builder`, `runtime`, `python`, `github`, `dist`, `ci`, `repo`.
+The body is not filler. `Why:`, `What:`, and `Validation:` must each contain useful detail. The repository's **Validate** workflow enforces this contract on `main` pushes.
 
-Use the body when the reason, failure mode, or tradeoff is not obvious from the diff. Mark breaking changes with `!` and a `BREAKING CHANGE:` footer when applicable.
+Example:
+
+```text
+fix(runtime): preserve Git auth across bundle relocation
+
+Why:
+GitHub CLI can configure Git with an absolute path to its current executable, which breaks after moving this portable bundle.
+
+What:
+Use a repo-local location-neutral `!gh auth git-credential` helper and verify the authenticated push path without changing the remote.
+
+Validation:
+Behavioral transport tests cover helper setup, bundle relocation, absence of global credential mutation, and a no-write push dry run; post-push Validate and Accept runtime are required.
+```
+
+Mark breaking changes with `!` and a `BREAKING CHANGE:` footer when applicable. Do not rewrite already-published history solely to improve older commit messages; enforce the stronger standard forward from the current history.
 
 ## Validation
 

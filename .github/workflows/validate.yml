@@ -23,7 +23,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check direct-to-main commit message
+        if: github.event_name == 'push'
+        run: git log -1 --format=%B | python3 scripts/check-commit-message.py
+
       - name: Run builder static checks
         run: |
           ./tests/static-check.sh
+          ./tests/commit-message-check.sh
           ./tests/release-workflow-check.sh
