@@ -64,6 +64,10 @@ WORK_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/magnet-agent-builder.XXXXXX")"
 WORK="$WORK_PARENT/Build Root With Spaces [relocation source]"
 BUILD="$WORK/magnet-agent-env"
 DL="$CACHE_DIR"
+BUILDER_UV_CACHE="$CACHE_DIR/uv-cache"
+BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"
+BUILDER_PIP_CACHE="$CACHE_DIR/pip-cache"
+mkdir -p "$BUILDER_UV_CACHE" "$BUILDER_UV_PYTHON_CACHE" "$BUILDER_PIP_CACHE"
 mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/env" "$BUILD/wheelhouse" \
   "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" \
   "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
@@ -124,15 +128,20 @@ ln -s uv "$BUILD/bin/uvx"
 "$BUILD/bin/uv" --version | grep -F "uv $UV_VERSION" >/dev/null
 
 log "CPython $PYTHON_VERSION via pinned uv"
-UV_CACHE_DIR="$BUILD/state/uv-cache" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" python install "$PYTHON_VERSION" --install-dir "$BUILD/runtime/python" --no-bin --managed-python
+UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" python install "$PYTHON_VERSION" --install-dir "$BUILD/runtime/python" --no-bin --managed-python
 BASE_PY="$(find "$BUILD/runtime/python" -mindepth 2 -maxdepth 4 -path "*/bin/python${PYTHON_MINOR}" -print -quit)"
 [[ -n "$BASE_PY" && -x "$BASE_PY" ]] || { echo "uv did not install expected Python $PYTHON_VERSION" >&2; exit 1; }
 BASE_ROOT="$(CDPATH= cd -- "$(dirname -- "$BASE_PY")/.." && pwd -P)"
 PYTHON_DIST_ID="$(basename -- "$BASE_ROOT")"
+# uv creates a top-level minor-version convenience symlink for managed Python
+# patch upgrades. Preserve that useful alias, but rewrite any absolute target
+# that stays within this managed-Python root to a relative target before the
+# bundle is moved. External absolute targets fail closed.
+"$SELF_DIR/scripts/normalize-python-links.sh" "$BUILD/runtime/python"
 ln -s "$PYTHON_DIST_ID" "$BUILD/runtime/python/current"
 
 log "Relocatable Python environment"
-UV_CACHE_DIR="$BUILD/state/uv-cache" UV_LINK_MODE=copy "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" venv --relocatable --python "$BASE_PY" "$BUILD/env"
+UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" UV_LINK_MODE=copy "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" venv --relocatable --python "$BASE_PY" "$BUILD/env"
 rm -f "$BUILD/env/bin/python" "$BUILD/env/bin/python3" "$BUILD/env/bin/python${PYTHON_MINOR}" "$BUILD/env/bin/.python-real"
 # Keep the real interpreter as a root-relative symlink. Copying a managed Python
 # executable can break $ORIGIN-relative runtime-library lookup after relocation.
@@ -154,12 +163,12 @@ log "Frozen Python analysis layer and offline wheelhouse"
 PIP_BOOT_WHEEL="$BUILD/wheelhouse/pip-26.1.2-py3-none-any.whl"
 fetch "$PIP_BOOTSTRAP_WHEEL_URL" "$PIP_BOOT_WHEEL"
 verify_one "$PIP_BOOT_WHEEL" "$PIP_BOOTSTRAP_WHEEL_SHA256"
-UV_CACHE_DIR="$BUILD/state/uv-cache" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip install --python "$BUILD/env/bin/python" \
+UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip install --python "$BUILD/env/bin/python" \
   --no-index --find-links "$BUILD/wheelhouse" "pip==26.1.2"
-"$BUILD/env/bin/python" -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: --dest "$BUILD/wheelhouse" -r "$BUILD/manifest/requirements.lock"
-UV_CACHE_DIR="$BUILD/state/uv-cache" UV_LINK_MODE=copy "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip sync --python "$BUILD/env/bin/python" \
+PIP_CACHE_DIR="$BUILDER_PIP_CACHE" "$BUILD/env/bin/python" -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: --dest "$BUILD/wheelhouse" -r "$BUILD/manifest/requirements.lock"
+UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" UV_LINK_MODE=copy "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip sync --python "$BUILD/env/bin/python" \
   --require-hashes --no-index --find-links "$BUILD/wheelhouse" "$BUILD/manifest/requirements.lock"
-UV_CACHE_DIR="$BUILD/state/uv-cache" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip check --python "$BUILD/env/bin/python"
+UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip check --python "$BUILD/env/bin/python"
 
 log "Node.js $NODE_VERSION"
 NODE_AR="$DL/node-v${NODE_VERSION}-linux-x64.tar.xz"

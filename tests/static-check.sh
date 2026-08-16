@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-for file in "$ROOT/build.sh" "$ROOT/tests/"*.sh "$ROOT/templates/scripts/"*.sh "$ROOT/templates/bin/agent-env"; do
+for file in "$ROOT/build.sh" "$ROOT/tests/"*.sh "$ROOT/templates/scripts/"*.sh "$ROOT/templates/bin/agent-env" "$ROOT/scripts/normalize-python-links.sh"; do
   bash -n "$file"
 done
 for file in "$ROOT/templates/bin/python-wrapper" "$ROOT/templates/bin/node-wrapper" "$ROOT/templates/bin/npm-wrapper" "$ROOT/templates/bin/npx-wrapper" "$ROOT/scripts/uv-isolated-exec.sh"; do
@@ -71,6 +71,12 @@ grep -F 'verify_one "$PIP_BOOT_WHEEL" "$PIP_BOOTSTRAP_WHEEL_SHA256"' "$ROOT/buil
 # uv build/recovery operations are isolated from project/user selection overrides without suppressing proxy/CA settings.
 grep -F 'UV_NO_CONFIG=1' "$ROOT/scripts/uv-isolated-exec.sh" >/dev/null
 grep -F 'unset UV_PYTHON_DOWNLOADS_JSON_URL' "$ROOT/scripts/uv-isolated-exec.sh" >/dev/null
+# Build-time caches live beside direct-download cache, not in the disposable payload tree.
+grep -F 'BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"' "$ROOT/build.sh" >/dev/null
+grep -F 'UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE"' "$ROOT/build.sh" >/dev/null
+grep -F 'PIP_CACHE_DIR="$BUILDER_PIP_CACHE"' "$ROOT/build.sh" >/dev/null
+# uv-managed absolute convenience links are preserved semantically but made relative.
+grep -F 'normalize-python-links.sh" "$BUILD/runtime/python"' "$ROOT/build.sh" >/dev/null
 # uv-managed Python sysconfig is normalized into a location-neutral, immutable file.
 grep -F '__MAGNET_AGENT_PYTHON_PREFIX__' "$ROOT/scripts/normalize-python-sysconfig.py" >/dev/null
 grep -F "sysconfig.get_config_var('BINDIR')" "$ROOT/templates/scripts/selftest.sh" >/dev/null
@@ -86,5 +92,6 @@ grep -F 'Fresh extraction retained its archive-build location' "$ROOT/build.sh" 
 "$ROOT/tests/github-auth-check.sh"
 "$ROOT/tests/uv-isolation-check.sh"
 "$ROOT/tests/repair-python-check.sh"
+"$ROOT/tests/python-link-relocation-check.sh"
 "$ROOT/tests/sysconfig-relocation-check.sh"
 echo "Builder static checks passed."

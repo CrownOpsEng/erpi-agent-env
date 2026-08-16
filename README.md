@@ -58,7 +58,7 @@ magnet-agent-env-linux-x64-v1.0.0.tar.gz
 magnet-agent-env-linux-x64-v1.0.0.tar.gz.sha256
 ```
 
-Use `./build.sh --help` for output/cache options. Downloads are cached separately from the finished environment so a failed build can be resumed without trusting partial payload files.
+Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under the builder's `.download-cache/`, separate from the finished environment. A failed build can therefore be resumed without redownloading CPython or other already-fetched artifacts and without trusting partial payload files.
 
 ## Acceptance
 

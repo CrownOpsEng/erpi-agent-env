@@ -19,6 +19,8 @@ set -eu
 [ "${HTTPS_PROXY:-}" = "http://proxy.example:8443" ]
 [ "${SSL_CERT_FILE:-}" = "/example/ca.pem" ]
 [ "${UV_SYSTEM_CERTS:-}" = "true" ]
+[ "${UV_CACHE_DIR:-}" = "/persistent/uv-cache" ]
+[ "${UV_PYTHON_CACHE_DIR:-}" = "/persistent/python-cache" ]
 PROBE
 chmod 0755 "$T/probe.sh"
 env \
@@ -32,5 +34,7 @@ env \
   HTTPS_PROXY=http://proxy.example:8443 \
   SSL_CERT_FILE=/example/ca.pem \
   UV_SYSTEM_CERTS=true \
+  UV_CACHE_DIR=/persistent/uv-cache \
+  UV_PYTHON_CACHE_DIR=/persistent/python-cache \
   "$ROOT/scripts/uv-isolated-exec.sh" "$T/probe.sh"
 echo "uv build-isolation check passed."

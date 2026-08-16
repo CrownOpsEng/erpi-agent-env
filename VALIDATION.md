@@ -163,3 +163,9 @@ After the second portability red-team, the builder was simplified and strengthen
 - the pip bootstrap wheel is exact-URL/SHA-256 pinned and verified before any pip code executes.
 
 The next unresolved validation gate remains the only one that matters: a connected full `build.sh` run must reach relocation, offline venv destruction/rebuild, immutable-manifest verification, and fresh archive extraction without bypasses.
+
+## FIXED5 connected-run findings — 2026-08-16
+
+The FIXED4 connected run reused all directly downloaded native assets but re-downloaded uv-managed CPython because `UV_CACHE_DIR` had been placed in the disposable payload worktree. It then reached the absolute-symlink portability gate, which correctly rejected uv's managed-Python minor-version alias (`cpython-3.13-linux-x86_64-gnu`) because uv had created it as an absolute link to the exact `cpython-3.13.14-linux-x86_64-gnu` directory.
+
+FIXED5 moves builder-only uv and managed-Python archive caches plus pip's download cache under `.download-cache/`. These caches are outside the output payload and survive failed/repeated builds. It also normalizes only top-level managed-Python absolute aliases whose targets stay inside the same managed-Python root to equivalent relative links; external absolute links fail closed. `tests/python-link-relocation-check.sh` behaviorally verifies the in-root rewrite and external-target refusal.

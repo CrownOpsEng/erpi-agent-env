@@ -130,3 +130,12 @@ The architecture was re-audited against current uv 0.12.5 source, python-build-s
 - The runtime contract is explicit: GNU/Linux x86-64, kernel >= 4.18, glibc >= 2.28, and a Node-compatible libstdc++ exposing GLIBCXX_3.4.25.
 
 Rejected again: direct `uv pip --system` installation (would make relocatable package entrypoints our problem), conda/conda-pack, generic relocators, runtime-Python reconstruction, and broader custom repair frameworks. One narrow metadata repair plus uv's native relocation remains the higher-leverage design.
+
+## FIXED5 cache/topology correction — 2026-08-16
+
+The first FIXED4 connected run showed two narrow issues before relocation:
+
+- uv's managed-Python download cache was incorrectly located under the disposable build payload, so every new build downloaded CPython again even though direct native assets reused `.download-cache`;
+- uv created its normal top-level minor-version managed-Python alias as an absolute symlink to the exact patch-version directory, which correctly failed the bundle's absolute-symlink gate.
+
+Corrections remain native/minimal. Build-time `UV_CACHE_DIR`, `UV_PYTHON_CACHE_DIR`, and pip cache now live under the builder's existing `.download-cache/` and are never shipped. uv therefore remains responsible for fetching and hash-validating its managed Python, but repeat builds can reuse the cached archive. The managed-Python convenience alias is preserved, not deleted: if an absolute top-level link resolves inside the same managed-Python root it is rewritten to the equivalent relative target; an external absolute target fails closed. A synthetic behavioral test proves both cases.
