@@ -46,6 +46,8 @@ jobs:
       - name: Validate release version
         if: env.RELEASE_TAG != ''
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           source ./versions.env
@@ -55,7 +57,7 @@ jobs:
             exit 1
           }
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null || {
-            echo "Release $RELEASE_TAG does not exist." >&2
+            echo "Release $RELEASE_TAG does not exist or is not accessible." >&2
             exit 1
           }
 

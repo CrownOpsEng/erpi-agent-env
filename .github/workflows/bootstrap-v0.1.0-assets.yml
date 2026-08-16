@@ -20,6 +20,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # One-time bootstrap for the release created before the durable publisher existed.
           gh workflow run build-dist.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
