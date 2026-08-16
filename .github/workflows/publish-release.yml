@@ -106,13 +106,21 @@ jobs:
             echo "Created release tag $release_tag at accepted target $target_sha."
           fi
 
-          existing_draft="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --jq ".[] | select(.tag_name == \"$release_tag\") | .draft" | sed -n '1p')"
-          if [[ -n "$existing_draft" ]]; then
-            [[ "$existing_draft" == true ]] || {
+          existing="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$release_tag\") | [.draft,.target_commitish] | @tsv" | sed -n '1p')"
+          if [[ -n "$existing" ]]; then
+            IFS=$'\t' read -r is_draft release_target <<<"$existing"
+            [[ "$is_draft" == true ]] || {
               echo "Release $release_tag is already published; refusing to recreate or modify it." >&2
               exit 1
             }
+            if [[ "$release_target" != "$target_sha" ]]; then
+              gh release edit "$release_tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --target "$target_sha" \
+                --draft=true >/dev/null
+              echo "Realigned draft release $release_tag metadata to accepted target $target_sha."
+            fi
             echo "Reusing matching draft release $release_tag."
           else
             gh release create "$release_tag" \

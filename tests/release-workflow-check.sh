@@ -17,6 +17,7 @@ grep -F '"ref=refs/tags/$release_tag"' "$PUBLISH" >/dev/null
 grep -F '"sha=$target_sha"' "$PUBLISH" >/dev/null
 grep -F -- '--verify-tag' "$PUBLISH" >/dev/null
 grep -F -- '--draft' "$PUBLISH" >/dev/null
+grep -F 'Realigned draft release' "$PUBLISH" >/dev/null
 grep -F 'Reusing matching draft release' "$PUBLISH" >/dev/null
 grep -F 'gh workflow run build-dist.yml' "$PUBLISH" >/dev/null
 
