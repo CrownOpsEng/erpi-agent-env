@@ -17,8 +17,44 @@ export PATH="$ROOT/env/bin:$ROOT/bin:$UV_TOOL_BIN_DIR:$NPM_CONFIG_PREFIX/bin:$PA
 
 "$ROOT/scripts/repair-python.sh" --quiet
 python - <<'PY'
-import pathlib, sys, sysconfig
+import csv
+import pathlib
+import sys
+import sysconfig
+
 root = pathlib.Path(__import__('os').environ['MAGNET_AGENT_ENV']).resolve()
+site_packages = pathlib.Path(sysconfig.get_path('purelib')).resolve()
+assert site_packages.is_relative_to(root / 'env'), (site_packages, root)
+
+# uv writes optional install-cache metadata with the current installation
+# timestamp. It is useful to uv as a cache hint but is not runtime behavior and
+# makes an otherwise identical offline rebuild differ byte-for-byte. Canonicalize
+# the installed environment by removing that non-deterministic metadata and its
+# corresponding RECORD row. RECORD does not hash itself, so the remaining wheel
+# contents retain their original recorded hashes.
+for dist_info in sorted(site_packages.glob('*.dist-info')):
+    cache_path = dist_info / 'uv_cache.json'
+    record_path = dist_info / 'RECORD'
+    cache_record = f'{dist_info.name}/uv_cache.json'
+
+    if cache_path.exists() or cache_path.is_symlink():
+        cache_path.unlink()
+
+    if record_path.is_file():
+        with record_path.open('r', encoding='utf-8', newline='') as handle:
+            rows = list(csv.reader(handle))
+        kept = [row for row in rows if not (row and row[0] == cache_record)]
+        if len(kept) != len(rows):
+            with record_path.open('w', encoding='utf-8', newline='') as handle:
+                csv.writer(handle, lineterminator='\n').writerows(kept)
+
+for cache_path in site_packages.glob('*.dist-info/uv_cache.json'):
+    raise AssertionError(f'uv cache metadata remains: {cache_path}')
+for record_path in site_packages.glob('*.dist-info/RECORD'):
+    with record_path.open('r', encoding='utf-8', newline='') as handle:
+        for row in csv.reader(handle):
+            assert not (row and row[0].endswith('.dist-info/uv_cache.json')), record_path
+
 assert pathlib.Path(sys.prefix).resolve() == root / 'env', (sys.prefix, root)
 base = (root / 'runtime/python/current').resolve()
 bindir = pathlib.Path(sysconfig.get_config_var('BINDIR')).resolve()

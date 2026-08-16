@@ -89,6 +89,16 @@ grep -F 'import httpx, jsonschema, packaging, yaml, tomlkit, pytest, rpds' "$ROO
 grep -F 'from yaml import CLoader' "$ROOT/templates/scripts/selftest.sh" >/dev/null
 grep -Fx 'pytest --version >/dev/null' "$ROOT/templates/scripts/selftest.sh" >/dev/null
 grep -Fx 'pip --version >/dev/null' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+# Offline rebuilds must canonicalize uv's timestamp-bearing installer metadata before integrity verification.
+grep -F "cache_path = dist_info / 'uv_cache.json'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F "cache_record = f'{dist_info.name}/uv_cache.json'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F "csv.writer(handle, lineterminator='\\n').writerows(kept)" "$ROOT/templates/scripts/selftest.sh" >/dev/null
+selftest_line="$(grep -nF '"$ROOT/scripts/selftest.sh"' "$ROOT/templates/scripts/rebuild-python.sh" | cut -d: -f1)"
+verify_line="$(grep -nF '"$ROOT/scripts/verify.sh"' "$ROOT/templates/scripts/rebuild-python.sh" | cut -d: -f1)"
+[[ -n "$selftest_line" && -n "$verify_line" && "$selftest_line" -lt "$verify_line" ]] || {
+  echo "Offline rebuild must canonicalize through selftest before immutable verification." >&2
+  exit 1
+}
 # pyvenv.cfg is the sole relocation-mutable venv file: preserve uv metadata and patch only `home`.
 grep -F -- "--exclude='pyvenv.cfg' \"\$ORIGINAL_BUILD_ROOT\"" "$ROOT/build.sh" >/dev/null
 ! grep -F 'executable = $PYROOT_LINK' "$ROOT/templates/scripts/repair-python.sh"
