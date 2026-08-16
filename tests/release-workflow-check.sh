@@ -10,14 +10,28 @@ for file in "$PUBLISH" "$BUILD" "$README" "$AGENTS"; do
   [[ -s "$file" ]] || { echo "Required release-routing source missing: $file" >&2; exit 1; }
 done
 
-# Release creation must stop at a recoverable draft until accepted assets exist.
+# An exact lightweight tag must exist before the draft is created so tagged
+# distribution checkout is a real Git ref, not only draft release metadata.
+grep -F 'git/ref/tags/$release_tag' "$PUBLISH" >/dev/null
+grep -F '"ref=refs/tags/$release_tag"' "$PUBLISH" >/dev/null
+grep -F '"sha=$target_sha"' "$PUBLISH" >/dev/null
+grep -F -- '--verify-tag' "$PUBLISH" >/dev/null
 grep -F -- '--draft' "$PUBLISH" >/dev/null
 grep -F 'Reusing matching draft release' "$PUBLISH" >/dev/null
 grep -F 'gh workflow run build-dist.yml' "$PUBLISH" >/dev/null
 
-# Distribution builds may repair draft assets, but must never replace a published release.
-grep -F 'refusing to replace published assets' "$BUILD" >/dev/null
-grep -F 'Reconfirm draft release' "$BUILD" >/dev/null
+tag_line="$(grep -nF '"ref=refs/tags/$release_tag"' "$PUBLISH" | cut -d: -f1)"
+draft_line="$(grep -nF -- '--draft' "$PUBLISH" | cut -d: -f1)"
+[[ -n "$tag_line" && -n "$draft_line" && "$tag_line" -lt "$draft_line" ]] || {
+  echo "Release tag must be created/verified before draft Release creation." >&2
+  exit 1
+}
+
+# Distribution builds verify the exact tag source, may repair draft assets, and
+# must never replace a published release.
+grep -F 'git/ref/tags/$RELEASE_TAG' "$BUILD" >/dev/null
+grep -F 'not checked-out source' "$BUILD" >/dev/null
+grep -F 'refusing to alter published assets' "$BUILD" >/dev/null
 grep -F 'gh release upload "$RELEASE_TAG"' "$BUILD" >/dev/null
 grep -F 'gh release edit "$RELEASE_TAG" --draft=false' "$BUILD" >/dev/null
 

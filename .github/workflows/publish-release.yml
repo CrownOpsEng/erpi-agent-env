@@ -64,7 +64,7 @@ jobs:
           persist-credentials: false
           ref: ${{ steps.request.outputs.target_ref }}
 
-      - name: Verify acceptance and prepare draft release
+      - name: Verify acceptance and prepare release tag/draft
         id: release
         shell: bash
         env:
@@ -91,21 +91,33 @@ jobs:
             exit 1
           }
 
-          existing="$(gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" \
-            --json isDraft,targetCommitish \
-            --jq '[.isDraft,.targetCommitish] | @tsv' 2>/dev/null || true)"
+          tag_sha="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" --jq .object.sha 2>/dev/null || true)"
+          if [[ -n "$tag_sha" ]]; then
+            [[ "$tag_sha" == "$target_sha" ]] || {
+              echo "Tag $release_tag already points to $tag_sha, not accepted target $target_sha." >&2
+              exit 1
+            }
+            echo "Release tag $release_tag already points to accepted target $target_sha."
+          else
+            gh api --method POST \
+              "/repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=refs/tags/$release_tag" \
+              -f "sha=$target_sha" >/dev/null
+            echo "Created release tag $release_tag at accepted target $target_sha."
+          fi
 
-          if [[ -n "$existing" ]]; then
-            IFS=$'\t' read -r is_draft release_target <<<"$existing"
-            [[ "$is_draft" == true && "$release_target" == "$target_sha" ]] || {
-              echo "Release $release_tag already exists but is not the matching recoverable draft for $target_sha." >&2
+          existing_draft="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$release_tag\") | .draft" | sed -n '1p')"
+          if [[ -n "$existing_draft" ]]; then
+            [[ "$existing_draft" == true ]] || {
+              echo "Release $release_tag is already published; refusing to recreate or modify it." >&2
               exit 1
             }
             echo "Reusing matching draft release $release_tag."
           else
             gh release create "$release_tag" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$target_sha" \
+              --verify-tag \
               --title "$release_tag" \
               --generate-notes \
               --draft

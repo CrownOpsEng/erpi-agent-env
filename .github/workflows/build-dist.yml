@@ -56,20 +56,16 @@ jobs:
             exit 1
           }
 
-          release_info="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --json isDraft,targetCommitish \
-            --jq '[.isDraft,.targetCommitish] | @tsv' 2>/dev/null || true)"
-          [[ -n "$release_info" ]] || {
-            echo "Draft release $RELEASE_TAG does not exist or is not accessible." >&2
+          tag_sha="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha 2>/dev/null || true)"
+          [[ "$tag_sha" == "$source_sha" ]] || {
+            echo "Release tag $RELEASE_TAG resolves to ${tag_sha:-missing}, not checked-out source $source_sha." >&2
             exit 1
           }
-          IFS=$'\t' read -r is_draft release_target <<<"$release_info"
+
+          is_draft="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .draft" | sed -n '1p')"
           [[ "$is_draft" == true ]] || {
-            echo "Release $RELEASE_TAG is already published; refusing to replace published assets." >&2
-            exit 1
-          }
-          [[ "$release_target" == "$source_sha" ]] || {
-            echo "Draft release $RELEASE_TAG targets $release_target, not checked-out source $source_sha." >&2
+            echo "Release $RELEASE_TAG does not exist as a mutable draft." >&2
             exit 1
           }
 
@@ -121,7 +117,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          is_draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+          is_draft="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .draft" | sed -n '1p')"
           [[ "$is_draft" == true ]] || {
             echo "Release $RELEASE_TAG stopped being a draft during the build; refusing to alter published assets." >&2
             exit 1
