@@ -70,18 +70,20 @@ The builder does not report success unless it:
 4. verifies the source-frozen hashed Python lock and creates an offline wheelhouse without resolving dependency versions;
 5. rejects absolute symlinks and old build-root residue;
 6. relocates to a deep path containing spaces and Unicode and self-tests;
-7. destroys/rebuilds the Python venv offline and self-tests again;
+7. destroys/rebuilds the Python venv offline, canonicalizes uv's optional timestamp-bearing install metadata, and self-tests again before immutable verification;
 8. emits and verifies immutable-file and symlink manifests;
 9. directly exercises uv-generated `pip`/`pytest` console entrypoints and compiled Python extensions after relocation/rebuild;
 10. archives, freshly extracts, self-tests and verifies the final artifact.
 
-See `VALIDATION.md` for source-level evidence, connected-host acceptance, and the accepted v1.0.0 artifact checksum.
+See `VALIDATION.md` for source-level evidence, connected-host acceptance, and release-candidate artifact checksums.
 
 ## Python lock and build isolation
 
 `requirements.lock` is an input to v1, not generated during hydration. It is the exact 21-package hashed resolution captured from the first connected build under the recorded cutoff, and its own SHA-256 is pinned in `versions.env`. Updating that lock is therefore an intentional builder-version change rather than an ambient resolver event.
 
 Builder/recovery uv invocations run through a small isolation wrapper that ignores project/user uv configuration and Python artifact-selection overrides while preserving ordinary proxy and CA/system-certificate transport settings. The one temporary pip bootstrap wheel is fetched from its exact PyPI file URL and SHA-256 verified before any pip code executes; it then remains in the offline wheelhouse.
+
+uv also writes optional `*.dist-info/uv_cache.json` installer-cache metadata containing the installation timestamp. Runtime self-test removes that nonfunctional cache record and its corresponding `RECORD` row, so an offline rebuild restores the same checksum-covered venv rather than differing only because it happened later.
 
 ## Security boundary
 
@@ -91,9 +93,10 @@ Ad-hoc UV Python installs, UV tools, npm globals and caches are redirected to `s
 
 ## Repository automation
 
-Two GitHub Actions workflows keep the repository useful without turning it into a CI project:
+This repository is intentionally **direct-to-`main`**. Pull requests remain available when explicit review or isolation is useful, but they are not required for the normal single-owner workflow. Three GitHub Actions workflows provide the safety boundary instead:
 
-- **Validate** runs `./tests/static-check.sh` on pushes to `main` and pull requests.
-- **Build distribution** is manual (`workflow_dispatch`). It restores the persistent builder download cache, runs the source checks, executes the full hydration/relocation/offline-rebuild/archive acceptance sequence, and uploads the `.tar.gz` plus `.sha256` as a GitHub Actions artifact.
+- **Validate** runs `./tests/static-check.sh` on every push to `main` and can also be run manually.
+- **Accept runtime** runs the full hydration → relocation → offline destruction/rebuild → archive/extraction acceptance sequence after payload-affecting pushes to `main`. It records the resulting digest but does not publish the 154 MB artifact.
+- **Build distribution** is manual or runs when a GitHub Release is published. It repeats the full acceptance build, uploads the `.tar.gz` plus `.sha256` as an Actions artifact, and attaches those files to the Release when release-triggered.
 
-Use the distribution workflow when a payload-producing source change lands or when a fresh package is needed. Ordinary documentation and policy changes only need the lightweight validation workflow.
+This keeps ordinary documentation/policy commits lightweight, gives direct-to-main payload changes a real post-push integration proof, and keeps distribution creation an explicit release concern.

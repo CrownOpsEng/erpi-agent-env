@@ -7,8 +7,9 @@ Before changing builder/runtime source:
 1. Read `README.md` and the directly affected files.
 2. Preserve the fail-closed portability, integrity, credential-isolation, and offline-recovery boundaries already encoded by the tests.
 3. Run `./tests/static-check.sh` after every source change.
-4. For changes that can affect the hydrated payload, run `./build.sh` or the repository distribution workflow before release.
+4. For changes that can affect the hydrated payload, run `./build.sh` or rely on the repository runtime-acceptance workflow before release.
 5. Never commit `dist/`, `.download-cache/`, credentials, or runtime-generated state.
 6. Use the commit convention in `CONTRIBUTING.md`.
+7. The default change flow is direct to `main`. Do not create a pull request unless the user explicitly asks for review or isolation; make coherent commits and inspect the resulting CI instead.
 
 Keep this file short. Detailed behavior belongs in the code, tests, `README.md`, `BUILD-REVIEW.md`, and `VALIDATION.md`.

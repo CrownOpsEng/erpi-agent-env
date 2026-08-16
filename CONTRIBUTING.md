@@ -1,5 +1,13 @@
 # Contributing
 
+## Change flow
+
+This repository is intentionally direct-to-`main`. It is a small, single-purpose builder repository with immediate automated validation, so mandatory pull requests would add ceremony without creating a meaningful approval boundary.
+
+Use one coherent commit per change when practical and inspect the resulting GitHub Actions runs after pushing. Pull requests remain available when explicit review, temporary isolation, or multi-contributor coordination is useful; they are not the default path.
+
+Payload-affecting pushes to `main` automatically run the full runtime acceptance build. Distribution publishing remains separate and happens through the **Build distribution** workflow manually or when a GitHub Release is published.
+
 ## Commit messages
 
 Use Conventional Commits:
@@ -37,4 +45,4 @@ For changes that may alter the produced runtime or its portability/integrity beh
 ./build.sh
 ```
 
-The full builder acceptance sequence is intentionally stronger than the lightweight source checks; see `VALIDATION.md`.
+A payload-affecting direct push to `main` runs that full acceptance sequence automatically in CI, so local hydration is optional when the GitHub runner is the intended proof. The full builder acceptance sequence is intentionally stronger than the lightweight source checks; see `VALIDATION.md`.
