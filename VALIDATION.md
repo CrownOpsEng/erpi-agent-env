@@ -1,7 +1,7 @@
 # Validation record
 
 Date: 2026-08-16 (America/Edmonton)  
-Status: **accepted release candidate: source validation, connected hydration, relocation, deterministic offline recovery, immutable verification, Git/GitHub transport behavior, and GitHub CI runtime acceptance complete; v1.0.0 is not yet tagged or published**
+Status: **accepted release candidate: source validation, connected hydration, relocation, deterministic offline recovery, immutable verification, Git/GitHub transport behavior, shell-network routing, and GitHub CI runtime acceptance complete; v1.0.0 is not yet tagged or published**
 
 ## Validation philosophy
 
@@ -36,6 +36,7 @@ The current `./tests/static-check.sh` suite validates, among other things:
 - credential isolation (`GH_CONFIG_DIR` is never redirected into the bundle);
 - mutable-state routing for ad-hoc uv/Python/npm activity;
 - correct immutable-verification exclusions for declared runtime state;
+- GitHub shell-network classification before credential/OAuth handling, including distinct exit `3` and no-retry guidance;
 - GitHub authentication state-machine behavior;
 - browser/device OAuth with GitHub CLI terminal prompting disabled;
 - repo-local, location-neutral HTTPS Git credential bridging through `!gh auth git-credential`;
@@ -157,7 +158,7 @@ SHA-256: 5da38faed7287908e5094b20aafdd53d158c11d324bda23984756f71017d18ea
 Size: 154M
 ```
 
-That artifact remains valid historical acceptance evidence but is superseded by the later Git/GitHub integration correction because runtime contents changed.
+That artifact remains valid historical acceptance evidence but is superseded by later Git/GitHub integration corrections because runtime contents changed.
 
 ## ChatGPT-shell functionality and Git transport audit — 2026-08-16
 
@@ -165,19 +166,29 @@ A hydrated FIXED6 artifact was exercised directly inside a ChatGPT execution fil
 
 The portable payload itself passed checksum verification, traversal-safe extraction, relocation to deep paths containing spaces and Unicode, zero absolute immutable symlinks, `agent-env selftest`, `agent-env verify`, and `agent-env doctor --json`. Actual behavioral probes also passed for the locked Python packages and compiled extensions, pytest, Node/npm/npx, jq, yq, ripgrep, actionlint, and gitleaks. Mutable uv/npm state was exercised without changing immutable verification.
 
-Host Git was tested independently of GitHub: normal repository initialization, commit, branch creation, and push to a local bare remote all worked. A real GitHub `git ls-remote` failed before authentication because the execution host could not resolve/reach `github.com`. Likewise, the bundled `gh 2.97.0` executed correctly and `agent-env github` correctly reported the absence of a credential source, but interactive OAuth could not reach GitHub from this host. In this execution environment the GitHub connector is therefore the usable remote-GitHub transport. This is a host sandbox/network boundary; the bundle does not and should not attempt to bypass it.
+Host Git was tested independently of GitHub: normal repository initialization, commit, branch creation, and push to a local bare remote all worked. A real GitHub `git ls-remote` failed before authentication because the execution host could not resolve/reach `github.com`. The bundled `gh 2.97.0` itself executed correctly. Before the shell-network correction, `agent-env github` could see that no credential source existed and recommend OAuth before separately establishing that this host could not reach GitHub; that was potentially misleading even though the underlying limitation was correctly documented as a host boundary.
 
 The audit also exposed a separate portability issue in the standard GitHub CLI Git-helper setup: it can persist the current absolute `gh` executable path into host-global Git configuration. That is inappropriate for a relocatable payload and could leave Git API authentication working while normal HTTPS Git transport is either unconfigured or coupled to an old extraction path.
 
-Current source now separates those concerns deliberately. `agent-env github-auth` starts browser/device OAuth with GitHub CLI terminal prompting disabled so the bundle does not write a location-specific global helper. For an HTTPS GitHub worktree, `agent-env github-git` installs only a repository-local, location-neutral `!gh auth git-credential` helper and proves the authenticated receive/policy path with `git push --dry-run --no-verify`. The helper was behaviorally tested with a synthetic credential before and after physically moving the bundled `gh` executable; the credential result remained identical and global Git credential configuration remained untouched. SSH remotes continue to rely on host SSH credentials.
+Current source separates those concerns deliberately. `agent-env github-auth` starts browser/device OAuth with GitHub CLI terminal prompting disabled so the bundle does not write a location-specific global helper. For an HTTPS GitHub worktree, `agent-env github-git` installs only a repository-local, location-neutral `!gh auth git-credential` helper and proves the authenticated receive/policy path with `git push --dry-run --no-verify`. The helper was behaviorally tested with a synthetic credential before and after physically moving the bundled `gh` executable; the credential result remained identical and global Git credential configuration remained untouched. SSH remotes continue to rely on host SSH credentials.
 
 The same audit confirmed one intended boundary: populated mutable `state/` is not part of the relocation contract. An ad-hoc uv tool install can contain location-specific links after state has been populated. This does not affect the shipped immutable runtime, and the distributable archive always starts with pristine empty state; affected ad-hoc state should simply be recreated after moving an already-used bundle.
 
-The latest lightweight validation run `31940312629` / job `95148406208` passed the expanded GitHub auth and Git transport suite. The latest full runtime acceptance run `31940312646` / job `95148406310`, against commit `c2679035e845702404c47bd50679b0152aa241ea`, then passed the complete cached build, relocation, runtime self-test, offline destruction/rebuild, immutable verification, and fresh extraction sequence. The current v1.0.0 release candidate produced by that run is:
+The Git/GitHub integration candidate produced by run `31940312646` / job `95148406310` had SHA-256 `c280390c3df243e300cbe5b49e50d38a74352eee44feee4d27fee8b1b419ad23`. It remains valid historical acceptance evidence but is superseded by the shell-network routing correction below.
+
+## Shell-network routing correction — 2026-08-16
+
+Commit `c6279b91e74ed52dd2a9d5d0501235e8a0c32882` makes GitHub shell reachability a first-class runtime state rather than inferring it from later auth failures. `agent-env github` now performs a short HTTPS probe to `api.github.com` before credential/OAuth handling. The probe uses the bundled Python/httpx stack, honors normal host proxy/CA environment, and requires a GitHub request identifier so a generic host-policy response is not mistaken for GitHub reachability.
+
+If that probe fails, `agent-env github`, `agent-env github-auth`, and `agent-env github-git` return distinct exit status `3` before attempting OAuth or GitHub Git transport. Their diagnostic explicitly says the host/sandbox cannot currently reach GitHub from shell commands, instructs the agent not to retry `gh` authentication/API calls or GitHub `git fetch/push` unless the host/network changes, preserves local Git as usable, and directs the agent to a platform GitHub connector/app when available. The root `AGENTS.md` router tells the model to treat that result as session-scoped and stop retrying. The README records the same boundary while explicitly avoiding a hardcoded assumption that all ChatGPT/agent hosts behave identically.
+
+The production probe was exercised directly inside the ChatGPT execution filesystem using the actual hydrated bundle's Python and `gh`; it returned exit `3` with the expected no-retry/connector guidance and made no OAuth attempt. The deterministic behavioral suite separately mocks both reachable and blocked network states so CI does not depend on its own external networking. Lightweight Validate run `31941019402` / job `95150113470` passed.
+
+Full runtime acceptance run `31941019483` / job `95150113614`, against `c6279b91e74ed52dd2a9d5d0501235e8a0c32882`, also passed the complete cached build, relocation torture test, runtime self-test, offline Python destruction/rebuild, immutable verification, archive creation, and fresh extraction proof. The current v1.0.0 release candidate is therefore:
 
 ```text
 magnet-agent-env-linux-x64-v1.0.0.tar.gz
-SHA-256: c280390c3df243e300cbe5b49e50d38a74352eee44feee4d27fee8b1b419ad23
+SHA-256: 4409d5761bc3171bbb4c440da58deff73c098e52e8f220f702d3d5355b0a4b14
 Size: 154M
 ```
 
