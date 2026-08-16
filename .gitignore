@@ -1,0 +1,14 @@
+# Builder outputs and persistent download caches
+.download-cache/
+dist/
+
+# Python/editor scratch
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# OS/editor noise
+.DS_Store
+*.swp
+*~
