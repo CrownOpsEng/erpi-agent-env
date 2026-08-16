@@ -110,7 +110,7 @@ Do not copy tokens, SSH keys, `.npmrc` credentials, cloud credentials or product
 
 The bundle may be moved to a different pathname on a **compatible Linux x86-64 glibc host**. It is not cross-OS or cross-architecture.
 
-The environment combines `uv venv --relocatable` with a location-aware Python wrapper because the venv still needs to identify its bundled base interpreter after relocation. Build-time tests reject absolute symlinks and stale references to the original build path, then move, self-test, destroy/rebuild the Python venv offline, archive, extract and test again.
+The environment combines `uv venv --relocatable` with a location-aware Python wrapper because the venv still needs to identify its bundled base interpreter after relocation. The builder also normalizes uv-managed Python sysconfig install-prefix metadata into a location-neutral form, so `sysconfig` continues to resolve the relocated bundled runtime correctly without making that file mutable. Build-time tests reject absolute symlinks and stale references to prior build locations, then move, self-test, destroy/rebuild the Python venv offline, archive, extract and test again.
 
 Prefer the supplied `.tar.gz` artifact. Tar reliably preserves executable permissions and symlinks; ZIP extraction behavior varies across hosts.
 

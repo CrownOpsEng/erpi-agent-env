@@ -17,9 +17,15 @@ export PATH="$ROOT/env/bin:$ROOT/bin:$UV_TOOL_BIN_DIR:$NPM_CONFIG_PREFIX/bin:$PA
 
 "$ROOT/scripts/repair-python.sh" --quiet
 python - <<'PY'
-import pathlib, sys
+import pathlib, sys, sysconfig
 root = pathlib.Path(__import__('os').environ['MAGNET_AGENT_ENV']).resolve()
 assert pathlib.Path(sys.prefix).resolve() == root / 'env', (sys.prefix, root)
+base = (root / 'runtime/python/current').resolve()
+bindir = pathlib.Path(sysconfig.get_config_var('BINDIR')).resolve()
+libdir = pathlib.Path(sysconfig.get_config_var('LIBDIR')).resolve()
+assert bindir == base / 'bin', (bindir, base)
+assert libdir == base / 'lib', (libdir, base)
+assert '__MAGNET_AGENT_PYTHON_PREFIX__' not in repr(sysconfig.get_config_vars())
 import httpx, jsonschema, packaging, yaml, tomlkit, pytest  # noqa: F401
 print('python-ok', sys.version.split()[0])
 PY

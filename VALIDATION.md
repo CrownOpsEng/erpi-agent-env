@@ -142,3 +142,9 @@ The corrected builder passed its static suite and was runtime-probed far enough 
 The build progressed successfully through uv 0.12.5, CPython 3.13.14, creation and population of the relocatable Python environment and offline wheelhouse, Node.js 24.19.0, GitHub CLI 2.97.0, and jq 1.8.2. It then stopped before downloading yq because the builder incorrectly treated yq's multi-algorithm `rhash` `checksums` table as a two-column SHA-256 manifest.
 
 The correction removes the checksum-table dependency entirely and pins `yq_linux_amd64` directly to GitHub's immutable v4.53.3 release-asset SHA-256 (`fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4`). The same pass removed remaining `| head` pipelines from runtime scripts under `set -o pipefail` and made broken-symlink verification consistently ignore mutable `state/`.
+
+### Live hydration portability-gate finding — 2026-08-16
+
+A connected Ubuntu 24.04 / glibc 2.39 x86-64 hydration run successfully completed Python 3.13.14, the hashed wheelhouse and environment sync, Node 24.19.0, gh 2.97.0, jq 1.8.2, yq 4.53.3, ripgrep 15.2.0, actionlint 1.7.12, and gitleaks 8.30.1. The pre-relocation residue gate then correctly exposed three absolute-path locations: the uv-annotated requirements lock, uv-installed Python `_sysconfigdata_*.py`, and the deliberately mutable `env/pyvenv.cfg`.
+
+The builder was revised to make the lock annotation-free, normalize uv's install-prefix sysconfig data into an immutable location-neutral form, and model `pyvenv.cfg` correctly as relocation metadata: permitted to name the current location before a move, repaired immediately after a move, and then included in stale-path rejection. The archive/extraction proof now also rejects any surviving reference to the archive-build location.

@@ -104,3 +104,13 @@ These were considered and rejected for v1 because they do not earn their cost ye
 ## Acceptance threshold
 
 Do not call a hydrated v1 bundle accepted unless `build.sh` completes every native checksum, relocation, offline Python destruction/rebuild, old-build-path scan, immutable verification, and fresh archive-extraction proof without bypasses.
+
+## Hydration red-team findings — 2026-08-16
+
+The first live hydration run reached the portability gate and surfaced three absolute-path residues rather than packaging them:
+
+- `manifest/requirements.lock` contained uv annotation comments naming the absolute input requirements path;
+- `env/pyvenv.cfg` correctly contained the current absolute base-Python location, but the pre-move gate had incorrectly begun treating that declared mutable relocation metadata as immutable residue;
+- uv-managed python-build-standalone `_sysconfigdata_*.py` contained the Python installation prefix. This is expected from uv's install-time sysconfig patching, but it would become stale after moving the complete Python installation.
+
+Corrections are deliberately narrow: compile locks with `--no-annotate`; exclude only `pyvenv.cfg` from the pre-move stale-root scan and require it clean after repair; normalize the installed Python prefix inside `_sysconfigdata_*.py` to a location-neutral sentinel resolved from that module's current location at import time. The normalized sysconfig file remains immutable and checksum-covered. Runtime self-test now proves `BINDIR` and `LIBDIR` resolve to the relocated bundled Python root, and fresh archive extraction must contain no reference to the archive-build location.

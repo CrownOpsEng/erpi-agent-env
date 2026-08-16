@@ -8,6 +8,7 @@ for file in "$ROOT/templates/bin/python-wrapper" "$ROOT/templates/bin/node-wrapp
   sh -n "$file"
 done
 python3 -m py_compile "$ROOT/templates/scripts/doctor.py"
+python3 -m py_compile "$ROOT/scripts/normalize-python-sysconfig.py"
 python3 - <<'PY' "$ROOT/versions.env"
 import re, sys
 text=open(sys.argv[1], encoding='utf-8').read()
@@ -15,7 +16,7 @@ for name, value in re.findall(r'^(\w+_SHA256)="([0-9a-f]+)"$', text, flags=re.M)
     assert len(value) == 64, (name, value)
 print('hash-shapes-ok')
 PY
-rm -rf "$ROOT/templates/scripts/__pycache__"
+rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
 for file in templates/AGENTS.md templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/bin/agent-env; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime source missing: $file" >&2; exit 1; }
 done
@@ -44,4 +45,13 @@ grep -F 'YQ_SHA256="fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789e
 ! grep -R -nE 'YQ_CHECKSUMS_SHA256|YQ_HASH|yq-checksums|awk.*yq_linux_amd64' "$ROOT/build.sh" "$ROOT/versions.env"
 grep -F "find . -xtype l ! -path './state/*'" "$ROOT/templates/scripts/verify.sh" >/dev/null
 "$ROOT/tests/github-auth-check.sh"
+"$ROOT/tests/sysconfig-relocation-check.sh"
+# Lock annotations can leak absolute builder paths; keep the runtime lock annotation-free.
+grep -F -- '--no-annotate' "$ROOT/build.sh" >/dev/null
+# uv-managed Python sysconfig is normalized into a location-neutral, immutable file.
+grep -F '__MAGNET_AGENT_PYTHON_PREFIX__' "$ROOT/scripts/normalize-python-sysconfig.py" >/dev/null
+grep -F "sysconfig.get_config_var('BINDIR')" "$ROOT/templates/scripts/selftest.sh" >/dev/null
+# pyvenv.cfg may name the current location before first move; stale locations are forbidden after repair.
+grep -F -- "--exclude='pyvenv.cfg' \"\$ORIGINAL_BUILD_ROOT\"" "$ROOT/build.sh" >/dev/null
+grep -F 'Fresh extraction retained its archive-build location' "$ROOT/build.sh" >/dev/null
 echo "Builder static checks passed."
