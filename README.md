@@ -88,3 +88,12 @@ Builder/recovery uv invocations run through a small isolation wrapper that ignor
 This increases the commands an agent can execute **inside permissions the sandbox already grants**. It cannot create network access, a Docker daemon, credentials, kernel capabilities, or filesystem permissions that the host denies.
 
 Ad-hoc UV Python installs, UV tools, npm globals and caches are redirected to `state/` so they do not mutate the verified bundled runtimes. Build-time self-tests intentionally exercise that state, but the distributable archive is always produced with a pristine empty `state/` tree; runtime caches are first-use state, not payload. Do not place credentials or production secrets inside the bundle.
+
+## Repository automation
+
+Two GitHub Actions workflows keep the repository useful without turning it into a CI project:
+
+- **Validate** runs `./tests/static-check.sh` on pushes to `main` and pull requests.
+- **Build distribution** is manual (`workflow_dispatch`). It restores the persistent builder download cache, runs the source checks, executes the full hydration/relocation/offline-rebuild/archive acceptance sequence, and uploads the `.tar.gz` plus `.sha256` as a GitHub Actions artifact.
+
+Use the distribution workflow when a payload-producing source change lands or when a fresh package is needed. Ordinary documentation and policy changes only need the lightweight validation workflow.
