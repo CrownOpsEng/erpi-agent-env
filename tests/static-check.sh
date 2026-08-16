@@ -47,9 +47,12 @@ fi
 # Ad-hoc package/runtime installation belongs in mutable state rather than verified payload directories.
 grep -F 'UV_PYTHON_INSTALL_DIR="$MAGNET_AGENT_ENV/state/uv-python"' "$ROOT/templates/activate" >/dev/null
 grep -F 'NPM_CONFIG_PREFIX="$MAGNET_AGENT_ENV/state/npm-global"' "$ROOT/templates/activate" >/dev/null
-# Mutable state is outside immutable payload verification/topology.
+# Mutable state is outside immutable payload verification/topology and is pristine in the distributed archive.
 grep -F "! -path './state/*'" "$ROOT/templates/scripts/verify.sh" >/dev/null
 grep -F '! -path "$ROOT/state/*"' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F 'log "Reset mutable state for distribution"' "$ROOT/build.sh" >/dev/null
+grep -F 'reset_runtime_state' "$ROOT/build.sh" >/dev/null
+grep -F 'Mutable state was not pristine before packaging:' "$ROOT/build.sh" >/dev/null
 # No shipped shell path may use an early-closing `head` pipeline under `set -o pipefail`.
 if grep -R -nE '\|[[:space:]]*head([[:space:]]|$)' "$ROOT/build.sh" "$ROOT/templates" "$ROOT/tests" "$ROOT/scripts"; then
   echo "Avoid early-closing head pipelines under pipefail; capture output or consume it fully." >&2
@@ -68,6 +71,7 @@ grep -F 'verify_one "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"' "$ROOT/
 ! grep -F 'pip compile' "$ROOT/build.sh"
 # Pip bootstrap code is verified before execution.
 grep -F 'verify_one "$PIP_BOOT_WHEEL" "$PIP_BOOTSTRAP_WHEEL_SHA256"' "$ROOT/build.sh" >/dev/null
+grep -F 'PIP_BOOT_CACHE="$DL/pip-26.1.2-py3-none-any.whl"' "$ROOT/build.sh" >/dev/null
 # uv build/recovery operations are isolated from project/user selection overrides without suppressing proxy/CA settings.
 grep -F 'UV_NO_CONFIG=1' "$ROOT/scripts/uv-isolated-exec.sh" >/dev/null
 grep -F 'unset UV_PYTHON_DOWNLOADS_JSON_URL' "$ROOT/scripts/uv-isolated-exec.sh" >/dev/null
@@ -94,4 +98,6 @@ grep -F 'Fresh extraction retained its archive-build location' "$ROOT/build.sh" 
 "$ROOT/tests/repair-python-check.sh"
 "$ROOT/tests/python-link-relocation-check.sh"
 "$ROOT/tests/sysconfig-relocation-check.sh"
+node_fetch_count="$(grep -Fc 'fetch "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" "$NODE_AR"' "$ROOT/build.sh")"
+[[ "$node_fetch_count" == 1 ]] || { echo "Expected exactly one Node fetch call, found $node_fetch_count" >&2; exit 1; }
 echo "Builder static checks passed."

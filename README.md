@@ -58,7 +58,7 @@ magnet-agent-env-linux-x64-v1.0.0.tar.gz
 magnet-agent-env-linux-x64-v1.0.0.tar.gz.sha256
 ```
 
-Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under the builder's `.download-cache/`, separate from the finished environment. A failed build can therefore be resumed without redownloading CPython or other already-fetched artifacts and without trusting partial payload files.
+Use `./build.sh --help` for output/cache options. Direct downloads (including the verified pip bootstrap wheel), uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under the builder's `.download-cache/`, separate from the finished environment. A failed build can therefore be resumed without redownloading CPython or other already-fetched artifacts and without trusting partial payload files.
 
 ## Acceptance
 
@@ -87,4 +87,4 @@ Builder/recovery uv invocations run through a small isolation wrapper that ignor
 
 This increases the commands an agent can execute **inside permissions the sandbox already grants**. It cannot create network access, a Docker daemon, credentials, kernel capabilities, or filesystem permissions that the host denies.
 
-Ad-hoc UV Python installs, UV tools, npm globals and caches are redirected to `state/` so they do not mutate the verified bundled runtimes. Do not place credentials or production secrets inside the bundle.
+Ad-hoc UV Python installs, UV tools, npm globals and caches are redirected to `state/` so they do not mutate the verified bundled runtimes. Build-time self-tests intentionally exercise that state, but the distributable archive is always produced with a pristine empty `state/` tree; runtime caches are first-use state, not payload. Do not place credentials or production secrets inside the bundle.

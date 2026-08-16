@@ -139,3 +139,10 @@ The first FIXED4 connected run showed two narrow issues before relocation:
 - uv created its normal top-level minor-version managed-Python alias as an absolute symlink to the exact patch-version directory, which correctly failed the bundle's absolute-symlink gate.
 
 Corrections remain native/minimal. Build-time `UV_CACHE_DIR`, `UV_PYTHON_CACHE_DIR`, and pip cache now live under the builder's existing `.download-cache/` and are never shipped. uv therefore remains responsible for fetching and hash-validating its managed Python, but repeat builds can reuse the cached archive. The managed-Python convenience alias is preserved, not deleted: if an absolute top-level link resolves inside the same managed-Python root it is rewritten to the equivalent relative target; an external absolute target fails closed. A synthetic behavioral test proves both cases.
+
+
+## FIXED6 distribution-state correction — 2026-08-16
+
+The first FIXED5 connected run passed the relocation torture test and the complete offline Python venv destruction/rebuild proof. The final archive-extraction gate then rejected path-bearing `.pyc` and uv cache metadata under `state/`. This was not immutable payload residue: the self-tests had correctly populated the declared mutable state tree before packaging.
+
+The correction preserves the strict extraction residue scan and fixes the lifecycle instead. `build.sh` now resets the entire mutable `state/` tree (including dotfiles and symlinks) after the final relocation/rebuild proofs and before immutable manifests/archive creation, then asserts that no state files or symlinks remain. The archive therefore ships pristine mutable directories only. Fresh-extraction self-test may repopulate state at the new extraction location; the old archive-build path is still rejected everywhere afterward.

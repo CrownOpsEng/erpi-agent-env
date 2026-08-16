@@ -95,7 +95,7 @@ Full database checks still require a host-provided working Docker/Podman-compati
 
 ## Mutable state
 
-The verified payload is intended to stay stable. Runtime mutation belongs under `state/`:
+The verified payload is intended to stay stable. The shipped archive starts with pristine empty mutable state; runtime mutation belongs under `state/`:
 
 - UV cache and ad-hoc UV tools
 - ad-hoc UV-managed Python installations
