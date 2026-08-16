@@ -91,8 +91,7 @@ jobs:
             exit 1
           }
 
-          tag_sha="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" --jq .object.sha 2>/dev/null || true)"
-          if [[ -n "$tag_sha" ]]; then
+          if tag_sha="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" --jq .object.sha 2>/dev/null)"; then
             [[ "$tag_sha" == "$target_sha" ]] || {
               echo "Tag $release_tag already points to $tag_sha, not accepted target $target_sha." >&2
               exit 1

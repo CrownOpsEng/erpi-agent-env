@@ -56,9 +56,12 @@ jobs:
             exit 1
           }
 
-          tag_sha="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha 2>/dev/null || true)"
+          if ! tag_sha="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha 2>/dev/null)"; then
+            echo "Release tag $RELEASE_TAG does not exist as a Git ref." >&2
+            exit 1
+          fi
           [[ "$tag_sha" == "$source_sha" ]] || {
-            echo "Release tag $RELEASE_TAG resolves to ${tag_sha:-missing}, not checked-out source $source_sha." >&2
+            echo "Release tag $RELEASE_TAG resolves to $tag_sha, not checked-out source $source_sha." >&2
             exit 1
           }
 

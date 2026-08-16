@@ -60,7 +60,7 @@ For changes that may alter the produced runtime or its portability/integrity beh
 
 A connector-only agent may not have a usable shell checkout. In that case it must not claim local validation: make the coherent direct-to-`main` commit, inspect **Validate**, and for payload-affecting changes require **Accept runtime** to succeed. GitHub Actions is an intentional supported acceptance host, not a fallback of last resort.
 
-Do **not** manually refresh candidate hashes, run IDs, or versions in `VALIDATION.md`. That file defines the stable validation authority/contract. Successful **Accept runtime** runs upload a small `acceptance.json` plus SHA sidecar for the exact commit; published Releases carry their own runtime archive, checksum and `acceptance.json`. Historical engineering chronology is preserved in `docs/validation-history.md` and `BUILD-REVIEW.md`; GitHub's native commit history plus Actions runs/artifacts are the supplemental change/execution history. Do not create another manually synchronized per-run ledger.
+Do **not** manually refresh candidate hashes, run IDs, versions, or per-run chronology in tracked narrative files. `VALIDATION.md` defines the stable validation contract; successful **Accept runtime** runs upload `acceptance.json` evidence for the exact commit, and published Releases carry their runtime archive, checksum, and `acceptance.json`. Git history preserves why/what/validation for changes, and GitHub Actions preserves execution history. Superseded historical documents should be removed from the live tree once they no longer serve current operation or authority—their content remains recoverable from Git.
 
 ## Releases
 
@@ -71,9 +71,9 @@ Normal release flow:
 1. change `BUNDLE_VERSION` on `main` as part of the intended release source;
 2. require that exact commit's **Validate** and **Accept runtime** runs to succeed;
 3. invoke permanent **Publish release** for that exact accepted source;
-4. **Publish release** verifies acceptance and creates/reuses only a matching **draft** Release/tag;
+4. **Publish release** verifies acceptance, creates/verifies the exact lightweight Git tag, and creates/reuses only a matching **draft** Release;
 5. it dispatches **Build distribution** for that tag;
-6. **Build distribution** checks out the tag, repeats the complete acceptance build, uploads the archive/checksum/`acceptance.json` to the draft, then publishes the Release.
+6. **Build distribution** checks out the real tag, verifies it matches the source/version and a mutable draft, repeats the complete acceptance build, uploads the archive/checksum/`acceptance.json` to the draft, then publishes the Release.
 
 There are two durable ways to invoke **Publish release**:
 
@@ -89,7 +89,7 @@ There are two durable ways to invoke **Publish release**:
 
 Changing that request file triggers the same permanent publisher. The workflow requires an exact 40-character lowercase commit SHA, verifies its `BUNDLE_VERSION`, and refuses to publish unless that commit already has a successful **Accept runtime** result. The request file is an auditable release command, not version authority; `versions.env` remains authoritative.
 
-If a release build fails after the draft was prepared, the draft is intentionally recoverable: rerun **Build distribution** with its `release_tag`. The build may replace partial assets while the Release is still draft, but publication happens only after all release assets are attached successfully.
+If a release build fails after the draft was prepared, the tag remains pinned to the accepted source and the draft remains recoverable. Correct the pipeline on `main`, accept the intended release source, retarget the request if the release source itself changed, then rerun the permanent publisher. Distribution assets may be replaced only while the Release is still draft; publication happens only after all release assets are attached successfully.
 
 **Build distribution** can also be run without a release tag to produce a short-lived Actions artifact without publishing anything.
 
@@ -97,8 +97,8 @@ The explicit workflow dispatch from **Publish release** to **Build distribution*
 
 ### Release immutability
 
-The release pipeline is intentionally draft-first so GitHub release immutability can be enabled safely. GitHub recommends attaching all assets to a draft and publishing only afterward; once immutability is enabled, future published release tags/assets are locked and GitHub creates a release attestation.
+The release pipeline is intentionally tag-first/draft-first so GitHub release immutability can be enabled safely. All assets are attached while the Release is draft and publication is the final action.
 
-Recommended repository setting for future releases: **Settings → General → Releases → Enable release immutability**. This setting is administrative and is not changed by the build workflows themselves. It applies to future releases, so the initial `v0.1.0` release remains historical even if the setting is enabled afterward.
+Recommended repository setting for future releases when available: **Settings → General → Releases → Enable release immutability**. This setting is administrative and is not changed by the build workflows themselves.
 
 Pre-1.0 versions are appropriate while the environment accumulates real-world usage evidence. `1.0.0` should signal a deliberately proven/stable compatibility contract, not merely a working package.

@@ -21,6 +21,15 @@ grep -F 'Realigned draft release' "$PUBLISH" >/dev/null
 grep -F 'Reusing matching draft release' "$PUBLISH" >/dev/null
 grep -F 'gh workflow run build-dist.yml' "$PUBLISH" >/dev/null
 
+# Tag lookups must branch on gh's exit status. A 404 JSON error body must never
+# be captured through `|| true` and mistaken for a SHA.
+if grep -nE 'git/ref/tags/.*\|\|[[:space:]]*true' "$PUBLISH" "$BUILD"; then
+  echo "Do not suppress tag-ref lookup failures into nonempty JSON values." >&2
+  exit 1
+fi
+grep -F 'if tag_sha="$(gh api' "$PUBLISH" >/dev/null
+grep -F 'if ! tag_sha="$(gh api' "$BUILD" >/dev/null
+
 tag_line="$(grep -nF '"ref=refs/tags/$release_tag"' "$PUBLISH" | cut -d: -f1)"
 create_line="$(grep -nF 'gh release create "$release_tag"' "$PUBLISH" | cut -d: -f1)"
 [[ -n "$tag_line" && -n "$create_line" && "$tag_line" -lt "$create_line" ]] || {
