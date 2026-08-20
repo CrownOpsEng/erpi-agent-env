@@ -68,9 +68,9 @@ BUILDER_UV_CACHE="$CACHE_DIR/uv-cache"
 BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"
 BUILDER_PIP_CACHE="$CACHE_DIR/pip-cache"
 mkdir -p "$BUILDER_UV_CACHE" "$BUILDER_UV_PYTHON_CACHE" "$BUILDER_PIP_CACHE"
-mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/env" "$BUILD/wheelhouse" \
+mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/env" "$BUILD/wheelhouse" \
   "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" \
-  "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
+  "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
 ORIGINAL_BUILD_ROOT="$BUILD"
 cleanup() { if (( KEEP_WORK )); then echo "Work tree retained: $WORK_PARENT"; else rm -rf "$WORK_PARENT"; fi; }
 trap cleanup EXIT
@@ -89,7 +89,8 @@ reset_runtime_state() {
     "$BUILD/state/pip-cache" \
     "$BUILD/state/npm-cache" \
     "$BUILD/state/npm-global" \
-    "$BUILD/state/pycache"
+    "$BUILD/state/pycache" \
+    "$BUILD/state/postgres"
 }
 fetch() {
   local url="$1" dest="$2"
@@ -204,6 +205,29 @@ cp "$SELF_DIR/templates/bin/npx-wrapper" "$BUILD/bin/npx"
 chmod 0755 "$BUILD/bin/node" "$BUILD/bin/npm" "$BUILD/bin/npx"
 "$BUILD/bin/node" -e 'if (process.versions.node !== process.argv[1]) process.exit(1)' "$NODE_VERSION"
 
+log "Offline Node capability capsules"
+mkdir -p "$BUILD/runtime/node-capsules"
+for spec in \
+  "postgres-${POSTGRES_JS_VERSION}.tgz:${POSTGRES_JS_SHA256}" \
+  "postgres-language-server-wasm-${PGLS_WASM_VERSION}.tgz:${PGLS_WASM_SHA256}" \
+  "fast-check-${FAST_CHECK_VERSION}.tgz:${FAST_CHECK_SHA256}" \
+  "pure-rand-${PURE_RAND_VERSION}.tgz:${PURE_RAND_SHA256}"; do
+  file="${spec%%:*}"; hash="${spec##*:}"
+  verify_one "$SELF_DIR/vendor/node-capsules/$file" "$hash"
+  install -m 0644 "$SELF_DIR/vendor/node-capsules/$file" "$BUILD/runtime/node-capsules/$file"
+done
+cat > "$BUILD/manifest/node-capsules.json" <<JSON
+{
+  "schema": 1,
+  "packages": {
+    "postgres": {"version": "$POSTGRES_JS_VERSION", "file": "postgres-$POSTGRES_JS_VERSION.tgz", "sha256": "$POSTGRES_JS_SHA256", "integrity": "sha512-Jtc2612XINuBjIl/QTWsV5UvE8UHuNblcO3vVADSrKsrc6RqGX6lOW1cEo3CM2v0XG4Nat8nI+YM7/f26VxXLw=="},
+    "@postgres-language-server/wasm": {"version": "$PGLS_WASM_VERSION", "file": "postgres-language-server-wasm-$PGLS_WASM_VERSION.tgz", "sha256": "$PGLS_WASM_SHA256", "integrity": "sha512-Q+MIVjh4AHwy4bppJBNpKxrkLxpO9Uro9JjU5hn3SExe4xumnYoogK0ebOSLej7wriLpmqXVpiIlDqxDMkaSYw=="},
+    "fast-check": {"version": "$FAST_CHECK_VERSION", "file": "fast-check-$FAST_CHECK_VERSION.tgz", "sha256": "$FAST_CHECK_SHA256", "integrity": "sha512-7ms6T7SybUev/PQITciI0yLM2pOSFy5zpG8Ty7tQofcVaQUvrMXp6CBwqF6fThLCLOrfBtuHAtwq6Yu4XPCllg=="},
+    "pure-rand": {"version": "$PURE_RAND_VERSION", "file": "pure-rand-$PURE_RAND_VERSION.tgz", "sha256": "$PURE_RAND_SHA256", "integrity": "sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng=="}
+  }
+}
+JSON
+
 log "GitHub CLI $GH_VERSION"
 GH_AR="$DL/gh_${GH_VERSION}_linux_amd64.tar.gz"
 fetch "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" "$GH_AR"
@@ -240,18 +264,55 @@ fetch "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSIO
 verify_one "$GITLEAKS_AR" "$GITLEAKS_SHA256"
 extract_single "$GITLEAKS_AR" gitleaks "$BUILD/bin/gitleaks"
 
+log "ShellCheck $SHELLCHECK_VERSION"
+SHELLCHECK_AR="$DL/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+fetch "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" "$SHELLCHECK_AR"
+verify_one "$SHELLCHECK_AR" "$SHELLCHECK_SHA256"
+extract_single "$SHELLCHECK_AR" shellcheck "$BUILD/bin/shellcheck"
+
+log "Miller $MILLER_VERSION"
+MILLER_AR="$DL/miller-${MILLER_VERSION}-linux-amd64.tar.gz"
+fetch "https://github.com/johnkerl/miller/releases/download/v${MILLER_VERSION}/miller-${MILLER_VERSION}-linux-amd64.tar.gz" "$MILLER_AR"
+verify_one "$MILLER_AR" "$MILLER_SHA256"
+extract_single "$MILLER_AR" mlr "$BUILD/bin/mlr"
+
+log "PostgreSQL $POSTGRES_VERSION portable database engineering runtime"
+PG_SERVER_AR="$SELF_DIR/vendor/database/postgres-server-${POSTGRES_VERSION}-linux-x64.txz"
+PG_CLIENT_AR="$SELF_DIR/vendor/database/postgresql-client-${POSTGRES_VERSION}-linux-x64-gnu.tar.gz"
+PLCHECK_AR="$SELF_DIR/vendor/database/plpgsql-check-${PLPGSQL_CHECK_VERSION}-pg17-linux-x64-gnu.tar.gz"
+verify_one "$PG_SERVER_AR" "$POSTGRES_SERVER_SHA256"
+verify_one "$PG_CLIENT_AR" "$POSTGRES_CLIENT_SHA256"
+verify_one "$PLCHECK_AR" "$PLPGSQL_CHECK_SHA256"
+rm -rf "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client"
+mkdir -p "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$WORK/postgres-client" "$WORK/plcheck"
+tar -xJf "$PG_SERVER_AR" -C "$BUILD/runtime/postgres/server"
+tar -xzf "$PG_CLIENT_AR" -C "$WORK/postgres-client"
+cp -a "$WORK/postgres-client/client-payload/." "$BUILD/runtime/postgres/client/"
+tar -xzf "$PLCHECK_AR" -C "$WORK/plcheck"
+install -m 0644 "$SELF_DIR/vendor/pgtap/pgtap.control" "$BUILD/runtime/postgres/server/share/postgresql/extension/pgtap.control"
+install -m 0644 "$SELF_DIR/vendor/pgtap/pgtap--${PGTAP_VERSION}.sql" "$BUILD/runtime/postgres/server/share/postgresql/extension/pgtap--${PGTAP_VERSION}.sql"
+install -m 0644 "$WORK/plcheck/plcheck-payload/plpgsql_check.control" "$BUILD/runtime/postgres/server/share/postgresql/extension/plpgsql_check.control"
+install -m 0644 "$WORK/plcheck/plcheck-payload/plpgsql_check--2.8.sql" "$BUILD/runtime/postgres/server/share/postgresql/extension/plpgsql_check--2.8.sql"
+install -m 0755 "$WORK/plcheck/plcheck-payload/plpgsql_check.so" "$BUILD/runtime/postgres/server/lib/postgresql/plpgsql_check.so"
+"$BUILD/runtime/postgres/server/bin/postgres" --version | grep -F "$POSTGRES_VERSION" >/dev/null
+LD_LIBRARY_PATH="$BUILD/runtime/postgres/client/lib" "$BUILD/runtime/postgres/client/bin/psql" --version | grep -F "$POSTGRES_VERSION" >/dev/null
+
 log "Runtime control surface"
 cp "$SELF_DIR/templates/activate" "$BUILD/activate"
 cp "$SELF_DIR/templates/bin/agent-env" "$BUILD/bin/agent-env"
 cp "$SELF_DIR/templates/scripts/doctor.py" "$BUILD/scripts/doctor.py"
+cp "$SELF_DIR/templates/scripts/capabilities.py" "$BUILD/scripts/capabilities.py"
+cp "$SELF_DIR/templates/scripts/postgres.py" "$BUILD/scripts/postgres.py"
+cp "$SELF_DIR/templates/scripts/pgtap.py" "$BUILD/scripts/pgtap.py"
+cp "$SELF_DIR/templates/scripts/node-deps.py" "$BUILD/scripts/node-deps.py"
 cp "$SELF_DIR/templates/scripts/github.sh" "$BUILD/scripts/github.sh"
 cp "$SELF_DIR/templates/scripts/selftest.sh" "$BUILD/scripts/selftest.sh"
 cp "$SELF_DIR/templates/scripts/verify.sh" "$BUILD/scripts/verify.sh"
 cp "$SELF_DIR/templates/scripts/rebuild-python.sh" "$BUILD/scripts/rebuild-python.sh"
 cp "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/scripts/uv-isolated-exec.sh"
 cp "$SELF_DIR/templates/bin/python-wrapper" "$BUILD/scripts/python-wrapper.template"
-chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/github.sh" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh" "$BUILD/scripts/uv-isolated-exec.sh"
-mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache"
+chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/capabilities.py" "$BUILD/scripts/postgres.py" "$BUILD/scripts/pgtap.py" "$BUILD/scripts/node-deps.py" "$BUILD/scripts/github.sh" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh" "$BUILD/scripts/uv-isolated-exec.sh"
+mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres"
 
 cat > "$BUILD/manifest/environment.json" <<JSON
 {
@@ -269,13 +330,20 @@ cat > "$BUILD/manifest/environment.json" <<JSON
     "yq": "$YQ_VERSION",
     "ripgrep": "$RIPGREP_VERSION",
     "actionlint": "$ACTIONLINT_VERSION",
-    "gitleaks": "$GITLEAKS_VERSION"
+    "gitleaks": "$GITLEAKS_VERSION",
+    "shellcheck": "$SHELLCHECK_VERSION",
+    "miller": "$MILLER_VERSION"
+  },
+  "capabilities": {
+    "postgresql": {"server": "$POSTGRES_VERSION", "pgtap": "$PGTAP_VERSION", "plpgsql_check": "$PLPGSQL_CHECK_VERSION", "client_tools": true, "disposable_clusters": true, "pgbench": true, "dump_restore": true, "amcheck": true, "checksums": true},
+    "node_capsules": {"postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION"},
+    "utilities": {"shellcheck": "$SHELLCHECK_VERSION", "miller": "$MILLER_VERSION", "httpx_cli": true}
   },
   "runtime_contract": {"os": "Linux", "architecture": "x86_64", "kernel_min": "$MIN_KERNEL_VERSION", "glibc_min": "$MIN_GLIBC_VERSION", "libstdcxx_symbol_min": "$MIN_GLIBCXX_SYMBOL"},
   "credentials_bundled": false,
   "github_auth": "host/session credentials; validate on demand with agent-env github",
   "mutable_paths": ["env/pyvenv.cfg", "state/"],
-  "project_authority_note": "Magnet Photos repository Makefile/package-lock remain authoritative for project tooling such as Supabase and PGLS."
+  "project_authority_note": "Target repositories remain authoritative for dependencies, schemas, commands, safety policy, and application architecture. Offline capsules only satisfy exact matching repository locks."
 }
 JSON
 
@@ -290,6 +358,16 @@ pip-bootstrap\t26.1.2\t$PIP_BOOTSTRAP_WHEEL_URL\t$PIP_BOOTSTRAP_WHEEL_SHA256
 ripgrep\t$RIPGREP_VERSION\thttps://github.com/BurntSushi/ripgrep/releases/download/$RIPGREP_VERSION/ripgrep-$RIPGREP_VERSION-x86_64-unknown-linux-musl.tar.gz\t$RIPGREP_SHA256
 actionlint\t$ACTIONLINT_VERSION\thttps://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz\t$ACTIONLINT_SHA256
 gitleaks\t$GITLEAKS_VERSION\thttps://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz\t$GITLEAKS_SHA256
+shellcheck	$SHELLCHECK_VERSION	https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/shellcheck-v$SHELLCHECK_VERSION.linux.x86_64.tar.xz	$SHELLCHECK_SHA256
+miller	$MILLER_VERSION	https://github.com/johnkerl/miller/releases/download/v$MILLER_VERSION/miller-$MILLER_VERSION-linux-amd64.tar.gz	$MILLER_SHA256
+postgres-server	$POSTGRES_VERSION	vendor/database/postgres-server-$POSTGRES_VERSION-linux-x64.txz	$POSTGRES_SERVER_SHA256
+postgres-client	$POSTGRES_VERSION	vendor/database/postgresql-client-$POSTGRES_VERSION-linux-x64-gnu.tar.gz	$POSTGRES_CLIENT_SHA256
+pgtap	$PGTAP_VERSION	vendor/pgtap/pgtap--$PGTAP_VERSION.sql	generated-from-$PGTAP_SOURCE_SHA256
+plpgsql-check	$PLPGSQL_CHECK_VERSION	vendor/database/plpgsql-check-$PLPGSQL_CHECK_VERSION-pg17-linux-x64-gnu.tar.gz	$PLPGSQL_CHECK_SHA256
+node-postgres	$POSTGRES_JS_VERSION	vendor/node-capsules/postgres-$POSTGRES_JS_VERSION.tgz	$POSTGRES_JS_SHA256
+pgls-wasm	$PGLS_WASM_VERSION	vendor/node-capsules/postgres-language-server-wasm-$PGLS_WASM_VERSION.tgz	$PGLS_WASM_SHA256
+fast-check	$FAST_CHECK_VERSION	vendor/node-capsules/fast-check-$FAST_CHECK_VERSION.tgz	$FAST_CHECK_SHA256
+pure-rand	$PURE_RAND_VERSION	vendor/node-capsules/pure-rand-$PURE_RAND_VERSION.tgz	$PURE_RAND_SHA256
 SOURCES
 
 log "Normalize uv-managed Python install metadata for relocation"

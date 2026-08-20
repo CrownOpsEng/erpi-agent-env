@@ -12,7 +12,7 @@ export PIP_CACHE_DIR="$ROOT/state/pip-cache"
 export NPM_CONFIG_CACHE="$ROOT/state/npm-cache"
 export NPM_CONFIG_PREFIX="$ROOT/state/npm-global"
 export PYTHONPYCACHEPREFIX="$ROOT/state/pycache"
-mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$PIP_CACHE_DIR" "$NPM_CONFIG_CACHE" "$NPM_CONFIG_PREFIX" "$PYTHONPYCACHEPREFIX" 2>/dev/null || true
+mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$PIP_CACHE_DIR" "$NPM_CONFIG_CACHE" "$NPM_CONFIG_PREFIX" "$PYTHONPYCACHEPREFIX" "$ROOT/state/postgres" 2>/dev/null || true
 export PATH="$ROOT/env/bin:$ROOT/bin:$UV_TOOL_BIN_DIR:$NPM_CONFIG_PREFIX/bin:$PATH"
 
 usage() {
@@ -20,26 +20,56 @@ usage() {
 Usage: agent-env COMMAND [ARGS...]
 
 Commands:
-  doctor [--json]    Diagnose local bundle, host commands, and current repository
-  github             Probe shell GitHub reachability, auth/API, and repo access
-  github-auth        Run browser/device GitHub OAuth when reachable, then verify it
-  github-git         Configure current-repo Git auth safely and verify push dry-run
-  git [ARGS...]      Run host Git with this environment active
-  selftest           Exercise bundled capabilities and portability invariants
-  verify             Verify immutable payload checksums and symlink topology
-  repair             Repair relocation-sensitive Python venv metadata
-  rebuild-python     Recreate the Python venv entirely offline from wheelhouse
-  versions           Print the pinned environment manifest
-  exec CMD [ARGS...] Run a command with this environment active
-  root               Print the resolved bundle root
-  help               Show this command surface
+  doctor [--json]          Diagnose bundle/host capabilities factually
+  capabilities [--json]    Show bundled capability manifest
+  postgres run [...] -- C  Run one command against a disposable local PostgreSQL
+  pg TOOL [ARGS...]        Run an explicitly selected bundled PostgreSQL client tool
+  pgtap FILE...            Run pgTAP SQL files with strict TAP accounting
+  node-deps CMD            status|hydrate|clean exact repository-locked offline capsules
+  github                   Probe shell GitHub reachability, auth/API, and repo access
+  github-auth              Run browser/device GitHub OAuth when reachable, then verify it
+  github-git               Configure current-repo Git auth safely and verify push dry-run
+  git [ARGS...]            Run host Git with this environment active
+  selftest                 Exercise bundled capabilities and portability invariants
+  verify                   Verify immutable payload checksums and symlink topology
+  repair                   Repair relocation-sensitive Python venv metadata
+  rebuild-python           Recreate the Python venv entirely offline from wheelhouse
+  versions                 Print the pinned environment manifest
+  exec CMD [ARGS...]       Run a command with this environment active
+  root                     Print the resolved bundle root
+  help                     Show this command surface
 USAGE
+}
+
+pg_exec() {
+  local tool="${1:-}"
+  [[ -n "$tool" ]] || { echo "agent-env pg requires a tool name" >&2; exit 2; }
+  shift
+  case "$tool" in
+    psql|pg_isready|pgbench|pg_dump|pg_restore|pg_dumpall|pg_amcheck|pg_checksums|createdb|dropdb) ;;
+    *) echo "Unsupported bundled PostgreSQL client tool: $tool" >&2; exit 2 ;;
+  esac
+  local bin="$ROOT/runtime/postgres/client/bin/$tool"
+  [[ -x "$bin" ]] || { echo "Bundled PostgreSQL client tool missing: $bin" >&2; exit 1; }
+  export LD_LIBRARY_PATH="$ROOT/runtime/postgres/client/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  exec "$bin" "$@"
 }
 
 cmd="${1:-help}"
 case "$cmd" in
   help|-h|--help) usage ;;
   doctor) shift; exec "$ROOT/env/bin/python" "$ROOT/scripts/doctor.py" "$@" ;;
+  capabilities) shift; exec "$ROOT/env/bin/python" "$ROOT/scripts/capabilities.py" "$@" ;;
+  postgres)
+    shift
+    sub="${1:-}"
+    [[ "$sub" == run ]] || { echo "Usage: agent-env postgres run [--port N] [--keep] -- COMMAND" >&2; exit 2; }
+    shift
+    exec "$ROOT/env/bin/python" "$ROOT/scripts/postgres.py" "$@"
+    ;;
+  pg) shift; pg_exec "$@" ;;
+  pgtap) shift; exec "$ROOT/env/bin/python" "$ROOT/scripts/pgtap.py" "$@" ;;
+  node-deps) shift; exec "$ROOT/env/bin/python" "$ROOT/scripts/node-deps.py" "$@" ;;
   github) shift; exec "$ROOT/scripts/github.sh" status "$@" ;;
   github-auth) shift; exec "$ROOT/scripts/github.sh" auth "$@" ;;
   github-git) shift; exec "$ROOT/scripts/github.sh" git "$@" ;;

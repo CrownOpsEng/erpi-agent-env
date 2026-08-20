@@ -7,34 +7,40 @@ done
 for file in "$ROOT/templates/bin/python-wrapper" "$ROOT/templates/bin/node-wrapper" "$ROOT/templates/bin/npm-wrapper" "$ROOT/templates/bin/npx-wrapper" "$ROOT/scripts/uv-isolated-exec.sh"; do
   sh -n "$file"
 done
-python3 -m py_compile "$ROOT/templates/scripts/doctor.py"
+for file in "$ROOT/templates/scripts/"*.py; do python3 -m py_compile "$file"; done
 python3 -m py_compile "$ROOT/scripts/normalize-python-sysconfig.py"
 python3 -m py_compile "$ROOT/scripts/write-acceptance-metadata.py"
-python3 - <<'PY' "$ROOT/versions.env" "$ROOT/requirements.in" "$ROOT/requirements.lock"
+python3 - <<'PY' "$ROOT/versions.env" "$ROOT/requirements.in" "$ROOT/requirements.lock" "$ROOT"
 import hashlib, pathlib, re, sys
-versions = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
-requirements_in = pathlib.Path(sys.argv[2]).read_text(encoding='utf-8')
-lock_path = pathlib.Path(sys.argv[3])
-lock = lock_path.read_text(encoding='utf-8')
-for name, value in re.findall(r'^(\w+_SHA256)="([0-9a-f]+)"$', versions, flags=re.M):
-    assert len(value) == 64, (name, value)
-expected_lock = re.search(r'^PYTHON_LOCK_SHA256="([0-9a-f]{64})"$', versions, flags=re.M).group(1)
-actual_lock = hashlib.sha256(lock_path.read_bytes()).hexdigest()
-assert actual_lock == expected_lock, (actual_lock, expected_lock)
+versions_path, req_in_path, lock_path, root = map(pathlib.Path, sys.argv[1:])
+versions=versions_path.read_text(encoding='utf-8'); req_in=req_in_path.read_text(encoding='utf-8'); lock=lock_path.read_text(encoding='utf-8')
+vals=dict(re.findall(r'^(\w+)="([^"]*)"$', versions, flags=re.M))
+for name,value in vals.items():
+    if name.endswith('_SHA256'): assert re.fullmatch(r'[0-9a-f]{64}',value),(name,value)
+assert hashlib.sha256(lock_path.read_bytes()).hexdigest()==vals['PYTHON_LOCK_SHA256']
 assert '/tmp/' not in lock and '# via' not in lock and 'Build Root' not in lock
-packages = re.findall(r'^([A-Za-z0-9_.-]+)==([^ \\\n]+)', lock, flags=re.M)
-assert len(packages) == 21, len(packages)
-locked = {name.lower(): version for name, version in packages}
-for line in requirements_in.splitlines():
-    line = line.strip()
-    if not line or line.startswith('#'):
-        continue
-    name, version = line.split('==', 1)
-    assert locked.get(name.lower()) == version, (name, version, locked.get(name.lower()))
-print('hash-and-lock-shapes-ok')
+packages=re.findall(r'^([A-Za-z0-9_.-]+)==([^ \\n]+)',lock,flags=re.M); locked={n.lower():v for n,v in packages}
+for line in req_in.splitlines():
+    line=line.strip()
+    if not line or line.startswith('#'): continue
+    name,version=line.split('==',1); name=re.sub(r'\[.*\]$','',name)
+    assert locked.get(name.lower())==version,(name,version,locked.get(name.lower()))
+assert 'pytest' not in locked and 'setuptools' not in locked and 'wheel' not in locked
+checks={
+ 'vendor/database/postgres-server-17.10-linux-x64.txz':'POSTGRES_SERVER_SHA256',
+ 'vendor/database/postgresql-client-17.10-linux-x64-gnu.tar.gz':'POSTGRES_CLIENT_SHA256',
+ 'vendor/database/plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz':'PLPGSQL_CHECK_SHA256',
+ 'vendor/node-capsules/postgres-3.4.7.tgz':'POSTGRES_JS_SHA256',
+ 'vendor/node-capsules/postgres-language-server-wasm-0.25.7.tgz':'PGLS_WASM_SHA256',
+ 'vendor/node-capsules/fast-check-4.9.0.tgz':'FAST_CHECK_SHA256',
+ 'vendor/node-capsules/pure-rand-8.4.2.tgz':'PURE_RAND_SHA256'}
+for rel,key in checks.items():
+    path=root/rel; assert path.is_file(),rel
+    assert hashlib.sha256(path.read_bytes()).hexdigest()==vals[key],(rel,key)
+print('hash-lock-and-vendor-shapes-ok')
 PY
 rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
-for file in requirements.lock templates/AGENTS.md templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py; do
+for file in requirements.lock templates/AGENTS.md templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime/build source missing: $file" >&2; exit 1; }
 done
 # The router is intentionally compact; large operational detail belongs in README/commands.
@@ -86,14 +92,14 @@ grep -F 'normalize-python-links.sh" "$BUILD/runtime/python"' "$ROOT/build.sh" >/
 grep -F '__MAGNET_AGENT_PYTHON_PREFIX__' "$ROOT/scripts/normalize-python-sysconfig.py" >/dev/null
 grep -F "sysconfig.get_config_var('BINDIR')" "$ROOT/templates/scripts/selftest.sh" >/dev/null
 # Native/compiled Python and uv-generated console entrypoints are exercised after each relocation/rebuild.
-grep -F 'import httpx, jsonschema, packaging, yaml, tomlkit, pytest, rpds' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F 'import httpx, jsonschema, packaging, yaml, tomlkit, rpds' "$ROOT/templates/scripts/selftest.sh" >/dev/null
 grep -F 'from yaml import CLoader' "$ROOT/templates/scripts/selftest.sh" >/dev/null
-grep -Fx 'pytest --version >/dev/null' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+! grep -F 'pytest --version' "$ROOT/templates/scripts/selftest.sh"
 grep -Fx 'pip --version >/dev/null' "$ROOT/templates/scripts/selftest.sh" >/dev/null
 # Offline rebuilds must canonicalize uv's timestamp-bearing installer metadata before integrity verification.
-grep -F "cache_path = dist_info / 'uv_cache.json'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
-grep -F "cache_record = f'{dist_info.name}/uv_cache.json'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
-grep -F "csv.writer(handle, lineterminator='\\n').writerows(kept)" "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F "cache=dist/'uv_cache.json'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F "cache_record=f'{dist.name}/uv_cache.json'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F "csv.writer(h,lineterminator='\\n').writerows(kept)" "$ROOT/templates/scripts/selftest.sh" >/dev/null
 selftest_line="$(grep -nF '"$ROOT/scripts/selftest.sh"' "$ROOT/templates/scripts/rebuild-python.sh" | cut -d: -f1)"
 verify_line="$(grep -nF '"$ROOT/scripts/verify.sh"' "$ROOT/templates/scripts/rebuild-python.sh" | cut -d: -f1)"
 [[ -n "$selftest_line" && -n "$verify_line" && "$selftest_line" -lt "$verify_line" ]] || {
@@ -118,6 +124,20 @@ if grep -R -nE 'git[[:space:]]+config[[:space:]]+--global.*credential' "$ROOT/te
   echo "Do not write Git credential helpers globally from the portable bundle." >&2
   exit 1
 fi
+grep -F 'BUNDLE_VERSION="0.2.0"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGRES_VERSION="17.10"' "$ROOT/versions.env" >/dev/null
+grep -F 'agent-env postgres run' "$ROOT/templates/RUNTIME-README.md" >/dev/null
+grep -F 'agent-env node-deps hydrate' "$ROOT/templates/RUNTIME-README.md" >/dev/null
+grep -F 'Do not fragment a suite merely to satisfy an agent wrapper timeout.' "$ROOT/templates/AGENTS.md" >/dev/null
+grep -F 'Unsupported bundled PostgreSQL client tool' "$ROOT/templates/bin/agent-env" >/dev/null
+grep -F 'DATABASE_URL' "$ROOT/templates/scripts/postgres.py" >/dev/null
+grep -F '127.0.0.1' "$ROOT/templates/scripts/postgres.py" >/dev/null
+grep -F 'pg_checksums' "$ROOT/templates/scripts/postgres.py" >/dev/null
+grep -F "unix_socket_directories = ''" "$ROOT/templates/scripts/postgres.py" >/dev/null
+grep -F -- '--- PostgreSQL startup log ---' "$ROOT/templates/scripts/postgres.py" >/dev/null
+! grep -F 'cluster / "socket"' "$ROOT/templates/scripts/postgres.py" >/dev/null
+grep -F 'package-lock.json is required' "$ROOT/templates/scripts/node-deps.py" >/dev/null
+! grep -R -nE 'anon|authenticated|service_role|magnet\.' "$ROOT/templates/scripts/postgres.py" "$ROOT/templates/scripts/pgtap.py" "$ROOT/templates/scripts/node-deps.py"
 "$ROOT/tests/github-auth-check.sh"
 "$ROOT/tests/acceptance-metadata-check.sh"
 "$ROOT/tests/uv-isolation-check.sh"
