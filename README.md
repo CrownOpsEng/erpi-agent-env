@@ -35,7 +35,7 @@ The supported runtime contract is GNU/Linux x86-64 with kernel >= 4.18, glibc >=
 
 ## Build
 
-Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz, sha256sum, find, sed/awk/grep, and internet access. No sudo is used.
+Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256sum, find, sed/awk/grep, a working Docker daemon, and internet access. No sudo is used. Docker is a builder capability only; it is not bundled into the runtime.
 
 ```bash
 ./tests/static-check.sh
@@ -54,9 +54,9 @@ Release candidates use SemVer prerelease identities such as `0.2.0-rc.1`. A cand
 Archive creation normalizes tar ordering/metadata, gzip headers, and the relocatable `pyvenv.cfg` placeholder so repeated packaging of the same accepted payload is byte-for-byte deterministic.
 
 Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under `.download-cache/` and are never shipped.
-The small source-controlled PostgreSQL client/plpgsql_check payloads are qualified inputs, not ordinary build products. Maintainers can reproduce them from pinned upstream source in the pinned manylinux 2.28 container with `scripts/rebuild-qualified-database-assets.sh`; ordinary builds do not require Docker or a compiler.
+The PostgreSQL server is built during every full acceptance/distribution build from the exact official PostgreSQL 17.10 source tarball inside a digest-pinned manylinux 2.28 image. The builder keeps the normal installed PostgreSQL prefix; optional readline, zlib, and ICU integrations are disabled only to reduce external runtime dependencies. The source-controlled PostgreSQL client/plpgsql_check payloads remain separately qualified inputs and can be reproduced with `scripts/rebuild-qualified-database-assets.sh`.
 
-Direct third-party license/attribution texts for redistributed command/database/capsule components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. The currently qualified prebuilt PostgreSQL server also contains nested runtime libraries from its upstream portable distribution; their exact notice set remains an explicit stable-publication gate rather than being silently treated as covered by PostgreSQL or Zonky licensing.
+Direct third-party license/attribution texts for redistributed command/database/capsule components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. PostgreSQL server provenance now terminates at the pinned official source artifact and pinned build image rather than an opaque prebuilt server bundle; the official PostgreSQL copyright notice is retained in the runtime.
 
 ## Offline Node capsule boundary
 

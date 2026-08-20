@@ -27,7 +27,6 @@ for line in req_in.splitlines():
     assert locked.get(name.lower())==version,(name,version,locked.get(name.lower()))
 assert 'pytest' not in locked and 'setuptools' not in locked and 'wheel' not in locked
 checks={
- 'vendor/database/postgres-server-17.10-linux-x64.txz':'POSTGRES_SERVER_SHA256',
  'vendor/database/postgresql-client-17.10-linux-x64-gnu.tar.gz':'POSTGRES_CLIENT_SHA256',
  'vendor/database/plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz':'PLPGSQL_CHECK_SHA256',
  'vendor/node-capsules/postgres-3.4.7.tgz':'POSTGRES_JS_SHA256',
@@ -169,6 +168,22 @@ grep -F 'Archive packaging is not deterministic for the accepted payload.' "$ROO
 grep -F 'Immutable payload contains a group/world-writable regular file' "$ROOT/build.sh" >/dev/null
 grep -F 'Publish release accepts stable versions only; release candidates are validation artifacts.' "$ROOT/.github/workflows/publish-release.yml" >/dev/null
 grep -F 'POSTGRES_VERSION="17.10"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGRES_SOURCE_URL="https://ftp.postgresql.org/pub/source/v17.10/postgresql-17.10.tar.bz2"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGRES_SOURCE_SHA256="078a03516dcdbdb705fecaf415ea3d13a956c589e46f09fed68a06fb00598c90"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGRES_BUILD_IMAGE="quay.io/pypa/manylinux_2_28_x86_64"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGRES_BUILD_IMAGE_SHA256="0c87ccb5996dab6c3b7612ee4fda7b80c4ab3c44a86c2541e4a872afdf4f131b"' "$ROOT/versions.env" >/dev/null
+[[ ! -e "$ROOT/vendor/database/postgres-server-17.10-linux-x64.txz" ]] || { echo 'Opaque prebuilt PostgreSQL server must not return.' >&2; exit 1; }
+[[ ! -e "$ROOT/scripts/qualify-postgres-server.sh" ]] || { echo 'Temporary PostgreSQL qualification script must not remain in the live tree.' >&2; exit 1; }
+! grep -F 'qualify-postgres-server' "$ROOT/.github/workflows/build-dist.yml"
+grep -F 'POSTGRES_BUILD_IMAGE_REF="${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}"' "$ROOT/build.sh" >/dev/null
+grep -F './configure --prefix=/usr/local/pg-build --without-readline --without-zlib --without-icu' "$ROOT/build.sh" >/dev/null
+grep -F 'cp -a "$PG_BUILD_WORK/stage/usr/local/pg-build/." "$BUILD/runtime/postgres/server/"' "$ROOT/build.sh" >/dev/null
+grep -F 'Source-built PostgreSQL server unexpectedly contains a bundled third-party shared library.' "$ROOT/build.sh" >/dev/null
+grep -F 'Source-built PostgreSQL exceeds runtime GLIBC floor' "$ROOT/build.sh" >/dev/null
+grep -F 'source_row postgres-server-source' "$ROOT/build.sh" >/dev/null
+grep -F 'source_row postgres-server-build-image' "$ROOT/build.sh" >/dev/null
+grep -F "probe_env['NO_PROXY']='127.0.0.1,localhost'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F "dead_proxy='http://127.0.0.1:9'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
 grep -F 'agent-env postgres run' "$ROOT/templates/RUNTIME-README.md" >/dev/null
 grep -F 'agent-env node-deps hydrate' "$ROOT/templates/RUNTIME-README.md" >/dev/null
 grep -F 'Do not fragment a suite merely to satisfy an agent wrapper timeout.' "$ROOT/templates/AGENTS.md" >/dev/null
@@ -181,10 +196,10 @@ grep -F -- '--- PostgreSQL startup log ---' "$ROOT/templates/scripts/postgres.py
 ! grep -F 'cluster / "socket"' "$ROOT/templates/scripts/postgres.py" >/dev/null
 grep -F 'package-lock.json is required' "$ROOT/templates/scripts/node-deps.py" >/dev/null
 ! grep -R -nE 'anon|authenticated|service_role|magnet\.' "$ROOT/templates/scripts/postgres.py" "$ROOT/templates/scripts/pgtap.py" "$ROOT/templates/scripts/node-deps.py"
-# RC2 boundaries are enforced both structurally and by executable regression tests.
+# Candidate boundaries are enforced both structurally and by executable regression tests.
 require_contains() {
   local needle="$1" file="$2" label="$3"
-  grep -F -- "$needle" "$file" >/dev/null || { echo "Missing RC2 invariant: $label ($file)" >&2; exit 1; }
+  grep -F -- "$needle" "$file" >/dev/null || { echo "Missing candidate invariant: $label ($file)" >&2; exit 1; }
 }
 require_contains 'NODE_CAPSULE_MANIFEST="$SELF_DIR/vendor/node-capsules/manifest.json"' "$ROOT/build.sh" 'source-controlled Node capsule manifest'
 require_contains 'install -m 0644 "$NODE_CAPSULE_MANIFEST" "$BUILD/manifest/node-capsules.json"' "$ROOT/build.sh" 'runtime manifest copy'

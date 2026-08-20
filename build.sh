@@ -15,7 +15,7 @@ usage() {
 Usage: ./build.sh [--out DIR] [--cache DIR] [--keep-work]
 
 Build Magnet Agent Environment ${BUNDLE_VERSION} for ${TARGET}.
-Requires an internet-connected supported Linux x86-64 host (kernel >= ${MIN_KERNEL_VERSION}, glibc >= ${MIN_GLIBC_VERSION}). No sudo is used.
+Requires an internet-connected supported Linux x86-64 host (kernel >= ${MIN_KERNEL_VERSION}, glibc >= ${MIN_GLIBC_VERSION}) with a working Docker daemon. No sudo is used.
 USAGE
 }
 
@@ -30,7 +30,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Required build command missing: $1" >&2; exit 1; }; }
-for cmd in bash curl tar gzip xz sha256sum find grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname env; do need "$cmd"; done
+for cmd in bash curl tar gzip bzip2 xz sha256sum find file readelf grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname env docker id; do need "$cmd"; done
 TAR_VERSION="$(tar --version 2>/dev/null || true)"
 grep -q 'GNU tar' <<<"$TAR_VERSION" || { echo "GNU tar is required by this builder." >&2; exit 1; }
 [[ "$(uname -s)" == Linux ]] || { echo "Builder target is Linux only." >&2; exit 1; }
@@ -56,6 +56,7 @@ KERNEL_VERSION="${KERNEL_VERSION_OVERRIDE:-$(uname -r)}"
 KERNEL_VERSION="${KERNEL_VERSION%%-*}"
 version_at_least "$GLIBC_VERSION" "$MIN_GLIBC_VERSION" || { echo "glibc >= $MIN_GLIBC_VERSION is required; found $GLIBC_VERSION." >&2; exit 1; }
 version_at_least "$KERNEL_VERSION" "$MIN_KERNEL_VERSION" || { echo "Linux kernel >= $MIN_KERNEL_VERSION is required; found $KERNEL_VERSION." >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "A working Docker daemon is required to build the pinned PostgreSQL server from official source." >&2; exit 1; }
 
 mkdir -p "$OUT_DIR" "$CACHE_DIR"
 OUT_DIR="$(CDPATH= cd -- "$OUT_DIR" && pwd -P)"
@@ -68,7 +69,7 @@ BUILDER_UV_CACHE="$CACHE_DIR/uv-cache"
 BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"
 BUILDER_PIP_CACHE="$CACHE_DIR/pip-cache"
 mkdir -p "$BUILDER_UV_CACHE" "$BUILDER_UV_PYTHON_CACHE" "$BUILDER_PIP_CACHE"
-mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" "$BUILD/licenses/third-party" \
+mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" "$BUILD/licenses/third-party" "$BUILD/licenses/postgresql" \
   "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" \
   "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
 ORIGINAL_BUILD_ROOT="$BUILD"
@@ -323,16 +324,74 @@ fetch "https://github.com/johnkerl/miller/releases/download/v${MILLER_VERSION}/m
 verify_one "$MILLER_AR" "$MILLER_SHA256"
 extract_single "$MILLER_AR" mlr "$BUILD/bin/mlr"
 
-log "PostgreSQL $POSTGRES_VERSION portable database engineering runtime"
-PG_SERVER_AR="$SELF_DIR/vendor/database/postgres-server-${POSTGRES_VERSION}-linux-x64.txz"
+log "PostgreSQL $POSTGRES_VERSION from pinned official source"
+PG_SOURCE_AR="$DL/postgresql-${POSTGRES_VERSION}.tar.bz2"
 PG_CLIENT_AR="$SELF_DIR/vendor/database/postgresql-client-${POSTGRES_VERSION}-linux-x64-gnu.tar.gz"
 PLCHECK_AR="$SELF_DIR/vendor/database/plpgsql-check-${PLPGSQL_CHECK_VERSION}-pg17-linux-x64-gnu.tar.gz"
-verify_one "$PG_SERVER_AR" "$POSTGRES_SERVER_SHA256"
+fetch "$POSTGRES_SOURCE_URL" "$PG_SOURCE_AR"
+verify_one "$PG_SOURCE_AR" "$POSTGRES_SOURCE_SHA256"
 verify_one "$PG_CLIENT_AR" "$POSTGRES_CLIENT_SHA256"
 verify_one "$PLCHECK_AR" "$PLPGSQL_CHECK_SHA256"
-rm -rf "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client"
-mkdir -p "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$WORK/postgres-client" "$WORK/plcheck"
-tar -xJf "$PG_SERVER_AR" -C "$BUILD/runtime/postgres/server"
+
+# Build the ordinary PostgreSQL installation tree at a stable in-container path.
+# Optional readline/zlib/ICU integrations are disabled to avoid adding host
+# library requirements; this is a portability choice, not a size-minimization
+# exercise. The release source tarball and build image are both pinned.
+PG_BUILD_WORK="$WORK/postgres-source-build"
+rm -rf "$PG_BUILD_WORK" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client"
+mkdir -p "$PG_BUILD_WORK" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$WORK/postgres-client" "$WORK/plcheck"
+tar -xjf "$PG_SOURCE_AR" -C "$PG_BUILD_WORK"
+POSTGRES_BUILD_IMAGE_REF="${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}"
+docker pull "$POSTGRES_BUILD_IMAGE_REF" >/dev/null
+docker run --rm \
+  -e POSTGRES_VERSION="$POSTGRES_VERSION" \
+  -e HOST_UID="$(id -u)" \
+  -e HOST_GID="$(id -g)" \
+  -v "$PG_BUILD_WORK:/work" \
+  "$POSTGRES_BUILD_IMAGE_REF" bash -lc '
+    set -euo pipefail
+    restore_owner() { chown -R "$HOST_UID:$HOST_GID" /work >/dev/null 2>&1 || true; }
+    trap restore_owner EXIT
+    # The pinned manylinux image lacks flex; PostgreSQL 17 configure checks for
+    # it even though the release tarball already contains generated sources.
+    dnf -y install flex >/dev/null
+    cd "/work/postgresql-${POSTGRES_VERSION}"
+    ./configure --prefix=/usr/local/pg-build --without-readline --without-zlib --without-icu >/dev/null
+    make -j2 >/dev/null
+    make DESTDIR=/work/stage install >/dev/null
+    make -C contrib/amcheck -j2 >/dev/null
+    make -C contrib/amcheck DESTDIR=/work/stage install >/dev/null
+  '
+cp -a "$PG_BUILD_WORK/stage/usr/local/pg-build/." "$BUILD/runtime/postgres/server/"
+install -m 0644 "$PG_BUILD_WORK/postgresql-${POSTGRES_VERSION}/COPYRIGHT" "$BUILD/licenses/postgresql/COPYRIGHT"
+
+# Fail closed if the source-built server accidentally regains the opaque native
+# library bundle that motivated removal of the prebuilt server.
+if find "$BUILD/runtime/postgres/server" -type f \
+  \( -name 'libssl.so*' -o -name 'libcrypto.so*' -o -name 'libicu*.so*' -o -name 'libxml2.so*' -o -name 'libxslt.so*' -o -name 'liblzma.so*' -o -name 'libz.so*' -o -name 'libossp-uuid.so*' \) \
+  -print -quit | grep -q .; then
+  echo 'Source-built PostgreSQL server unexpectedly contains a bundled third-party shared library.' >&2
+  exit 1
+fi
+SERVER_MAX_GLIBC="$(find "$BUILD/runtime/postgres/server" -type f -print0 | while IFS= read -r -d '' f; do
+  if file "$f" | grep -q ELF; then readelf --version-info "$f" 2>/dev/null || true; fi
+done | grep -oE 'GLIBC_[0-9]+([.][0-9]+)+' | sort -Vu | tail -1)"
+[[ -n "$SERVER_MAX_GLIBC" ]] || { echo 'Could not determine source-built PostgreSQL GLIBC floor.' >&2; exit 1; }
+version_at_least "$MIN_GLIBC_VERSION" "${SERVER_MAX_GLIBC#GLIBC_}" || {
+  echo "Source-built PostgreSQL exceeds runtime GLIBC floor: $SERVER_MAX_GLIBC > GLIBC_$MIN_GLIBC_VERSION" >&2
+  exit 1
+}
+while IFS= read -r -d '' f; do
+  if file "$f" | grep -q ELF; then
+    deps="$(ldd "$f" 2>&1 || true)"
+    if grep -Fq 'not found' <<<"$deps"; then
+      echo "Unresolved PostgreSQL runtime dependency: $f" >&2
+      printf '%s\n' "$deps" >&2
+      exit 1
+    fi
+  fi
+done < <(find "$BUILD/runtime/postgres/server" -type f -print0)
+
 tar -xzf "$PG_CLIENT_AR" -C "$WORK/postgres-client"
 cp -a "$WORK/postgres-client/client-payload/." "$BUILD/runtime/postgres/client/"
 tar -xzf "$PLCHECK_AR" -C "$WORK/plcheck"
@@ -382,7 +441,7 @@ cat > "$BUILD/manifest/environment.json" <<JSON
     "miller": "$MILLER_VERSION"
   },
   "capabilities": {
-    "postgresql": {"server": "$POSTGRES_VERSION", "pgtap": "$PGTAP_VERSION", "plpgsql_check": "$PLPGSQL_CHECK_VERSION", "client_tools": true, "disposable_clusters": true, "pgbench": true, "dump_restore": true, "amcheck": true, "checksums": true},
+    "postgresql": {"server": "$POSTGRES_VERSION", "server_source": "$POSTGRES_SOURCE_URL", "server_source_sha256": "$POSTGRES_SOURCE_SHA256", "server_build_image": "${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}", "pgtap": "$PGTAP_VERSION", "plpgsql_check": "$PLPGSQL_CHECK_VERSION", "client_tools": true, "disposable_clusters": true, "pgbench": true, "dump_restore": true, "amcheck": true, "checksums": true},
     "node_capsules": {"postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION"},
     "utilities": {"shellcheck": "$SHELLCHECK_VERSION", "miller": "$MILLER_VERSION", "httpx_cli": true}
   },
@@ -412,7 +471,8 @@ source_row gitleaks "$GITLEAKS_VERSION" "https://github.com/gitleaks/gitleaks/re
 source_row shellcheck "$SHELLCHECK_VERSION" "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/shellcheck-v$SHELLCHECK_VERSION.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256"
 source_row shellcheck-source "$SHELLCHECK_VERSION" "https://github.com/koalaman/shellcheck/archive/refs/tags/v$SHELLCHECK_VERSION.tar.gz" "$SHELLCHECK_SOURCE_SHA256"
 source_row miller "$MILLER_VERSION" "https://github.com/johnkerl/miller/releases/download/v$MILLER_VERSION/miller-$MILLER_VERSION-linux-amd64.tar.gz" "$MILLER_SHA256"
-source_row postgres-server "$POSTGRES_VERSION" "vendor/database/postgres-server-$POSTGRES_VERSION-linux-x64.txz" "$POSTGRES_SERVER_SHA256"
+source_row postgres-server-source "$POSTGRES_VERSION" "$POSTGRES_SOURCE_URL" "$POSTGRES_SOURCE_SHA256"
+source_row postgres-server-build-image manylinux_2_28_x86_64 "$POSTGRES_BUILD_IMAGE" "$POSTGRES_BUILD_IMAGE_SHA256"
 source_row postgres-client "$POSTGRES_VERSION" "vendor/database/postgresql-client-$POSTGRES_VERSION-linux-x64-gnu.tar.gz" "$POSTGRES_CLIENT_SHA256"
 source_row pgtap "$PGTAP_VERSION" "vendor/pgtap/pgtap--$PGTAP_VERSION.sql" "generated-from-$PGTAP_SOURCE_SHA256"
 source_row plpgsql-check "$PLPGSQL_CHECK_VERSION" "vendor/database/plpgsql-check-$PLPGSQL_CHECK_VERSION-pg17-linux-x64-gnu.tar.gz" "$PLPGSQL_CHECK_SHA256"

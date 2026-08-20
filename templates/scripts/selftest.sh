@@ -94,7 +94,7 @@ x=json.load(open(sys.argv[1])); assert x==[{'name':'b','count':2,'double':4}],x
 PY
 
 python - <<'PY'
-import http.server, socketserver, subprocess, threading
+import http.server, os, socketserver, subprocess, threading
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         body=b'agent-env-httpx-ok\n'
@@ -105,7 +105,15 @@ class H(http.server.BaseHTTPRequestHandler):
     def log_message(self,*a): pass
 with socketserver.TCPServer(('127.0.0.1',0),H) as s:
     t=threading.Thread(target=s.handle_request); t.start()
-    p=subprocess.run(['httpx',f'http://127.0.0.1:{s.server_address[1]}'],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    # The probe is deliberately run with dead inherited-style proxies. Local
+    # runtime verification must never depend on the host's proxy policy.
+    probe_env=os.environ.copy()
+    dead_proxy='http://127.0.0.1:9'
+    for key in ('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'):
+        probe_env[key]=dead_proxy
+    probe_env['NO_PROXY']='127.0.0.1,localhost'
+    probe_env['no_proxy']='127.0.0.1,localhost'
+    p=subprocess.run(['httpx',f'http://127.0.0.1:{s.server_address[1]}'],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=probe_env)
     t.join(5); assert p.returncode==0,p.stdout; assert 'agent-env-httpx-ok' in p.stdout,p.stdout
 PY
 

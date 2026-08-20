@@ -4,7 +4,7 @@ This runtime redistributes pinned third-party software. Exact versions, source U
 
 Direct third-party license and attribution texts for the redistributed command/database/capsule components are included under `licenses/third-party/`. ShellCheck 0.11.0 is GPL-3.0-only; its GPL license and exact pinned corresponding source archive are additionally included under `licenses/shellcheck/` and `licenses/source/`. The bundled Node and CPython distributions retain their upstream license files in their own runtime trees, and installed Python packages retain their package-provided license metadata.
 
-The prebuilt PostgreSQL server payload also carries shared libraries from its upstream portable distribution (including OpenSSL 1.1.1, ICU 60.2, libxml2, libxslt, liblzma, zlib, and OSSP uuid). The direct-license bundle below is not a legal-compliance conclusion for those nested libraries. Stable publication is blocked until their exact notices are retained and reviewed, or the server payload is replaced by a qualified source-built distribution whose license surface is controlled by this repository.
+The PostgreSQL server is built from the exact pinned official PostgreSQL source artifact in a digest-pinned manylinux 2.28 image rather than redistributed from an opaque prebuilt server bundle. Readline, zlib, and ICU integrations are disabled in that server build to avoid unnecessary external runtime-library dependencies, and the official PostgreSQL copyright notice is retained under `licenses/postgresql/`.
 
 The direct inventory includes:
 

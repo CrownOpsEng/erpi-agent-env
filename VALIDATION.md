@@ -32,14 +32,13 @@ A payload-affecting source commit is releasable only after **Accept runtime** bu
 
 The accepted archive hash and exact source SHA belong in machine-generated `acceptance.json` and the archive sidecar, not copied into narrative docs.
 
-## PostgreSQL native-input qualification
+## PostgreSQL source/native qualification
 
-The source-controlled PostgreSQL client and plpgsql_check payloads are qualified build inputs, not opaque trust shortcuts. Their pinned hashes are validated by source checks and by `build.sh` before extraction.
+The PostgreSQL server is not accepted from a prebuilt third-party binary bundle. Every full runtime build fetches the exact pinned official PostgreSQL source tarball, verifies its SHA-256, and builds the normal install prefix inside a digest-pinned manylinux 2.28 image. Optional readline, zlib, and ICU integrations are disabled to avoid unnecessary external runtime-library dependencies; the resulting ELF symbol floor and dynamic dependencies are checked before runtime acceptance.
 
-Their promotion baseline was a controlled GLIBC 2.28 build from pinned PostgreSQL 17.10 and plpgsql_check upstream sources, integrated with the pinned Zonky PostgreSQL 17.10 server and pgTAP 1.3.3, then exercised through hostile relocation, psql/extension execution, concurrent pgbench load, dump/restore, `pg_amcheck`, and stopped-cluster `pg_checksums`. Qualified maximum GLIBC requirements were 2.25 for the client payload and 2.17 for the plpgsql_check native payload.
+The source-controlled PostgreSQL client and plpgsql_check payloads remain qualified build inputs. Their pinned hashes are validated by source checks and by `build.sh` before extraction. Their existing promotion baseline is a controlled GLIBC 2.28 build from pinned PostgreSQL 17.10/plpgsql_check sources; qualified maximum GLIBC requirements were 2.25 for the client payload and 2.17 for plpgsql_check. `scripts/rebuild-qualified-database-assets.sh` retains their pinned maintainer reproduction path.
 
-Future native-payload changes require equivalent or stronger fail-closed qualification before their hashes may replace the pins. A harness defect is fixed and the complete qualification rerun from source; partial progress is not promoted as success.
-`scripts/rebuild-qualified-database-assets.sh` retains the pinned maintainer rebuild path for the source-controlled native payloads. It requires Docker and is deliberately separate from ordinary lightweight hydration; successful reproduction must match the pinned payload hashes exactly.
+Any future server source, configure, build-image, client, or extension-native change requires full source validation and runtime acceptance. A harness defect is fixed and the complete relevant qualification is rerun; partial progress is not promoted as success.
 
 ## Node capsule boundary
 
@@ -88,6 +87,6 @@ A release requires:
 6. permanent release workflow verifies the accepted source/tag relationship;
 7. **Build distribution** rebuilds and accepts the tagged distribution before publication;
 8. release assets include the archive, SHA-256 sidecar, and `acceptance.json`;
-9. all nested third-party libraries redistributed inside the prebuilt PostgreSQL server have an exact retained notice/license inventory, or that server payload has been replaced and requalified with a distribution whose license surface is controlled by this repository.
+9. PostgreSQL server provenance remains pinned to the official source artifact and digest-pinned build image, with no opaque prebuilt server bundle or unresolved runtime dependency reintroduced.
 
 No manual tag/upload path is authoritative. Temporary qualification workflows must not become an alternate release system.
