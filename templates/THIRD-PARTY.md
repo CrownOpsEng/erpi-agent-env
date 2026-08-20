@@ -1,17 +1,17 @@
-# Third-party components
+# Third-party software
 
-The Magnet Agent Environment redistributes or downloads the following upstream components. Exact versions, artifact URLs and SHA-256 values used for the build are recorded in `manifest/sources.tsv` and `manifest/versions.env`.
+This runtime redistributes pinned third-party software. Exact versions, source URLs and SHA-256 values are recorded in `manifest/versions.env` and `manifest/sources.tsv`.
 
-- uv — https://github.com/astral-sh/uv
-- CPython distribution managed by uv — https://github.com/astral-sh/python-build-standalone and https://www.python.org/
-- Node.js — https://nodejs.org/
-- GitHub CLI — https://github.com/cli/cli
-- jq — https://github.com/jqlang/jq
-- yq — https://github.com/mikefarah/yq
-- ripgrep — https://github.com/BurntSushi/ripgrep
-- actionlint — https://github.com/rhysd/actionlint
-- gitleaks — https://github.com/gitleaks/gitleaks
+Key components and upstream licenses include:
 
-The Python analysis layer is installed from the source-frozen exact hash-locked `manifest/requirements.lock`; installed package metadata and bundled wheel metadata carry package-specific licensing information.
+- PostgreSQL 17.10 — PostgreSQL License.
+- pgTAP 1.3.3 — PostgreSQL-style license; upstream source is identified by its pinned source hash.
+- plpgsql_check 2.8.11 — permissive BSD/MIT-style license from upstream; the compiled payload is reproducible from the pinned source/toolchain described by the builder repository.
+- ShellCheck 0.11.0 — GPL-3.0-only. The binary is distributed unmodified; corresponding source is available from the exact upstream v0.11.0 tag/release identified in the source manifest.
+- Miller 6.20.2 — upstream open-source license; see the upstream release/source identified in the source manifest.
+- postgres 3.4.7 npm package — Unlicense.
+- `@postgres-language-server/wasm` 0.25.7 — MIT.
+- fast-check 4.9.0 — MIT.
+- pure-rand 8.4.2 — MIT.
 
-This notice is informational and does not replace the license files or terms supplied by each upstream project.
+Other bundled tools retain the license terms documented by their upstream projects. This file is a distribution notice, not a substitute for those license texts.

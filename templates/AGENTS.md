@@ -1,22 +1,13 @@
-# Agent environment router
+# Agent routing
 
-This bundle supplies execution capability. It does not supersede the current user's instruction or the target project's own `AGENTS.md`, dependency authority, safety rules, or command surface.
+This bundle supplies portable execution capability. It never supersedes the user or the target repository.
 
-Keep environment context small: do not preload `README.md`, manifests, build notes, or third-party notices unless the current task needs them.
-
-## Route by need
-
-- If a required local capability is uncertain, run `agent-env doctor` before concluding a tool is unavailable.
-- If GitHub may be needed in this turn, run `agent-env github` **once before substantial GitHub-dependent work**.
-  - If it reports `Shell GitHub network: unavailable` (exit 3), treat remote GitHub shell access as unavailable for the rest of the session unless the host/network changes. Do not retry `gh` authentication/API calls or GitHub `git fetch/push`; local Git still works. Use a platform GitHub connector/app if one is available.
-  - If shell GitHub networking is reachable but no credential source exists and the user is engaged, run `agent-env github-auth`, let the user complete browser/device authorization, then rerun `agent-env github` and continue.
-  - If a credential exists but GitHub rejects it, diagnose that credential/account state; do not blindly re-authenticate.
-  - For an HTTPS GitHub worktree that will push, run `agent-env github-git` once in that repository. It installs only a repo-local, location-neutral `gh` credential helper and verifies the push path with a no-write dry run.
-- Never print or request a GitHub token when the interactive OAuth flow is available. Never use `gh auth status --show-token`.
-- Do not request broader GitHub OAuth scopes in advance. If a concrete operation requires an additional scope, request only that scope while the user is engaged, verify the operation, and resume the task.
-- Credentials are host/session state. Do not copy credentials, SSH keys, `.npmrc`, cloud secrets, or production database secrets into this bundle.
-- Use project-owned commands and pinned dependencies when the project provides them. The bundle gives an agent tools; it does not grant permission to bypass repository controls.
-- For Magnet Photos, use the repository `Makefile` for Supabase/database operations rather than raw Supabase commands unless the user explicitly authorizes a one-off command.
-- Treat the verified payload as immutable. Ad-hoc UV tools, UV-managed extra Pythons, npm globals, and caches belong under `state/`; populated state is per-location/disposable and may need recreation after moving the bundle.
-
-Use `agent-env help` for the small command surface. Read `README.md` only when environment operation, recovery, portability, or build details are relevant.
+1. Follow current user instructions and the target repository's own `AGENTS.md`/documented commands first.
+2. Prefer an available native/platform capability when it fully covers the operation, then repository-owned commands/dependencies, then this toolbox to fill a demonstrated execution gap.
+3. Use `agent-env doctor` or `agent-env capabilities` when local capability is uncertain; do not preload the full README just to discover tools.
+4. PostgreSQL is explicit capability, not ambient PATH. Use repository-owned database commands when defined; otherwise `agent-env postgres run ...` creates an isolated disposable local server and `agent-env pg TOOL ...` invokes a client utility.
+5. Offline Node capsules never create project dependencies. `agent-env node-deps hydrate` acts only when the repository lock exactly matches a bundled package/version/integrity.
+6. If shell GitHub is genuinely needed, run `agent-env github` once; use `agent-env github-git` only when the current HTTPS worktree actually needs Git credential wiring. Do not repeatedly retry known-blocked shell networking; use an available platform connector instead.
+7. Credentials remain host/session state. The verified payload is immutable; caches, ad-hoc tools, disposable databases, and other mutable data belong under `state/`.
+8. Preserve one logical long-running repository validation. Give it an adequate outer timeout, or keep/supervise and poll that same process. Do not fragment a suite merely to satisfy an agent wrapper timeout.
+9. Use `agent-env help` for commands and the runtime README only for deeper environment/recovery detail.

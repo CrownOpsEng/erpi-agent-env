@@ -14,20 +14,16 @@ A working bundled `gh` binary does **not** imply the shell can reach GitHub. `ag
 
 ## Payload
 
-The finished bundle pins and verifies:
+The finished bundle pins and verifies a deliberately small generic capability layer:
 
-- uv 0.12.5
-- uv-managed CPython 3.13.14
+- uv 0.12.5 and uv-managed CPython 3.13.14
 - Node.js 24.19.0 LTS with npm/npx
-- GitHub CLI 2.97.0
-- jq 1.8.2
-- yq 4.53.3
-- ripgrep 15.2.0
-- actionlint 1.7.12
-- gitleaks 8.30.1
-- a small locked Python analysis layer including httpx, jsonschema, packaging, PyYAML, tomlkit and pytest
+- GitHub CLI, jq, yq, ripgrep, actionlint, gitleaks, ShellCheck, and Miller
+- a locked Python analysis layer with the HTTPX CLI completed, without project-specific pytest/setuptools/wheel requirements
+- PostgreSQL 17.10 server plus explicitly routed client/test/recovery tools, pgTAP 1.3.3, and plpgsql_check 2.8.11
+- exact offline npm capability capsules for postgres 3.4.7, PostgreSQL Language Server WASM 0.25.7, fast-check 4.9.0, and pure-rand 8.4.2
 
-It intentionally does **not** bundle Supabase, the Postgres language server, Git, Make, Docker/Podman, or PostgreSQL client tooling. Supabase/PGLS are project-owned; Git/Make are host prerequisites; a Docker client without a usable daemon is false capability; and direct database tooling could bypass repository-owned safe command surfaces.
+PostgreSQL is intentionally **not** placed on the activated `PATH`; use `agent-env pg TOOL ...`. The npm capsules are offline inputs, not a second project dependency authority. Supabase, application frameworks, project test frameworks, Git, Make, and Docker/Podman remain project/host concerns unless a future demonstrated need earns promotion.
 
 ## Portability model
 
@@ -54,10 +50,12 @@ magnet-agent-env-linux-x64-v<version>.tar.gz.sha256
 ```
 
 Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under `.download-cache/` and are never shipped.
+The small source-controlled PostgreSQL client/plpgsql_check payloads are qualified inputs, not ordinary build products. Maintainers can reproduce them from pinned upstream source in the pinned manylinux 2.28 container with `scripts/rebuild-qualified-database-assets.sh`; ordinary builds do not require Docker or a compiler.
+Because ShellCheck is GPL-3.0-only, the runtime also carries its license and exact pinned upstream source archive under `licenses/`; the binary is not redistributed without its source material.
 
 ## Acceptance
 
-The builder does not report success unless it verifies native assets; creates the environment under hostile pathnames; builds the venv with uv relocation support; uses the source-frozen hashed Python lock; rejects absolute symlinks and old build-root residue; relocates to a deep Unicode/spaces path; exercises compiled Python code and uv-generated console entrypoints; destroys/rebuilds Python offline; canonicalizes uv's optional timestamp metadata; verifies immutable files and symlink topology; resets mutable state; archives; freshly extracts; and verifies again.
+The builder does not report success unless it verifies native assets; creates the environment under hostile pathnames; builds the venv with uv relocation support; uses the source-frozen hashed Python lock; rejects absolute symlinks and old build-root residue; relocates to a deep Unicode/spaces path; exercises compiled Python code, HTTPX/ShellCheck/Miller, and the PostgreSQL capability; destroys/rebuilds Python offline; canonicalizes uv's optional timestamp metadata; verifies immutable files and symlink topology; resets mutable state; archives; freshly extracts; and verifies again.
 
 `VALIDATION.md` defines the current evidence/authority model. It is intentionally **not** a per-build ledger. Successful **Accept runtime** runs generate machine-readable `acceptance.json` evidence; published GitHub Releases carry the authoritative archive, checksum sidecar, and acceptance metadata. Change rationale remains in Git history, execution evidence remains in GitHub Actions, and superseded narrative records are removed from the live tree once they stop serving current operation.
 
@@ -92,7 +90,7 @@ The package expands commands available **within permissions the host already gra
 This repository is intentionally direct-to-`main`; PRs remain optional for explicit review/isolation. The permanent workflows are:
 
 - **Validate** — cheap source/static checks on every `main` push, optional PRs, and manual runs.
-- **Accept runtime** — full hydration/relocation/offline-rebuild/archive acceptance after payload-affecting `main` changes; retains only small checksum/`acceptance.json` evidence.
+- **Accept runtime** — full hydration/relocation/offline-rebuild/archive acceptance on payload-affecting PRs and `main` changes; retains only small checksum/`acceptance.json` evidence.
 - **Publish release** — manual or connector-triggered release gate. It resolves an exact accepted source commit, verifies **Accept runtime**, creates or verifies the exact release Git tag, and then creates or reuses the matching draft Release.
 - **Build distribution** — full tagged release build. It verifies the checked-out tag and mutable draft, attaches the archive, checksum and `acceptance.json`, and only then publishes the Release; it can also build a short-lived Actions artifact without a release tag.
 
