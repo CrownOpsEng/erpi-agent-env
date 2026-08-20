@@ -48,9 +48,11 @@ def free_on_loopback(port: int) -> bool:
 
 def client_env(base: dict[str, str] | None = None) -> dict[str, str]:
     env = dict(base or os.environ)
-    lib = str(CLIENT / "lib")
+    runtime_libs = [str(CLIENT / "lib"), str(SERVER / "lib")]
     existing = env.get("LD_LIBRARY_PATH", "")
-    env["LD_LIBRARY_PATH"] = lib if not existing else f"{lib}:{existing}"
+    if existing:
+        runtime_libs.append(existing)
+    env["LD_LIBRARY_PATH"] = ":".join(runtime_libs)
     return env
 
 

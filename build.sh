@@ -364,6 +364,9 @@ docker run --rm \
   '
 cp -a "$PG_BUILD_WORK/stage/usr/local/pg-build/." "$BUILD/runtime/postgres/server/"
 install -m 0644 "$PG_BUILD_WORK/postgresql-${POSTGRES_VERSION}/COPYRIGHT" "$BUILD/licenses/postgresql/COPYRIGHT"
+tar -xzf "$PG_CLIENT_AR" -C "$WORK/postgres-client"
+cp -a "$WORK/postgres-client/client-payload/." "$BUILD/runtime/postgres/client/"
+PG_RUNTIME_LD_LIBRARY_PATH="$BUILD/runtime/postgres/client/lib:$BUILD/runtime/postgres/server/lib"
 
 # Fail closed if the source-built server accidentally regains the opaque native
 # library bundle that motivated removal of the prebuilt server.
@@ -383,7 +386,7 @@ version_at_least "$MIN_GLIBC_VERSION" "${SERVER_MAX_GLIBC#GLIBC_}" || {
 }
 while IFS= read -r -d '' f; do
   if file "$f" | grep -q ELF; then
-    deps="$(ldd "$f" 2>&1 || true)"
+    deps="$(LD_LIBRARY_PATH="$PG_RUNTIME_LD_LIBRARY_PATH" ldd "$f" 2>&1 || true)"
     if grep -Fq 'not found' <<<"$deps"; then
       echo "Unresolved PostgreSQL runtime dependency: $f" >&2
       printf '%s\n' "$deps" >&2
@@ -392,16 +395,14 @@ while IFS= read -r -d '' f; do
   fi
 done < <(find "$BUILD/runtime/postgres/server" -type f -print0)
 
-tar -xzf "$PG_CLIENT_AR" -C "$WORK/postgres-client"
-cp -a "$WORK/postgres-client/client-payload/." "$BUILD/runtime/postgres/client/"
 tar -xzf "$PLCHECK_AR" -C "$WORK/plcheck"
 install -m 0644 "$SELF_DIR/vendor/pgtap/pgtap.control" "$BUILD/runtime/postgres/server/share/postgresql/extension/pgtap.control"
 install -m 0644 "$SELF_DIR/vendor/pgtap/pgtap--${PGTAP_VERSION}.sql" "$BUILD/runtime/postgres/server/share/postgresql/extension/pgtap--${PGTAP_VERSION}.sql"
 install -m 0644 "$WORK/plcheck/plcheck-payload/plpgsql_check.control" "$BUILD/runtime/postgres/server/share/postgresql/extension/plpgsql_check.control"
 install -m 0644 "$WORK/plcheck/plcheck-payload/plpgsql_check--2.8.sql" "$BUILD/runtime/postgres/server/share/postgresql/extension/plpgsql_check--2.8.sql"
 install -m 0755 "$WORK/plcheck/plcheck-payload/plpgsql_check.so" "$BUILD/runtime/postgres/server/lib/postgresql/plpgsql_check.so"
-"$BUILD/runtime/postgres/server/bin/postgres" --version | grep -F "$POSTGRES_VERSION" >/dev/null
-LD_LIBRARY_PATH="$BUILD/runtime/postgres/client/lib" "$BUILD/runtime/postgres/client/bin/psql" --version | grep -F "$POSTGRES_VERSION" >/dev/null
+LD_LIBRARY_PATH="$PG_RUNTIME_LD_LIBRARY_PATH" "$BUILD/runtime/postgres/server/bin/postgres" --version | grep -F "$POSTGRES_VERSION" >/dev/null
+LD_LIBRARY_PATH="$PG_RUNTIME_LD_LIBRARY_PATH" "$BUILD/runtime/postgres/client/bin/psql" --version | grep -F "$POSTGRES_VERSION" >/dev/null
 
 log "Runtime control surface"
 cp "$SELF_DIR/templates/activate" "$BUILD/activate"

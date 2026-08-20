@@ -180,6 +180,10 @@ grep -F './configure --prefix=/usr/local/pg-build --without-readline --without-z
 grep -F 'cp -a "$PG_BUILD_WORK/stage/usr/local/pg-build/." "$BUILD/runtime/postgres/server/"' "$ROOT/build.sh" >/dev/null
 grep -F 'Source-built PostgreSQL server unexpectedly contains a bundled third-party shared library.' "$ROOT/build.sh" >/dev/null
 grep -F 'Source-built PostgreSQL exceeds runtime GLIBC floor' "$ROOT/build.sh" >/dev/null
+grep -F 'PG_RUNTIME_LD_LIBRARY_PATH="$BUILD/runtime/postgres/client/lib:$BUILD/runtime/postgres/server/lib"' "$ROOT/build.sh" >/dev/null
+grep -F 'LD_LIBRARY_PATH="$PG_RUNTIME_LD_LIBRARY_PATH" ldd "$f"' "$ROOT/build.sh" >/dev/null
+grep -F 'runtime_libs = [str(CLIENT / "lib"), str(SERVER / "lib")]' "$ROOT/templates/scripts/postgres.py" >/dev/null
+grep -F 'env["LD_LIBRARY_PATH"] = ":".join(runtime_libs)' "$ROOT/templates/scripts/postgres.py" >/dev/null
 grep -F 'source_row postgres-server-source' "$ROOT/build.sh" >/dev/null
 grep -F 'source_row postgres-server-build-image' "$ROOT/build.sh" >/dev/null
 grep -F "probe_env['NO_PROXY']='127.0.0.1,localhost'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
