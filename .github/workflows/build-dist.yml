@@ -16,7 +16,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  qualify-postgres-server:
+    if: inputs.release_tag == 'qualify-postgres-server'
+    name: Qualify source-built PostgreSQL server
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact qualification source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Run source validation
+        run: ./tests/static-check.sh
+
+      - name: Qualify controlled PostgreSQL server
+        run: ./scripts/qualify-postgres-server.sh
+
+      - name: Upload qualified PostgreSQL server
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qualified-postgres-server-${{ github.sha }}
+          path: |
+            dist/postgres-server-qualification/*.tar.gz
+            dist/postgres-server-qualification/*.tar.gz.sha256
+            dist/postgres-server-qualification/qualification.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
   build:
+    if: inputs.release_tag != 'qualify-postgres-server'
     name: Linux x86-64 runtime
     runs-on: ubuntu-24.04
     timeout-minutes: 30
