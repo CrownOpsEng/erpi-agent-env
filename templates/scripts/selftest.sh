@@ -42,6 +42,26 @@ PY
 real_python="$(readlink -f "$ROOT/env/bin/.python-real")"
 case "$real_python" in "$ROOT/runtime/python/"*) ;; *) echo "Venv interpreter escapes bundled runtime: $real_python" >&2; exit 1;; esac
 
+python - <<'PY_META'
+import csv, json, os, pathlib, re
+root=pathlib.Path(os.environ['MAGNET_AGENT_ENV'])
+env=json.loads((root/'manifest/environment.json').read_text(encoding='utf-8'))
+python_meta=env['python_provenance']
+assert python_meta['version']=='3.13.14'
+assert python_meta['build']=='20260805'
+assert re.fullmatch(r'[0-9a-f]{64}',python_meta['sha256'])
+assert (root/'runtime/python/current/BUILD').read_text(encoding='utf-8').strip()==python_meta['build']
+with (root/'manifest/sources.tsv').open('r',encoding='utf-8',newline='') as handle:
+    rows=list(csv.reader(handle,delimiter='\t'))
+assert rows and rows[0]==['component','version','url','sha256'], rows[:1]
+assert all(len(row)==4 and all(cell for cell in row) for row in rows[1:]), rows
+components={row[0] for row in rows[1:]}
+assert {'python-build-standalone','postgres-server','node-postgres','pgls-wasm'} <= components
+licenses=root/'licenses/third-party'
+notice=licenses/'THIRD-PARTY-LICENSES.md'
+assert notice.is_file() and notice.stat().st_size>10000,notice
+PY_META
+
 uv --version
 gh --version
 node --version
@@ -61,7 +81,8 @@ printf 'magnet\n' | rg -q magnet
 node -e 'if (process.versions.node !== "24.19.0") process.exit(1)'
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-env-selftest.XXXXXX")"
-trap 'rm -rf "$TMP"' EXIT
+cleanup_tmp() { rm -rf "$TMP"; }
+trap cleanup_tmp EXIT
 printf '#!/bin/sh\nprintf "ok\\n"\n' > "$TMP/good.sh"
 printf '#!/bin/sh\necho $UNQUOTED\n' > "$TMP/bad.sh"
 shellcheck "$TMP/good.sh" >/dev/null
@@ -88,6 +109,33 @@ with socketserver.TCPServer(('127.0.0.1',0),H) as s:
     t.join(5); assert p.returncode==0,p.stdout; assert 'agent-env-httpx-ok' in p.stdout,p.stdout
 PY
 
+# Prove the actual immutable Node capsules hydrate from the repository lock
+# contract, execute, record content-bound ownership, and clean without network.
+NODE_FIXTURE="$TMP/node-fixture"
+mkdir -p "$NODE_FIXTURE"
+printf '{"name":"agent-env-node-selftest","version":"1.0.0","type":"module"}\n' > "$NODE_FIXTURE/package.json"
+python - <<'PY' "$ROOT/manifest/node-capsules.json" "$NODE_FIXTURE/package-lock.json"
+import json,sys
+manifest=json.load(open(sys.argv[1],encoding='utf-8'))
+packages={"": {"name":"agent-env-node-selftest","version":"1.0.0"}}
+for name,cap in manifest['packages'].items():
+    packages[f'node_modules/{name}']={'version':cap['version'],'integrity':cap['integrity']}
+json.dump({'name':'agent-env-node-selftest','version':'1.0.0','lockfileVersion':3,'requires':True,'packages':packages},open(sys.argv[2],'w',encoding='utf-8'),indent=2)
+PY
+"$ROOT/bin/agent-env" node-deps --repo "$NODE_FIXTURE" hydrate >/dev/null
+(
+  cd "$NODE_FIXTURE"
+  node --input-type=module -e 'import postgres from "postgres"; import * as pgls from "@postgres-language-server/wasm"; import * as fc from "fast-check"; import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus"; if(typeof postgres!=="function"||typeof pgls!=="object"||typeof fc.assert!=="function"||typeof xoroshiro128plus!=="function") process.exit(1)'
+)
+python - <<'PY' "$NODE_FIXTURE/node_modules/.agent-env-node-deps.json"
+import json,re,sys
+marker=json.load(open(sys.argv[1],encoding='utf-8'))
+assert marker['schema']==2 and len(marker['packages'])==4
+for record in marker['packages'].values(): assert re.fullmatch(r'[0-9a-f]{64}',record['tree_sha256'])
+PY
+"$ROOT/bin/agent-env" node-deps --repo "$NODE_FIXTURE" clean >/dev/null
+[[ ! -e "$NODE_FIXTURE/node_modules/.agent-env-node-deps.json" ]]
+
 cat > "$TMP/pgtap.sql" <<'SQL'
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
@@ -97,17 +145,77 @@ SELECT is(2,2,'two equals two');
 SELECT * FROM finish();
 ROLLBACK;
 SQL
-"$ROOT/bin/agent-env" postgres run --port 54322 -- bash -ceu '
+cat > "$TMP/pgtap-bad.sql" <<'SQL'
+BEGIN;
+CREATE EXTENSION IF NOT EXISTS pgtap;
+SELECT plan(1);
+SELECT ok(false,'intentional negative self-test');
+SELECT * FROM finish();
+ROLLBACK;
+SQL
+
+free_port() {
+  python - <<'PY'
+import socket
+with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as s:
+    s.bind(('127.0.0.1',0)); print(s.getsockname()[1])
+PY
+}
+PG_PORT="$(free_port)"
+"$ROOT/bin/agent-env" postgres run --port "$PG_PORT" -- bash -ceu '
   "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -Atc "select version()" | grep -F "PostgreSQL 17.10" >/dev/null
   "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create extension if not exists plpgsql_check" >/dev/null
   "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create or replace function selftest_good() returns int language plpgsql as \$\$ begin return 1; end \$\$" >/dev/null
   "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -Atc "select count(*) from plpgsql_check_function_tb('"'"'selftest_good()'"'"')" | grep -Fx 0 >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pgtap '"$TMP"'/pgtap.sql
+  "$MAGNET_AGENT_ENV/bin/agent-env" pgtap '"$TMP"'/pgtap.sql >/dev/null
+  if "$MAGNET_AGENT_ENV/bin/agent-env" pgtap '"$TMP"'/pgtap-bad.sql >/dev/null 2>&1; then echo "pgTAP negative probe unexpectedly passed" >&2; exit 1; fi
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create table selftest_data(id integer primary key, note text); insert into selftest_data values (1, '"'"'ok'"'"');" >/dev/null
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump -Fc -f '"$TMP"'/selftest.dump postgres
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg createdb selftest_restore
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg pg_restore -d selftest_restore '"$TMP"'/selftest.dump
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -d selftest_restore -Atc "select note from selftest_data where id=1" | grep -Fx ok >/dev/null
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg pg_amcheck --install-missing --database=postgres >/dev/null
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg pgbench -i -s 1 postgres >/dev/null
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg pgbench -c 2 -j 1 -t 2 postgres >/dev/null
 '
+
+# Nonzero child status must survive teardown and leave no cluster state.
+NONZERO_PORT="$(free_port)"
+set +e
+"$ROOT/bin/agent-env" postgres run --port "$NONZERO_PORT" -- bash -c 'exit 23' >/dev/null 2>&1
+nonzero_rc=$?
+set -e
+[[ "$nonzero_rc" == 23 ]] || { echo "PostgreSQL runner changed child exit 23 to $nonzero_rc" >&2; exit 1; }
+
+# An interrupted command must still stop/check/delete its database cluster.
+SIGNAL_PORT="$(free_port)"
+SIGNAL_READY="$TMP/postgres-signal-ready"
+"$ROOT/bin/agent-env" postgres run --port "$SIGNAL_PORT" -- python -c 'import pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text("ready",encoding="utf-8"); time.sleep(30)' "$SIGNAL_READY" >/dev/null 2>&1 &
+runner_pid=$!
+ready=0
+for (( attempt=0; attempt<100; attempt++ )); do
+  if [[ -f "$SIGNAL_READY" ]]; then ready=1; break; fi
+  sleep 0.05
+done
+(( ready == 1 )) || { kill -TERM "$runner_pid" 2>/dev/null || true; wait "$runner_pid" 2>/dev/null || true; echo 'PostgreSQL signal probe never reached child execution.' >&2; exit 1; }
+kill -TERM "$runner_pid"
+set +e
+wait "$runner_pid"
+signal_rc=$?
+set -e
+[[ "$signal_rc" != 0 ]] || { echo 'PostgreSQL signal probe unexpectedly returned success.' >&2; exit 1; }
 
 if find "$ROOT/state/postgres" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
   echo 'PostgreSQL self-test left mutable cluster state.' >&2; exit 1
 fi
+python - <<'PY' "$PG_PORT" "$NONZERO_PORT" "$SIGNAL_PORT"
+import socket,sys
+for raw in sys.argv[1:]:
+    port=int(raw)
+    with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+        s.bind(('127.0.0.1',port))
+PY
 
 while IFS= read -r -d '' link; do
   target="$(readlink "$link")"

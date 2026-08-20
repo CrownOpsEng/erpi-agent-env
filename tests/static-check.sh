@@ -11,7 +11,7 @@ for file in "$ROOT/templates/scripts/"*.py; do python3 -m py_compile "$file"; do
 python3 -m py_compile "$ROOT/scripts/normalize-python-sysconfig.py"
 python3 -m py_compile "$ROOT/scripts/write-acceptance-metadata.py"
 python3 - <<'PY' "$ROOT/versions.env" "$ROOT/requirements.in" "$ROOT/requirements.lock" "$ROOT"
-import hashlib, pathlib, re, sys
+import hashlib, json, pathlib, re, sys
 versions_path, req_in_path, lock_path, root = map(pathlib.Path, sys.argv[1:])
 versions=versions_path.read_text(encoding='utf-8'); req_in=req_in_path.read_text(encoding='utf-8'); lock=lock_path.read_text(encoding='utf-8')
 vals=dict(re.findall(r'^(\w+)="([^"]*)"$', versions, flags=re.M))
@@ -37,10 +37,26 @@ checks={
 for rel,key in checks.items():
     path=root/rel; assert path.is_file(),rel
     assert hashlib.sha256(path.read_bytes()).hexdigest()==vals[key],(rel,key)
+manifest_path=root/'vendor/node-capsules/manifest.json'
+manifest=json.loads(manifest_path.read_text(encoding='utf-8'))
+expected={
+    'postgres': (vals['POSTGRES_JS_VERSION'], f"postgres-{vals['POSTGRES_JS_VERSION']}.tgz", vals['POSTGRES_JS_SHA256']),
+    '@postgres-language-server/wasm': (vals['PGLS_WASM_VERSION'], f"postgres-language-server-wasm-{vals['PGLS_WASM_VERSION']}.tgz", vals['PGLS_WASM_SHA256']),
+    'fast-check': (vals['FAST_CHECK_VERSION'], f"fast-check-{vals['FAST_CHECK_VERSION']}.tgz", vals['FAST_CHECK_SHA256']),
+    'pure-rand': (vals['PURE_RAND_VERSION'], f"pure-rand-{vals['PURE_RAND_VERSION']}.tgz", vals['PURE_RAND_SHA256']),
+}
+assert manifest.get('schema')==1
+assert isinstance(manifest.get('packages'),dict) and set(manifest['packages'])==set(expected)
+for name,(version,file,sha256) in expected.items():
+    record=manifest['packages'][name]
+    assert record.get('version')==version,(name,'version')
+    assert record.get('file')==file,(name,'file')
+    assert record.get('sha256')==sha256,(name,'sha256')
+    assert re.fullmatch(r'sha512-[A-Za-z0-9+/]+={0,2}',record.get('integrity','')),(name,'integrity')
 print('hash-lock-and-vendor-shapes-ok')
 PY
 rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
-for file in requirements.lock templates/AGENTS.md templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh; do
+for file in requirements.lock templates/AGENTS.md templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json tests/node-deps-safety-check.sh; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime/build source missing: $file" >&2; exit 1; }
 done
 # The router is intentionally compact; large operational detail belongs in README/commands.
@@ -133,6 +149,16 @@ PY_VERSION
 grep -F 'BUILD_CUTOFF="2026-08-20T04:30:00Z"' "$ROOT/versions.env" >/dev/null
 grep -F 'ARCHIVE_MTIME="2026-08-20T04:30:00Z"' "$ROOT/versions.env" >/dev/null
 grep -F 'SHELLCHECK_SOURCE_SHA256="8b07554f92e4fbfc33f1539a1f475f21c6503ceae8f806efcc518b1f529f7102"' "$ROOT/versions.env" >/dev/null
+grep -F 'PYTHON_DISTRIBUTION_BUILD="20260805"' "$ROOT/versions.env" >/dev/null
+grep -F 'PYTHON_DISTRIBUTION_SHA256="39e82d05926bdcd206732026bcd878d9f00e288cd227d91c1fabf379b6ea4fa5"' "$ROOT/versions.env" >/dev/null
+grep -F 'cpython-3.13.14%2B20260805-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz' "$ROOT/versions.env" >/dev/null
+grep -F 'Managed Python build provenance does not match pinned build' "$ROOT/build.sh" >/dev/null
+grep -F '"python_provenance"' "$ROOT/build.sh" >/dev/null
+grep -F 'source_row python-build-standalone' "$ROOT/build.sh" >/dev/null
+grep -F "delimiter='\t'" "$ROOT/build.sh" >/dev/null
+! grep -F 'component\tversion\turl\tsha256' "$ROOT/build.sh"
+grep -F 'vendor/licenses/THIRD-PARTY-LICENSES.md' "$ROOT/build.sh" >/dev/null
+grep -F 'licenses/third-party/THIRD-PARTY-LICENSES.md' "$ROOT/build.sh" >/dev/null
 grep -F '@BUNDLE_VERSION@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
 grep -F 'shellcheck-v${SHELLCHECK_VERSION}-source.tar.gz' "$ROOT/build.sh" >/dev/null
 grep -F 'SHELLCHECK_SOURCE_SHA256' "$ROOT/build.sh" >/dev/null
@@ -155,12 +181,34 @@ grep -F -- '--- PostgreSQL startup log ---' "$ROOT/templates/scripts/postgres.py
 ! grep -F 'cluster / "socket"' "$ROOT/templates/scripts/postgres.py" >/dev/null
 grep -F 'package-lock.json is required' "$ROOT/templates/scripts/node-deps.py" >/dev/null
 ! grep -R -nE 'anon|authenticated|service_role|magnet\.' "$ROOT/templates/scripts/postgres.py" "$ROOT/templates/scripts/pgtap.py" "$ROOT/templates/scripts/node-deps.py"
+# RC2 boundaries are enforced both structurally and by executable regression tests.
+require_contains() {
+  local needle="$1" file="$2" label="$3"
+  grep -F -- "$needle" "$file" >/dev/null || { echo "Missing RC2 invariant: $label ($file)" >&2; exit 1; }
+}
+require_contains 'NODE_CAPSULE_MANIFEST="$SELF_DIR/vendor/node-capsules/manifest.json"' "$ROOT/build.sh" 'source-controlled Node capsule manifest'
+require_contains 'install -m 0644 "$NODE_CAPSULE_MANIFEST" "$BUILD/manifest/node-capsules.json"' "$ROOT/build.sh" 'runtime manifest copy'
+require_contains 'MARKER_SCHEMA = 2' "$ROOT/templates/scripts/node-deps.py" 'content-bound ownership marker schema'
+require_contains 'def package_tree_sha256' "$ROOT/templates/scripts/node-deps.py" 'package tree fingerprinting'
+require_contains 'ensure_directory_path(dest.parent, repo, label=f"parent path for {name}")' "$ROOT/templates/scripts/node-deps.py" 'scoped package parent containment'
+require_contains 'package destination changed during hydration; refusing partial commit' "$ROOT/templates/scripts/node-deps.py" 'transactional hydration recheck'
+require_contains 'owned package contents changed; refusing to continue' "$ROOT/templates/scripts/node-deps.py" 'content-bound cleanup ownership'
+require_contains 'unsupported ownership marker schema; refusing unsafe legacy/stale marker' "$ROOT/templates/scripts/node-deps.py" 'legacy marker refusal'
+require_contains 'node-deps --repo "$NODE_FIXTURE" hydrate' "$ROOT/templates/scripts/selftest.sh" 'real offline Node hydration'
+require_contains "marker['schema']==2" "$ROOT/templates/scripts/selftest.sh" 'runtime ownership marker validation'
+require_contains 'pgTAP negative probe unexpectedly passed' "$ROOT/templates/scripts/selftest.sh" 'pgTAP negative proof'
+require_contains 'pg_amcheck --install-missing --database=postgres' "$ROOT/templates/scripts/selftest.sh" 'pg_amcheck proof'
+require_contains 'pgbench -c 2 -j 1 -t 2 postgres' "$ROOT/templates/scripts/selftest.sh" 'pgbench concurrency proof'
+require_contains "bash -c 'exit 23'" "$ROOT/templates/scripts/selftest.sh" 'child exit propagation proof'
+require_contains 'kill -TERM "$runner_pid"' "$ROOT/templates/scripts/selftest.sh" 'signal teardown proof'
+require_contains 'for (( attempt=0; attempt<100; attempt++ )); do' "$ROOT/templates/scripts/selftest.sh" 'dependency-free signal readiness loop'
 "$ROOT/tests/github-auth-check.sh"
 "$ROOT/tests/acceptance-metadata-check.sh"
 "$ROOT/tests/uv-isolation-check.sh"
 "$ROOT/tests/repair-python-check.sh"
 "$ROOT/tests/python-link-relocation-check.sh"
 "$ROOT/tests/sysconfig-relocation-check.sh"
+"$ROOT/tests/node-deps-safety-check.sh"
 node_fetch_count="$(grep -Fc 'fetch "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" "$NODE_AR"' "$ROOT/build.sh")"
 [[ "$node_fetch_count" == 1 ]] || { echo "Expected exactly one Node fetch call, found $node_fetch_count" >&2; exit 1; }
 echo "Builder static checks passed."

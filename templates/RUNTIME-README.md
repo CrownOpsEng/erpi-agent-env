@@ -40,7 +40,9 @@ agent-env node-deps hydrate
 agent-env node-deps clean
 ```
 
-Hydration occurs only when `package-lock.json` contains the exact matching package version and npm integrity value. It never edits `package.json` or `package-lock.json`, runs no lifecycle scripts, and refuses to overwrite a mismatching package. The target repository remains dependency authority.
+Hydration occurs only when `package-lock.json` contains the exact matching package version and npm integrity value. The command validates every destination before writing, refuses symlinked `node_modules`/scope paths or repository escapes, stages all missing packages before committing any of them, runs no lifecycle scripts, and never edits `package.json` or `package-lock.json`. A matching package already owned by the repository remains repository-owned rather than being claimed by agent-env.
+
+Packages hydrated by agent-env are recorded with content-bound ownership metadata. `clean` first verifies every recorded package against that metadata and refuses the whole cleanup if any package was replaced or modified. Legacy/name-only ownership markers are not trusted. The target repository remains dependency authority.
 
 ## Long-running validation
 
@@ -57,6 +59,10 @@ agent-env github-git
 ```
 
 Probe shell GitHub only when it is actually needed. If shell networking is known blocked, do not retry it repeatedly; use an available platform connector/app.
+
+## Provenance and licenses
+
+`manifest/environment.json`, `manifest/versions.env`, and the machine-readable `manifest/sources.tsv` record the exact runtime/tool provenance, including the managed python-build-standalone build selected by pinned uv. Direct third-party license/notice material is under `licenses/third-party/`; ShellCheck's GPL license and exact corresponding source are under `licenses/shellcheck/` and `licenses/source/`. Node and CPython also retain their upstream license files inside their bundled runtime trees.
 
 ## Mutable state
 

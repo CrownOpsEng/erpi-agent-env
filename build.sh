@@ -68,7 +68,7 @@ BUILDER_UV_CACHE="$CACHE_DIR/uv-cache"
 BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"
 BUILDER_PIP_CACHE="$CACHE_DIR/pip-cache"
 mkdir -p "$BUILDER_UV_CACHE" "$BUILDER_UV_PYTHON_CACHE" "$BUILDER_PIP_CACHE"
-mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" \
+mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" "$BUILD/licenses/third-party" \
   "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" \
   "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
 ORIGINAL_BUILD_ROOT="$BUILD"
@@ -137,6 +137,7 @@ if grep -Fq '@BUNDLE_VERSION@' "$BUILD/README.md"; then
 fi
 cp "$SELF_DIR/templates/AGENTS.md" "$BUILD/AGENTS.md"
 cp "$SELF_DIR/templates/THIRD-PARTY.md" "$BUILD/THIRD-PARTY.md"
+install -m 0644 "$SELF_DIR/vendor/licenses/THIRD-PARTY-LICENSES.md" "$BUILD/licenses/third-party/THIRD-PARTY-LICENSES.md"
 printf '%s\n' "$BUNDLE_VERSION" > "$BUILD/VERSION"
 
 log "uv $UV_VERSION"
@@ -154,6 +155,15 @@ BASE_PY="$(find "$BUILD/runtime/python" -mindepth 2 -maxdepth 4 -path "*/bin/pyt
 [[ -n "$BASE_PY" && -x "$BASE_PY" ]] || { echo "uv did not install expected Python $PYTHON_VERSION" >&2; exit 1; }
 BASE_ROOT="$(CDPATH= cd -- "$(dirname -- "$BASE_PY")/.." && pwd -P)"
 PYTHON_DIST_ID="$(basename -- "$BASE_ROOT")"
+EXPECTED_PYTHON_DIST_ID="cpython-${PYTHON_VERSION}-linux-x86_64-gnu"
+[[ "$PYTHON_DIST_ID" == "$EXPECTED_PYTHON_DIST_ID" ]] || {
+  echo "Managed Python distribution identity drifted: expected $EXPECTED_PYTHON_DIST_ID; found $PYTHON_DIST_ID" >&2
+  exit 1
+}
+[[ -f "$BASE_ROOT/BUILD" && "$(tr -d '\r\n' < "$BASE_ROOT/BUILD")" == "$PYTHON_DISTRIBUTION_BUILD" ]] || {
+  echo "Managed Python build provenance does not match pinned build $PYTHON_DISTRIBUTION_BUILD." >&2
+  exit 1
+}
 # uv creates a top-level minor-version convenience symlink for managed Python
 # patch upgrades. Preserve that useful alias, but rewrite any absolute target
 # that stays within this managed-Python root to a relative target before the
@@ -221,17 +231,33 @@ for spec in \
   verify_one "$SELF_DIR/vendor/node-capsules/$file" "$hash"
   install -m 0644 "$SELF_DIR/vendor/node-capsules/$file" "$BUILD/runtime/node-capsules/$file"
 done
-cat > "$BUILD/manifest/node-capsules.json" <<JSON
-{
-  "schema": 1,
-  "packages": {
-    "postgres": {"version": "$POSTGRES_JS_VERSION", "file": "postgres-$POSTGRES_JS_VERSION.tgz", "sha256": "$POSTGRES_JS_SHA256", "integrity": "sha512-Jtc2612XINuBjIl/QTWsV5UvE8UHuNblcO3vVADSrKsrc6RqGX6lOW1cEo3CM2v0XG4Nat8nI+YM7/f26VxXLw=="},
-    "@postgres-language-server/wasm": {"version": "$PGLS_WASM_VERSION", "file": "postgres-language-server-wasm-$PGLS_WASM_VERSION.tgz", "sha256": "$PGLS_WASM_SHA256", "integrity": "sha512-Q+MIVjh4AHwy4bppJBNpKxrkLxpO9Uro9JjU5hn3SExe4xumnYoogK0ebOSLej7wriLpmqXVpiIlDqxDMkaSYw=="},
-    "fast-check": {"version": "$FAST_CHECK_VERSION", "file": "fast-check-$FAST_CHECK_VERSION.tgz", "sha256": "$FAST_CHECK_SHA256", "integrity": "sha512-7ms6T7SybUev/PQITciI0yLM2pOSFy5zpG8Ty7tQofcVaQUvrMXp6CBwqF6fThLCLOrfBtuHAtwq6Yu4XPCllg=="},
-    "pure-rand": {"version": "$PURE_RAND_VERSION", "file": "pure-rand-$PURE_RAND_VERSION.tgz", "sha256": "$PURE_RAND_SHA256", "integrity": "sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng=="}
-  }
+NODE_CAPSULE_MANIFEST="$SELF_DIR/vendor/node-capsules/manifest.json"
+"$BUILD/env/bin/python" - "$NODE_CAPSULE_MANIFEST" \
+  "$POSTGRES_JS_VERSION" "$POSTGRES_JS_SHA256" \
+  "$PGLS_WASM_VERSION" "$PGLS_WASM_SHA256" \
+  "$FAST_CHECK_VERSION" "$FAST_CHECK_SHA256" \
+  "$PURE_RAND_VERSION" "$PURE_RAND_SHA256" <<'PY_NODE_MANIFEST'
+import json, pathlib, re, sys
+path=pathlib.Path(sys.argv[1])
+values=sys.argv[2:]
+expected={
+    'postgres': (values[0], f'postgres-{values[0]}.tgz', values[1]),
+    '@postgres-language-server/wasm': (values[2], f'postgres-language-server-wasm-{values[2]}.tgz', values[3]),
+    'fast-check': (values[4], f'fast-check-{values[4]}.tgz', values[5]),
+    'pure-rand': (values[6], f'pure-rand-{values[6]}.tgz', values[7]),
 }
-JSON
+data=json.loads(path.read_text(encoding='utf-8'))
+assert data.get('schema') == 1, data.get('schema')
+packages=data.get('packages')
+assert isinstance(packages,dict) and set(packages)==set(expected), sorted(packages or {})
+for name,(version,file,sha256) in expected.items():
+    record=packages[name]
+    assert record.get('version') == version, (name,record.get('version'),version)
+    assert record.get('file') == file, (name,record.get('file'),file)
+    assert record.get('sha256') == sha256, (name,record.get('sha256'),sha256)
+    assert re.fullmatch(r'sha512-[A-Za-z0-9+/]+={0,2}', record.get('integrity','')), (name,record.get('integrity'))
+PY_NODE_MANIFEST
+install -m 0644 "$NODE_CAPSULE_MANIFEST" "$BUILD/manifest/node-capsules.json"
 
 log "GitHub CLI $GH_VERSION"
 GH_AR="$DL/gh_${GH_VERSION}_linux_amd64.tar.gz"
@@ -364,33 +390,44 @@ cat > "$BUILD/manifest/environment.json" <<JSON
   "credentials_bundled": false,
   "github_auth": "host/session credentials; validate on demand with agent-env github",
   "mutable_paths": ["env/pyvenv.cfg", "state/"],
-  "project_authority_note": "Target repositories remain authoritative for dependencies, schemas, commands, safety policy, and application architecture. Offline capsules only satisfy exact matching repository locks."
+  "project_authority_note": "Target repositories remain authoritative for dependencies, schemas, commands, safety policy, and application architecture. Offline capsules only satisfy exact matching repository locks.",
+  "python_provenance": {"version": "$PYTHON_VERSION", "distribution": "$PYTHON_DIST_ID", "build": "$PYTHON_DISTRIBUTION_BUILD", "url": "$PYTHON_DISTRIBUTION_URL", "sha256": "$PYTHON_DISTRIBUTION_SHA256"}
 }
 JSON
 
-cat > "$BUILD/manifest/sources.tsv" <<SOURCES
-component\tversion\turl\tsha256
-uv\t$UV_VERSION\thttps://releases.astral.sh/github/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz\t$UV_SHA256
-node\t$NODE_VERSION\thttps://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz\t$NODE_SHA256
-gh\t$GH_VERSION\thttps://github.com/cli/cli/releases/download/v$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz\t$GH_SHA256
-jq\t$JQ_VERSION\thttps://github.com/jqlang/jq/releases/download/jq-$JQ_VERSION/jq-linux-amd64\t$JQ_SHA256
-yq\t$YQ_VERSION\thttps://github.com/mikefarah/yq/releases/download/v$YQ_VERSION/yq_linux_amd64\t$YQ_SHA256
-pip-bootstrap\t26.1.2\t$PIP_BOOTSTRAP_WHEEL_URL\t$PIP_BOOTSTRAP_WHEEL_SHA256
-ripgrep\t$RIPGREP_VERSION\thttps://github.com/BurntSushi/ripgrep/releases/download/$RIPGREP_VERSION/ripgrep-$RIPGREP_VERSION-x86_64-unknown-linux-musl.tar.gz\t$RIPGREP_SHA256
-actionlint\t$ACTIONLINT_VERSION\thttps://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz\t$ACTIONLINT_SHA256
-gitleaks\t$GITLEAKS_VERSION\thttps://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz\t$GITLEAKS_SHA256
-shellcheck	$SHELLCHECK_VERSION	https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/shellcheck-v$SHELLCHECK_VERSION.linux.x86_64.tar.xz	$SHELLCHECK_SHA256
-shellcheck-source	$SHELLCHECK_VERSION	https://github.com/koalaman/shellcheck/archive/refs/tags/v$SHELLCHECK_VERSION.tar.gz	$SHELLCHECK_SOURCE_SHA256
-miller	$MILLER_VERSION	https://github.com/johnkerl/miller/releases/download/v$MILLER_VERSION/miller-$MILLER_VERSION-linux-amd64.tar.gz	$MILLER_SHA256
-postgres-server	$POSTGRES_VERSION	vendor/database/postgres-server-$POSTGRES_VERSION-linux-x64.txz	$POSTGRES_SERVER_SHA256
-postgres-client	$POSTGRES_VERSION	vendor/database/postgresql-client-$POSTGRES_VERSION-linux-x64-gnu.tar.gz	$POSTGRES_CLIENT_SHA256
-pgtap	$PGTAP_VERSION	vendor/pgtap/pgtap--$PGTAP_VERSION.sql	generated-from-$PGTAP_SOURCE_SHA256
-plpgsql-check	$PLPGSQL_CHECK_VERSION	vendor/database/plpgsql-check-$PLPGSQL_CHECK_VERSION-pg17-linux-x64-gnu.tar.gz	$PLPGSQL_CHECK_SHA256
-node-postgres	$POSTGRES_JS_VERSION	vendor/node-capsules/postgres-$POSTGRES_JS_VERSION.tgz	$POSTGRES_JS_SHA256
-pgls-wasm	$PGLS_WASM_VERSION	vendor/node-capsules/postgres-language-server-wasm-$PGLS_WASM_VERSION.tgz	$PGLS_WASM_SHA256
-fast-check	$FAST_CHECK_VERSION	vendor/node-capsules/fast-check-$FAST_CHECK_VERSION.tgz	$FAST_CHECK_SHA256
-pure-rand	$PURE_RAND_VERSION	vendor/node-capsules/pure-rand-$PURE_RAND_VERSION.tgz	$PURE_RAND_SHA256
-SOURCES
+SOURCES_TSV="$BUILD/manifest/sources.tsv"
+: > "$SOURCES_TSV"
+source_row() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$SOURCES_TSV"; }
+source_row component version url sha256
+source_row uv "$UV_VERSION" "https://releases.astral.sh/github/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256"
+source_row python-build-standalone "${PYTHON_VERSION}+${PYTHON_DISTRIBUTION_BUILD}" "$PYTHON_DISTRIBUTION_URL" "$PYTHON_DISTRIBUTION_SHA256"
+source_row node "$NODE_VERSION" "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" "$NODE_SHA256"
+source_row gh "$GH_VERSION" "https://github.com/cli/cli/releases/download/v$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz" "$GH_SHA256"
+source_row jq "$JQ_VERSION" "https://github.com/jqlang/jq/releases/download/jq-$JQ_VERSION/jq-linux-amd64" "$JQ_SHA256"
+source_row yq "$YQ_VERSION" "https://github.com/mikefarah/yq/releases/download/v$YQ_VERSION/yq_linux_amd64" "$YQ_SHA256"
+source_row pip-bootstrap 26.1.2 "$PIP_BOOTSTRAP_WHEEL_URL" "$PIP_BOOTSTRAP_WHEEL_SHA256"
+source_row ripgrep "$RIPGREP_VERSION" "https://github.com/BurntSushi/ripgrep/releases/download/$RIPGREP_VERSION/ripgrep-$RIPGREP_VERSION-x86_64-unknown-linux-musl.tar.gz" "$RIPGREP_SHA256"
+source_row actionlint "$ACTIONLINT_VERSION" "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" "$ACTIONLINT_SHA256"
+source_row gitleaks "$GITLEAKS_VERSION" "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "$GITLEAKS_SHA256"
+source_row shellcheck "$SHELLCHECK_VERSION" "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/shellcheck-v$SHELLCHECK_VERSION.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256"
+source_row shellcheck-source "$SHELLCHECK_VERSION" "https://github.com/koalaman/shellcheck/archive/refs/tags/v$SHELLCHECK_VERSION.tar.gz" "$SHELLCHECK_SOURCE_SHA256"
+source_row miller "$MILLER_VERSION" "https://github.com/johnkerl/miller/releases/download/v$MILLER_VERSION/miller-$MILLER_VERSION-linux-amd64.tar.gz" "$MILLER_SHA256"
+source_row postgres-server "$POSTGRES_VERSION" "vendor/database/postgres-server-$POSTGRES_VERSION-linux-x64.txz" "$POSTGRES_SERVER_SHA256"
+source_row postgres-client "$POSTGRES_VERSION" "vendor/database/postgresql-client-$POSTGRES_VERSION-linux-x64-gnu.tar.gz" "$POSTGRES_CLIENT_SHA256"
+source_row pgtap "$PGTAP_VERSION" "vendor/pgtap/pgtap--$PGTAP_VERSION.sql" "generated-from-$PGTAP_SOURCE_SHA256"
+source_row plpgsql-check "$PLPGSQL_CHECK_VERSION" "vendor/database/plpgsql-check-$PLPGSQL_CHECK_VERSION-pg17-linux-x64-gnu.tar.gz" "$PLPGSQL_CHECK_SHA256"
+source_row node-postgres "$POSTGRES_JS_VERSION" "vendor/node-capsules/postgres-$POSTGRES_JS_VERSION.tgz" "$POSTGRES_JS_SHA256"
+source_row pgls-wasm "$PGLS_WASM_VERSION" "vendor/node-capsules/postgres-language-server-wasm-$PGLS_WASM_VERSION.tgz" "$PGLS_WASM_SHA256"
+source_row fast-check "$FAST_CHECK_VERSION" "vendor/node-capsules/fast-check-$FAST_CHECK_VERSION.tgz" "$FAST_CHECK_SHA256"
+source_row pure-rand "$PURE_RAND_VERSION" "vendor/node-capsules/pure-rand-$PURE_RAND_VERSION.tgz" "$PURE_RAND_SHA256"
+"$BUILD/env/bin/python" - "$SOURCES_TSV" <<'PY_SOURCES'
+import csv, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+rows = list(csv.reader(path.open(encoding='utf-8', newline=''), delimiter='\t'))
+assert rows and rows[0] == ['component', 'version', 'url', 'sha256'], rows[:1]
+assert all(len(row) == 4 and all(row) for row in rows), rows
+assert b'\\t' not in path.read_bytes(), 'literal backslash-t found in sources.tsv'
+PY_SOURCES
 
 log "Normalize uv-managed Python install metadata for relocation"
 mapfile -t PY_SYSCONFIG_FILES < <(find "$BASE_ROOT/lib" -maxdepth 3 -type f -name '_sysconfigdata_*.py' -print)

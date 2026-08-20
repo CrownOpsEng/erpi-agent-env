@@ -4,7 +4,7 @@ This file defines the stable validation authority for Magnet Agent Environment. 
 
 ## Source validation
 
-`./tests/static-check.sh` is the fast source gate. It must fail closed on malformed scripts, inconsistent pins/locks, missing required source, unsafe credential handling, router bloat, invalid portability assumptions, and mismatched source-controlled qualified native payloads.
+`./tests/static-check.sh` is the fast source gate. It must fail closed on malformed scripts, inconsistent pins/locks, missing required source, unsafe credential handling, router bloat, invalid portability assumptions, mismatched source-controlled qualified native payloads, malformed provenance metadata, incomplete required direct-license material, and unsafe Node-capsule filesystem/ownership behavior.
 
 Source validation does not prove the runtime.
 
@@ -14,16 +14,19 @@ A payload-affecting source commit is releasable only after **Accept runtime** bu
 
 - verified upstream/custom payload hashes before execution or inclusion
 - supported Linux x86-64/glibc host contract
-- Python relocation repair, native-import checks, and offline venv destruction/rebuild
-- bundled command functional probes, including ShellCheck positive/negative behavior, Miller transformation, and HTTPX CLI startup
+- exact managed-Python build provenance plus Python relocation repair, native-import checks, and offline venv destruction/rebuild
+- bundled command functional probes, including ShellCheck positive/negative behavior, Miller transformation, and HTTPX CLI localhost execution
+- exact-lock offline Node capsule hydration using the real bundled packages, content-bound ownership, import execution, and safe cleanup
+- source-level Node-capsule negative tests for lock mismatch, all-or-nothing late conflicts, symlinked `node_modules`/scope escape attempts, stale ownership, pre-existing repository packages, and legacy-marker refusal
 - PostgreSQL server/client version and extension integration checks
-- disposable PostgreSQL start/query/pgTAP/plpgsql_check smoke when the acceptance host is unprivileged
+- disposable PostgreSQL start/query, pgTAP positive/negative accounting, plpgsql_check, dump/restore, `pg_amcheck`, pgbench, and stopped-cluster checksum verification when the acceptance host is unprivileged
+- PostgreSQL child-exit propagation and signal-interrupted teardown with no orphaned cluster state or occupied loopback port
 - hostile relocation with spaces/unicode/deep paths
 - PostgreSQL lifecycle under that hostile relocation path over explicit `127.0.0.1` TCP with Unix-domain sockets disabled, preventing relocation depth from becoming a socket-path failure mode
 - rejection of original build-root residue and absolute symlinks
 - pristine mutable state before packaging and no group/world-writable immutable regular files
 - immutable checksum/symlink manifest verification
-- bundled third-party compliance material required by the builder contract, including ShellCheck corresponding source/license
+- parseable four-column `manifest/sources.tsv` and bundled direct third-party compliance material required by the builder contract, including ShellCheck corresponding source/license
 - deterministic archive ordering/timestamps/gzip metadata and a stable first-use `pyvenv.cfg` sentinel
 - fresh archive extraction, repair, self-test, and stale-path rejection
 
@@ -37,6 +40,14 @@ Their promotion baseline was a controlled GLIBC 2.28 build from pinned PostgreSQ
 
 Future native-payload changes require equivalent or stronger fail-closed qualification before their hashes may replace the pins. A harness defect is fixed and the complete qualification rerun from source; partial progress is not promoted as success.
 `scripts/rebuild-qualified-database-assets.sh` retains the pinned maintainer rebuild path for the source-controlled native payloads. It requires Docker and is deliberately separate from ordinary lightweight hydration; successful reproduction must match the pinned payload hashes exactly.
+
+## Node capsule boundary
+
+Offline Node capsules supply immutable bytes only when a target repository's lock requests the exact pinned version and npm integrity. They never become dependency authority.
+
+Hydration must remain repository-contained and transactional: validate every destination and capsule before writing; reject symlink/path escapes; stage all missing packages before any commit; never claim matching packages that already belong to the repository; and write content-bound ownership only after successful commit. Cleanup must verify all recorded ownership before deleting anything and fail closed if the package contents or marker cannot be trusted.
+
+Any change to this boundary requires the dedicated source-level negative suite plus real runtime hydration/import/cleanup acceptance. A happy-path package import alone is not sufficient evidence.
 
 ## Long-running commands and supervision
 
@@ -71,9 +82,12 @@ A release requires:
 
 1. source commit passes source validation;
 2. the exact payload-affecting source commit passes **Accept runtime**;
-3. release version is updated intentionally and is not a prerelease identifier;
-4. permanent release workflow verifies the accepted source/tag relationship;
-5. **Build distribution** rebuilds and accepts the tagged distribution before publication;
-6. release assets include the archive, SHA-256 sidecar, and `acceptance.json`.
+3. direct candidate artifact inspection finds no unresolved release blocker;
+4. when Magnet Photos is the motivating consumer, current project promotion proof passes using the repository-owned interfaces;
+5. release version is updated intentionally and is not a prerelease identifier;
+6. permanent release workflow verifies the accepted source/tag relationship;
+7. **Build distribution** rebuilds and accepts the tagged distribution before publication;
+8. release assets include the archive, SHA-256 sidecar, and `acceptance.json`;
+9. all nested third-party libraries redistributed inside the prebuilt PostgreSQL server have an exact retained notice/license inventory, or that server payload has been replaced and requalified with a distribution whose license surface is controlled by this repository.
 
 No manual tag/upload path is authoritative. Temporary qualification workflows must not become an alternate release system.

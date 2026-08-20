@@ -16,7 +16,7 @@ A working bundled `gh` binary does **not** imply the shell can reach GitHub. `ag
 
 The finished bundle pins and verifies a deliberately small generic capability layer:
 
-- uv 0.12.5 and uv-managed CPython 3.13.14
+- uv 0.12.5 and uv-managed CPython 3.13.14 from an explicitly pinned python-build-standalone build
 - Node.js 24.19.0 LTS with npm/npx
 - GitHub CLI, jq, yq, ripgrep, actionlint, gitleaks, ShellCheck, and Miller
 - a locked Python analysis layer with the HTTPX CLI completed, without project-specific pytest/setuptools/wheel requirements
@@ -29,7 +29,7 @@ PostgreSQL is intentionally **not** placed on the activated `PATH`; use `agent-e
 
 The J2911 portable venv was used as a reference. Its strongest idea—self-locating repair of the venv base-Python `home` after a move—is retained. Its stale absolute console-script failure is not: `uv venv --relocatable` owns standard activation/entrypoint portability, the bundle repairs only the one `pyvenv.cfg` value that cannot remain valid when the bundled interpreter itself moves, and stale build-root residue is a hard failure.
 
-The uv-managed python-build-standalone runtime remains intact under `runtime/python/`; the venv reaches it through relative internal topology. uv install-time sysconfig prefix metadata is normalized into a location-derived form so the base runtime can move without making sysconfig mutable.
+The uv-managed python-build-standalone runtime remains intact under `runtime/python/`; the venv reaches it through relative internal topology. The selected distribution's exact build identifier, upstream URL and SHA-256 are pinned in `versions.env`, asserted against the installed runtime's `BUILD` file, and copied into runtime provenance. uv install-time sysconfig prefix metadata is normalized into a location-derived form so the base runtime can move without making sysconfig mutable.
 
 The supported runtime contract is GNU/Linux x86-64 with kernel >= 4.18, glibc >= 2.28, and libstdc++ exposing `GLIBCXX_3.4.25`. It is not Windows/macOS/ARM/musl portability.
 
@@ -55,11 +55,18 @@ Archive creation normalizes tar ordering/metadata, gzip headers, and the relocat
 
 Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under `.download-cache/` and are never shipped.
 The small source-controlled PostgreSQL client/plpgsql_check payloads are qualified inputs, not ordinary build products. Maintainers can reproduce them from pinned upstream source in the pinned manylinux 2.28 container with `scripts/rebuild-qualified-database-assets.sh`; ordinary builds do not require Docker or a compiler.
-Because ShellCheck is GPL-3.0-only, the runtime also carries its license and exact pinned upstream source archive under `licenses/`; the binary is not redistributed without its source material.
+
+Direct third-party license/attribution texts for redistributed command/database/capsule components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. The currently qualified prebuilt PostgreSQL server also contains nested runtime libraries from its upstream portable distribution; their exact notice set remains an explicit stable-publication gate rather than being silently treated as covered by PostgreSQL or Zonky licensing.
+
+## Offline Node capsule boundary
+
+The target repository's `package-lock.json` remains authority. `versions.env` pins the immutable capsule hashes and package versions used by the generic runtime; `vendor/node-capsules/manifest.json` is the source-controlled package/integrity manifest, the builder validates it against those pins before copying it to `manifest/node-capsules.json`, and source validation verifies the pins against both that manifest and the actual capsule bytes.
+
+Hydration is deliberately transactional and repository-contained. It validates all destinations before writing, rejects symlinked `node_modules` or scope parents and any resolved target outside the repository, stages every missing package before committing any of them, runs no lifecycle scripts, and does not claim packages already owned by the project. Agent-owned packages are recorded with deterministic content hashes; cleanup first verifies every record and refuses the entire operation if any owned package was replaced or modified. Dedicated negative tests preserve these invariants.
 
 ## Acceptance
 
-The builder does not report success unless it verifies native assets; creates the environment under hostile pathnames; builds the venv with uv relocation support; uses the source-frozen hashed Python lock; rejects absolute symlinks and old build-root residue; relocates to a deep Unicode/spaces path; exercises compiled Python code, HTTPX/ShellCheck/Miller, and the PostgreSQL capability; destroys/rebuilds Python offline; canonicalizes uv's optional timestamp metadata; verifies immutable files and symlink topology; resets mutable state; archives; freshly extracts; and verifies again.
+The builder does not report success unless it verifies native assets and source-controlled capsule/license inputs; creates the environment under hostile pathnames; builds the venv with uv relocation support; uses the source-frozen hashed Python lock; asserts exact managed-Python provenance; rejects absolute symlinks and old build-root residue; relocates to a deep Unicode/spaces path; exercises compiled Python code, HTTPX/ShellCheck/Miller, real offline Node capsule hydration/import/cleanup, and the PostgreSQL capability; destroys/rebuilds Python offline; exercises pgTAP failure handling, plpgsql_check, dump/restore, pg_amcheck, pgbench, child-exit propagation and signal cleanup; canonicalizes uv's optional timestamp metadata; verifies immutable files and symlink topology; validates the source TSV and third-party material; resets mutable state; archives; freshly extracts; and verifies again.
 
 `VALIDATION.md` defines the current evidence/authority model. It is intentionally **not** a per-build ledger. Successful **Accept runtime** runs generate machine-readable `acceptance.json` evidence; published GitHub Releases carry the authoritative archive, checksum sidecar, and acceptance metadata. Change rationale remains in Git history, execution evidence remains in GitHub Actions, and superseded narrative records are removed from the live tree once they stop serving current operation.
 
