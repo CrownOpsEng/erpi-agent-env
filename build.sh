@@ -357,10 +357,10 @@ docker run --rm \
     dnf -y install flex >/dev/null
     cd "/work/postgresql-${POSTGRES_VERSION}"
     ./configure --prefix=/usr/local/pg-build --without-readline --without-zlib --without-icu >/dev/null
-    make -j2 >/dev/null
-    make DESTDIR=/work/stage install >/dev/null
-    make -C contrib/amcheck -j2 >/dev/null
-    make -C contrib/amcheck DESTDIR=/work/stage install >/dev/null
+    make AROPT=crsD -j2 >/dev/null
+    make AROPT=crsD DESTDIR=/work/stage install >/dev/null
+    make -C contrib/amcheck AROPT=crsD -j2 >/dev/null
+    make -C contrib/amcheck AROPT=crsD DESTDIR=/work/stage install >/dev/null
   '
 cp -a "$PG_BUILD_WORK/stage/usr/local/pg-build/." "$BUILD/runtime/postgres/server/"
 install -m 0644 "$PG_BUILD_WORK/postgresql-${POSTGRES_VERSION}/COPYRIGHT" "$BUILD/licenses/postgresql/COPYRIGHT"
