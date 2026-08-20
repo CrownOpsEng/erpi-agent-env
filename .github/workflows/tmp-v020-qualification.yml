@@ -16,23 +16,36 @@ jobs:
   qualify:
     name: Qualify database and offline-tool candidates
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      - name: Qualify candidates
+      - name: Qualify candidates independently
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -u -o pipefail
           ROOT="$RUNNER_TEMP/v020-qualification"
           REPORT="$ROOT/report.txt"
           mkdir -p "$ROOT"
           exec > >(tee "$REPORT") 2>&1
 
+          FAILURES=0
           section() { printf '\n===== %s =====\n' "$*"; }
           sha() { sha256sum "$1" | awk '{print $1}'; }
+          phase() {
+            local name="$1"
+            shift
+            section "$name"
+            if ( set -euo pipefail; "$@" ); then
+              printf 'PHASE_%s=pass\n' "$(printf '%s' "$name" | tr '[:lower:] -/' '[:upper:]___')"
+            else
+              local rc=$?
+              printf 'PHASE_%s=fail rc=%s\n' "$(printf '%s' "$name" | tr '[:lower:] -/' '[:upper:]___')" "$rc"
+              FAILURES=$((FAILURES + 1))
+            fi
+          }
           gh_asset_url() {
             local repo="$1" tag="$2" asset="$3"
             gh api "repos/$repo/releases/tags/$tag" --jq ".assets[] | select(.name == \"$asset\") | .browser_download_url"
@@ -46,62 +59,122 @@ jobs:
             done | grep -oE 'GLIBC_[0-9]+([.][0-9]+)+' | sort -Vu | tail -1 || true
           }
 
-          section "Theseus PostgreSQL 17.10.0"
-          PG_ASSET='postgresql-17.10.0-x86_64-unknown-linux-gnu.tar.gz'
-          PG_URL="$(gh_asset_url theseus-rs/postgresql-binaries 17.10.0 "$PG_ASSET")"
-          test -n "$PG_URL"
-          curl -fL --retry 3 -o "$ROOT/$PG_ASSET" "$PG_URL"
-          echo "THESEUS_POSTGRES_URL=$PG_URL"
-          echo "THESEUS_POSTGRES_SHA256=$(sha "$ROOT/$PG_ASSET")"
-          mkdir -p "$ROOT/pg"
-          tar -xzf "$ROOT/$PG_ASSET" -C "$ROOT/pg"
-          PGROOT="$(find "$ROOT/pg" -type f -path '*/bin/postgres' -printf '%h\n' -quit | xargs dirname)"
-          test -x "$PGROOT/bin/postgres"
-          echo "PGROOT=$PGROOT"
-          echo "THESEUS_MAX_GLIBC=$(max_glibc "$PGROOT")"
-          for tool in postgres initdb pg_ctl pg_isready psql createdb dropdb pgbench pg_dump pg_restore pg_dumpall pg_amcheck pg_checksums pg_config; do
-            if [[ -x "$PGROOT/bin/$tool" ]]; then
-              printf 'PG_TOOL_%s=present\n' "$tool"
-            else
-              printf 'PG_TOOL_%s=missing\n' "$tool"
-            fi
-          done
-          "$PGROOT/bin/postgres" --version
-          "$PGROOT/bin/psql" --version
-          "$PGROOT/bin/pgbench" --version
-          "$PGROOT/bin/pg_dump" --version
-          "$PGROOT/bin/pg_amcheck" --version
-          "$PGROOT/bin/pg_config" --version
-          "$PGROOT/bin/pg_config" --configure
-          test -d "$($PGROOT/bin/pg_config --includedir-server)" && echo PG_SERVER_HEADERS=present || echo PG_SERVER_HEADERS=missing
-          test -f "$($PGROOT/bin/pg_config --pgxs)" && echo PG_PGXS=present || echo PG_PGXS=missing
+          qualify_postgres_build() {
+            local source_url='https://ftp.postgresql.org/pub/source/v17.10/postgresql-17.10.tar.bz2'
+            local sums_url='https://ftp.postgresql.org/pub/source/v17.10/postgresql-17.10.tar.bz2.sha256'
+            curl -fL --retry 3 -o "$ROOT/postgresql-17.10.tar.bz2" "$source_url"
+            curl -fL --retry 3 -o "$ROOT/postgresql-17.10.tar.bz2.sha256" "$sums_url"
+            local expected actual
+            expected="$(grep -oE '[0-9a-fA-F]{64}' "$ROOT/postgresql-17.10.tar.bz2.sha256" | head -1 | tr '[:upper:]' '[:lower:]')"
+            actual="$(sha "$ROOT/postgresql-17.10.tar.bz2")"
+            test -n "$expected"
+            test "$actual" = "$expected"
+            echo "POSTGRES_SOURCE_URL=$source_url"
+            echo "POSTGRES_SOURCE_SHA256=$actual"
+            tar -xjf "$ROOT/postgresql-17.10.tar.bz2" -C "$ROOT"
 
-          section "PostgreSQL relocation, integrity, recovery, concurrency and diagnostics"
-          MOVED="$ROOT/Relocated PostgreSQL – spaces unicode/deep/path/postgresql"
-          mkdir -p "$(dirname "$MOVED")"
-          cp -a "$PGROOT" "$MOVED"
-          PG="$MOVED"
-          export PATH="$PG/bin:$PATH"
-          export LD_LIBRARY_PATH="$PG/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          DATA="$ROOT/data"
-          SOCKET="$ROOT/socket"
-          mkdir -p "$SOCKET"
-          initdb -D "$DATA" --encoding=UTF8 --locale-provider=icu --icu-locale=en-US --data-checksums --auth=trust >/dev/null
-          cat >> "$DATA/postgresql.conf" <<CONF
+            curl -fL --retry 3 -o "$ROOT/plpgsql-check-2.8.11.tar.gz" https://github.com/okbob/plpgsql_check/archive/refs/tags/v2.8.11.tar.gz
+            echo "PLPGSQL_CHECK_SOURCE_SHA256=$(sha "$ROOT/plpgsql-check-2.8.11.tar.gz")"
+            tar -xzf "$ROOT/plpgsql-check-2.8.11.tar.gz" -C "$ROOT"
+
+            local image='quay.io/pypa/manylinux_2_28_x86_64:latest'
+            docker pull "$image" >/dev/null
+            local digest
+            digest="$(docker image inspect "$image" --format '{{index .RepoDigests 0}}')"
+            test -n "$digest"
+            echo "MANYLINUX_IMAGE=$digest"
+
+            docker run --rm -v "$ROOT:/work" "$digest" bash -lc '
+              set -euo pipefail
+              cd /work/postgresql-17.10
+              ./configure --prefix=/opt/pgclient --without-readline --without-zlib --without-icu
+              make -j2
+              make DESTDIR=/work/client-stage install
+              rm -rf /opt/pgclient
+              cp -a /work/client-stage/opt/pgclient /opt/pgclient
+              cd /work/plpgsql_check-2.8.11
+              make clean >/dev/null 2>&1 || true
+              make -j2 USE_PGXS=1 PG_CONFIG=/opt/pgclient/bin/pg_config
+              make USE_PGXS=1 PG_CONFIG=/opt/pgclient/bin/pg_config DESTDIR=/work/plcheck-stage install
+            '
+
+            local stage="$ROOT/client-stage/opt/pgclient"
+            test -x "$stage/bin/psql"
+            test -x "$stage/bin/pgbench"
+            test -x "$stage/bin/pg_dump"
+            test -x "$stage/bin/pg_restore"
+            test -x "$stage/bin/pg_amcheck"
+            test -x "$stage/bin/pg_checksums"
+            mkdir -p "$ROOT/client-payload/bin" "$ROOT/client-payload/lib"
+            for tool in psql pg_isready createdb dropdb pgbench pg_dump pg_restore pg_dumpall pg_amcheck pg_checksums pg_config; do
+              install -m 0755 "$stage/bin/$tool" "$ROOT/client-payload/bin/$tool"
+            done
+            cp -a "$stage/lib/libpq.so"* "$ROOT/client-payload/lib/"
+            echo "POSTGRES_CLIENT_MAX_GLIBC=$(max_glibc "$ROOT/client-payload")"
+            case "$(max_glibc "$ROOT/client-payload")" in
+              GLIBC_2.2|GLIBC_2.2.*|GLIBC_2.3|GLIBC_2.3.*|GLIBC_2.4|GLIBC_2.5|GLIBC_2.6|GLIBC_2.7|GLIBC_2.8|GLIBC_2.9|GLIBC_2.10|GLIBC_2.11|GLIBC_2.12|GLIBC_2.13|GLIBC_2.14|GLIBC_2.15|GLIBC_2.16|GLIBC_2.17|GLIBC_2.18|GLIBC_2.19|GLIBC_2.20|GLIBC_2.21|GLIBC_2.22|GLIBC_2.23|GLIBC_2.24|GLIBC_2.25|GLIBC_2.26|GLIBC_2.27|GLIBC_2.28) ;;
+              *) echo 'PostgreSQL client payload exceeds GLIBC 2.28 floor' >&2; return 1 ;;
+            esac
+            local so
+            so="$(find "$ROOT/plcheck-stage" -type f -name 'plpgsql_check.so' -print -quit)"
+            test -f "$so"
+            mkdir -p "$ROOT/plcheck-payload"
+            cp "$so" "$ROOT/plcheck-payload/"
+            cp "$ROOT/plpgsql_check-2.8.11/plpgsql_check.control" "$ROOT/plcheck-payload/"
+            cp "$ROOT/plpgsql_check-2.8.11"/plpgsql_check--*.sql "$ROOT/plcheck-payload/"
+            echo "PLPGSQL_CHECK_MAX_GLIBC=$(max_glibc "$ROOT/plcheck-payload")"
+            case "$(max_glibc "$ROOT/plcheck-payload")" in
+              GLIBC_2.2|GLIBC_2.2.*|GLIBC_2.3|GLIBC_2.3.*|GLIBC_2.4|GLIBC_2.5|GLIBC_2.6|GLIBC_2.7|GLIBC_2.8|GLIBC_2.9|GLIBC_2.10|GLIBC_2.11|GLIBC_2.12|GLIBC_2.13|GLIBC_2.14|GLIBC_2.15|GLIBC_2.16|GLIBC_2.17|GLIBC_2.18|GLIBC_2.19|GLIBC_2.20|GLIBC_2.21|GLIBC_2.22|GLIBC_2.23|GLIBC_2.24|GLIBC_2.25|GLIBC_2.26|GLIBC_2.27|GLIBC_2.28) ;;
+              *) echo 'plpgsql_check exceeds GLIBC 2.28 floor' >&2; return 1 ;;
+            esac
+            tar -czf "$ROOT/postgresql-client-17.10-linux-x64-gnu.tar.gz" -C "$ROOT" client-payload
+            tar -czf "$ROOT/plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz" -C "$ROOT" plcheck-payload
+            echo "POSTGRES_CLIENT_PAYLOAD_SHA256=$(sha "$ROOT/postgresql-client-17.10-linux-x64-gnu.tar.gz")"
+            echo "PLPGSQL_CHECK_PAYLOAD_SHA256=$(sha "$ROOT/plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz")"
+          }
+
+          qualify_combined_postgres() {
+            local jar="$ROOT/embedded-postgres-binaries-linux-amd64-17.10.0.jar"
+            curl -fL --retry 3 -o "$jar" 'https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/17.10.0/embedded-postgres-binaries-linux-amd64-17.10.0.jar'
+            echo "ZONKY_JAR_SHA256=$(sha "$jar")"
+            test "$(sha "$jar")" = 'a6c44794a7a258621b8cb98c196bf621cdd705d9fa73c3628166b658c419877a'
+            mkdir -p "$ROOT/zonky-jar" "$ROOT/server"
+            unzip -q "$jar" -d "$ROOT/zonky-jar"
+            local txz
+            txz="$(find "$ROOT/zonky-jar" -type f -name '*.txz' -print -quit)"
+            test -f "$txz"
+            echo "ZONKY_POSTGRES_TXZ_SHA256=$(sha "$txz")"
+            tar -xJf "$txz" -C "$ROOT/server"
+            local server="$ROOT/server"
+            test -x "$server/bin/postgres"
+            test -x "$server/bin/initdb"
+            test -x "$server/bin/pg_ctl"
+
+            local moved="$ROOT/Relocated database – spaces unicode/deep/postgres"
+            mkdir -p "$moved/server" "$moved/client"
+            cp -a "$server"/. "$moved/server/"
+            cp -a "$ROOT/client-payload"/. "$moved/client/"
+            local ld="$moved/client/lib"
+            local data="$ROOT/data"
+            local socket="$ROOT/socket"
+            mkdir -p "$socket"
+            "$moved/server/bin/initdb" -D "$data" --encoding=UTF8 --locale-provider=icu --icu-locale=en-US --data-checksums --auth=trust >/dev/null
+            cat >> "$data/postgresql.conf" <<CONF
           listen_addresses = '127.0.0.1'
           port = 55432
-          unix_socket_directories = '$SOCKET'
+          unix_socket_directories = '$socket'
           timezone = 'UTC'
           jit = off
           compute_query_id = auto
           max_connections = 60
           shared_preload_libraries = 'pg_stat_statements'
           CONF
-          pg_ctl -D "$DATA" -l "$ROOT/postgres.log" -w start
-          trap 'pg_ctl -D "$DATA" -m fast -w stop >/dev/null 2>&1 || true' EXIT
-          export PGHOST=127.0.0.1 PGPORT=55432 PGUSER="$USER" PGDATABASE=postgres
-          pg_isready
-          psql -v ON_ERROR_STOP=1 <<'SQL'
+            "$moved/server/bin/pg_ctl" -D "$data" -l "$ROOT/postgres.log" -w start
+            trap '"$moved/server/bin/pg_ctl" -D "$data" -m fast -w stop >/dev/null 2>&1 || true' RETURN
+            export PGHOST=127.0.0.1 PGPORT=55432 PGUSER="$USER" PGDATABASE=postgres
+            export LD_LIBRARY_PATH="$ld"
+            "$moved/client/bin/pg_isready"
+            "$moved/client/bin/psql" -v ON_ERROR_STOP=1 <<'SQL'
           create extension if not exists pg_stat_statements;
           create extension if not exists amcheck;
           create table q(id bigint primary key, value bigint not null default 0);
@@ -110,141 +183,147 @@ jobs:
           update q set value = value + 1 where id = 1;
           rollback;
           select value from q where id = 1;
-          select extname from pg_extension where extname in ('pg_stat_statements','amcheck') order by 1;
           load 'auto_explain';
           SQL
-          createdb bench
-          pgbench -i -s 1 bench >/dev/null
-          pgbench -c 4 -j 2 -T 2 -n bench | tee "$ROOT/pgbench.txt"
-          pg_dump -Fc postgres -f "$ROOT/postgres.dump"
-          createdb restorecheck
-          pg_restore --exit-on-error -d restorecheck "$ROOT/postgres.dump"
-          pg_amcheck --database=restorecheck --all-indexes --heapallindexed
-          psql -Atc "select calls > 0 from pg_stat_statements where query like '%select value from q%' limit 1" | grep -Fx true
-          pg_ctl -D "$DATA" -m fast -w stop
-          trap - EXIT
-          pg_checksums --check -D "$DATA"
-          echo POSTGRES_RUNTIME_GATE=pass
+            "$moved/client/bin/createdb" bench
+            "$moved/client/bin/pgbench" -i -s 1 bench >/dev/null
+            "$moved/client/bin/pgbench" -c 4 -j 2 -T 2 -n bench | tee "$ROOT/pgbench.txt"
+            "$moved/client/bin/pg_dump" -Fc postgres -f "$ROOT/postgres.dump"
+            "$moved/client/bin/createdb" restorecheck
+            "$moved/client/bin/pg_restore" --exit-on-error -d restorecheck "$ROOT/postgres.dump"
+            "$moved/client/bin/pg_amcheck" --database=restorecheck --all-indexes --heapallindexed
+            "$moved/client/bin/psql" -Atc "select calls > 0 from pg_stat_statements where query like '%select value from q%' limit 1" | grep -Fx true
+            "$moved/server/bin/pg_ctl" -D "$data" -m fast -w stop
+            trap - RETURN
+            "$moved/client/bin/pg_checksums" --check -D "$data"
+            echo COMBINED_POSTGRES_GATE=pass
+          }
 
-          section "pgTAP 1.3.3"
-          curl -fL --retry 3 -o "$ROOT/pgtap-1.3.3.tar.gz" https://github.com/theory/pgtap/archive/refs/tags/v1.3.3.tar.gz
-          echo "PGTAP_SHA256=$(sha "$ROOT/pgtap-1.3.3.tar.gz")"
-          tar -xzf "$ROOT/pgtap-1.3.3.tar.gz" -C "$ROOT"
-          PGTAP_SRC="$ROOT/pgtap-1.3.3"
-          make -C "$PGTAP_SRC" >/dev/null
-          find "$PGTAP_SRC" -maxdepth 1 -type f -name 'pgtap--*.sql' -print
-          echo PGTAP_BUILD=pass
+          qualify_pgtap_plcheck() {
+            curl -fL --retry 3 -o "$ROOT/pgtap-1.3.3.tar.gz" https://github.com/theory/pgtap/archive/refs/tags/v1.3.3.tar.gz
+            echo "PGTAP_SOURCE_SHA256=$(sha "$ROOT/pgtap-1.3.3.tar.gz")"
+            test "$(sha "$ROOT/pgtap-1.3.3.tar.gz")" = '325ea79d0d2515bce96bce43f6823dcd3effbd6c54cb2a4d6c2384fffa3a14c7'
+            tar -xzf "$ROOT/pgtap-1.3.3.tar.gz" -C "$ROOT"
+            make -C "$ROOT/pgtap-1.3.3" >/dev/null
 
-          section "plpgsql_check 2.8.11"
-          curl -fL --retry 3 -o "$ROOT/plpgsql-check-2.8.11.tar.gz" https://github.com/okbob/plpgsql_check/archive/refs/tags/v2.8.11.tar.gz
-          echo "PLPGSQL_CHECK_SHA256=$(sha "$ROOT/plpgsql-check-2.8.11.tar.gz")"
-          tar -xzf "$ROOT/plpgsql-check-2.8.11.tar.gz" -C "$ROOT"
-          PLC_SRC="$ROOT/plpgsql_check-2.8.11"
-          make -C "$PLC_SRC" USE_PGXS=1 PG_CONFIG="$PG/bin/pg_config"
-          test -f "$PLC_SRC/plpgsql_check.so"
-          echo "PLPGSQL_CHECK_MAX_GLIBC=$(max_glibc "$PLC_SRC/plpgsql_check.so")"
-          ldd "$PLC_SRC/plpgsql_check.so" || true
-          cp "$PLC_SRC/plpgsql_check.so" "$PG/lib/"
-          cp "$PLC_SRC/plpgsql_check.control" "$PG/share/extension/"
-          cp "$PLC_SRC"/plpgsql_check--*.sql "$PG/share/extension/"
-          DATA2="$ROOT/data-plcheck"
-          SOCKET2="$ROOT/socket-plcheck"
-          mkdir -p "$SOCKET2"
-          initdb -D "$DATA2" --encoding=UTF8 --locale-provider=icu --icu-locale=en-US --data-checksums --auth=trust >/dev/null
-          cat >> "$DATA2/postgresql.conf" <<CONF
+            local server="$ROOT/server"
+            local share="$server/share/postgresql/extension"
+            test -d "$share"
+            cp "$ROOT/pgtap-1.3.3/pgtap.control" "$share/"
+            cp "$ROOT/pgtap-1.3.3"/pgtap--*.sql "$share/"
+            cp "$ROOT/plcheck-payload/plpgsql_check.control" "$share/"
+            cp "$ROOT/plcheck-payload"/plpgsql_check--*.sql "$share/"
+            local pkglib
+            pkglib="$(find "$server/lib" -type f -name 'auto_explain.so' -printf '%h\n' -quit)"
+            test -d "$pkglib"
+            cp "$ROOT/plcheck-payload/plpgsql_check.so" "$pkglib/"
+
+            local data="$ROOT/ext-data"
+            local socket="$ROOT/ext-socket"
+            mkdir -p "$socket"
+            "$server/bin/initdb" -D "$data" --encoding=UTF8 --locale-provider=icu --icu-locale=en-US --data-checksums --auth=trust >/dev/null
+            cat >> "$data/postgresql.conf" <<CONF
           listen_addresses = '127.0.0.1'
           port = 55433
-          unix_socket_directories = '$SOCKET2'
+          unix_socket_directories = '$socket'
           timezone = 'UTC'
           CONF
-          pg_ctl -D "$DATA2" -l "$ROOT/postgres-plcheck.log" -w start
-          trap 'pg_ctl -D "$DATA2" -m fast -w stop >/dev/null 2>&1 || true' EXIT
-          export PGPORT=55433
-          psql -v ON_ERROR_STOP=1 <<'SQL'
+            "$server/bin/pg_ctl" -D "$data" -l "$ROOT/ext-postgres.log" -w start
+            trap '"$server/bin/pg_ctl" -D "$data" -m fast -w stop >/dev/null 2>&1 || true' RETURN
+            export PGHOST=127.0.0.1 PGPORT=55433 PGUSER="$USER" PGDATABASE=postgres
+            export LD_LIBRARY_PATH="$ROOT/client-payload/lib"
+            "$ROOT/client-payload/bin/psql" -v ON_ERROR_STOP=1 <<'SQL'
+          create extension pgtap;
           create extension plpgsql_check;
-          create table t_ok(id integer primary key);
+          select plan(2);
+          select ok(true, 'known good assertion');
+          select is(1, 1, 'known equality');
+          select * from finish();
           create function f_ok(p integer) returns integer language plpgsql as $$ begin return p + 1; end $$;
-          select count(*) = 0 from plpgsql_check_function_tb('f_ok(integer)'::regprocedure) where level in ('error','warning');
-          create function f_bad() returns integer language plpgsql as $$ declare x integer; begin x := 'bad'::text; return x; end $$;
+          create function f_bad() returns integer language plpgsql as $$ declare x integer; begin select missing_column into x from pg_class limit 1; return x; end $$;
           SQL
-          set +e
-          BAD_OUT="$(psql -At -c "select level || ':' || message from plpgsql_check_function_tb('f_bad()'::regprocedure)" 2>&1)"
-          rc=$?
-          set -e
-          printf '%s\n' "$BAD_OUT"
-          test "$rc" -eq 0
-          test -n "$BAD_OUT"
-          pg_ctl -D "$DATA2" -m fast -w stop
-          trap - EXIT
-          pg_checksums --check -D "$DATA2"
-          echo PLPGSQL_CHECK_GATE=pass
+            test "$("$ROOT/client-payload/bin/psql" -Atc "select count(*) from plpgsql_check_function_tb('f_ok(integer)'::regprocedure) where level in ('error','warning')")" = 0
+            local bad
+            bad="$("$ROOT/client-payload/bin/psql" -Atc "select level || ':' || message from plpgsql_check_function_tb('f_bad()'::regprocedure)")"
+            printf '%s\n' "$bad"
+            test -n "$bad"
+            "$server/bin/pg_ctl" -D "$data" -m fast -w stop
+            trap - RETURN
+            "$ROOT/client-payload/bin/pg_checksums" --check -D "$data"
+            echo PGTAP_PLPGSQL_CHECK_GATE=pass
+          }
 
-          section "ShellCheck 0.11.0"
-          SC_ASSET='shellcheck-v0.11.0.linux.x86_64.tar.xz'
-          SC_URL="$(gh_asset_url koalaman/shellcheck v0.11.0 "$SC_ASSET")"
-          curl -fL --retry 3 -o "$ROOT/$SC_ASSET" "$SC_URL"
-          echo "SHELLCHECK_URL=$SC_URL"
-          echo "SHELLCHECK_SHA256=$(sha "$ROOT/$SC_ASSET")"
-          mkdir -p "$ROOT/sc" && tar -xJf "$ROOT/$SC_ASSET" -C "$ROOT/sc"
-          SC_BIN="$(find "$ROOT/sc" -type f -name shellcheck -print -quit)"
-          "$SC_BIN" --version
-          printf '#!/bin/sh\necho "$x"\n' > "$ROOT/good.sh"
-          "$SC_BIN" "$ROOT/good.sh"
-          printf '#!/bin/sh\nfor f in $(ls); do echo $f; done\n' > "$ROOT/bad.sh"
-          if "$SC_BIN" "$ROOT/bad.sh" >/dev/null 2>&1; then echo 'ShellCheck failed to reject known-bad script' >&2; exit 1; fi
-          echo SHELLCHECK_GATE=pass
+          qualify_shellcheck() {
+            local asset='shellcheck-v0.11.0.linux.x86_64.tar.xz'
+            local url
+            url="$(gh_asset_url koalaman/shellcheck v0.11.0 "$asset")"
+            curl -fL --retry 3 -o "$ROOT/$asset" "$url"
+            echo "SHELLCHECK_URL=$url"
+            echo "SHELLCHECK_SHA256=$(sha "$ROOT/$asset")"
+            mkdir -p "$ROOT/sc"
+            tar -xJf "$ROOT/$asset" -C "$ROOT/sc"
+            local bin
+            bin="$(find "$ROOT/sc" -type f -name shellcheck -print -quit)"
+            "$bin" --version
+            printf '#!/bin/sh\nx=ok\nprintf "%%s\\n" "$x"\n' > "$ROOT/good.sh"
+            "$bin" "$ROOT/good.sh"
+            printf '#!/bin/sh\nfor f in $(ls); do echo $f; done\n' > "$ROOT/bad.sh"
+            if "$bin" "$ROOT/bad.sh" >/dev/null 2>&1; then return 1; fi
+          }
 
-          section "Miller 6.20.2"
-          ML_TAG='v6.20.2'
-          ML_ASSET="$(gh api repos/johnkerl/miller/releases/tags/$ML_TAG --jq '.assets[].name' | grep -E '^miller-6[.]20[.]2-linux-(amd64|x86_64)[.]tar[.]gz$' | sed -n '1p')"
-          test -n "$ML_ASSET"
-          ML_URL="$(gh_asset_url johnkerl/miller "$ML_TAG" "$ML_ASSET")"
-          curl -fL --retry 3 -o "$ROOT/$ML_ASSET" "$ML_URL"
-          echo "MILLER_ASSET=$ML_ASSET"
-          echo "MILLER_URL=$ML_URL"
-          echo "MILLER_SHA256=$(sha "$ROOT/$ML_ASSET")"
-          mkdir -p "$ROOT/mlr" && tar -xzf "$ROOT/$ML_ASSET" -C "$ROOT/mlr"
-          MLR_BIN="$(find "$ROOT/mlr" -type f -name mlr -print -quit)"
-          "$MLR_BIN" --version
-          printf 'id,value\n1,2\n2,5\n' | "$MLR_BIN" --icsv --ojson filter '$value > 2' then put '$double=$value*2' > "$ROOT/mlr.json"
-          grep -q '"double": 10' "$ROOT/mlr.json"
-          echo MILLER_GATE=pass
+          qualify_miller() {
+            local tag='v6.20.2'
+            local asset
+            asset="$(gh api repos/johnkerl/miller/releases/tags/$tag --jq '.assets[].name' | grep -E '^miller-6[.]20[.]2-linux-(amd64|x86_64)[.]tar[.]gz$' | sed -n '1p')"
+            test -n "$asset"
+            local url
+            url="$(gh_asset_url johnkerl/miller "$tag" "$asset")"
+            curl -fL --retry 3 -o "$ROOT/$asset" "$url"
+            echo "MILLER_ASSET=$asset"
+            echo "MILLER_URL=$url"
+            echo "MILLER_SHA256=$(sha "$ROOT/$asset")"
+            mkdir -p "$ROOT/mlr"
+            tar -xzf "$ROOT/$asset" -C "$ROOT/mlr"
+            local bin
+            bin="$(find "$ROOT/mlr" -type f -name mlr -print -quit)"
+            "$bin" --version
+            printf 'id,value\n1,2\n2,5\n' | "$bin" --icsv --ojson filter '$value > 2' then put '$double=$value*2' > "$ROOT/mlr.json"
+            grep -Eq '"double"[[:space:]]*:[[:space:]]*10' "$ROOT/mlr.json"
+          }
 
-          section "NPM capsule candidates"
-          CAPS="$ROOT/capsules"
-          mkdir -p "$CAPS"
-          cd "$CAPS"
-          for spec in 'postgres@3.4.7' '@postgres-language-server/wasm@0.25.7' 'fast-check@4.9.0' '@supabase/pg-delta@1.0.0-alpha.33'; do
-            safe="$(printf '%s' "$spec" | tr '/@' '__')"
-            echo "--- $spec ---"
-            npm view "$spec" name version dist.tarball dist.integrity dependencies --json
-            npm pack "$spec" --ignore-scripts --json > "$safe.pack.json"
-            tgz="$(node -e "const x=require('./$safe.pack.json');process.stdout.write(x[0].filename)")"
-            echo "NPM_SPEC=$spec FILE=$tgz SHA256=$(sha "$tgz")"
-          done
-          PURE_VERSION="$(node - <<'NODE'
-          const p=require('./fast-check_4.9.0.pack.json')[0].filename;
-          const {execFileSync}=require('child_process');
-          const fs=require('fs'), os=require('os'), path=require('path');
-          const d=fs.mkdtempSync(path.join(os.tmpdir(),'fc-'));
-          execFileSync('tar',['-xzf',p,'-C',d]);
-          const pkg=JSON.parse(fs.readFileSync(path.join(d,'package','package.json')));
-          process.stdout.write(pkg.dependencies['pure-rand']);
-          NODE
-          )"
-          echo "FAST_CHECK_PURE_RAND_RANGE=$PURE_VERSION"
-          PURE_EXACT="$(npm view "pure-rand@$PURE_VERSION" version)"
-          npm view "pure-rand@$PURE_EXACT" name version dist.tarball dist.integrity dependencies --json
-          npm pack "pure-rand@$PURE_EXACT" --ignore-scripts --json > pure-rand.pack.json
-          PURE_TGZ="$(node -e "const x=require('./pure-rand.pack.json');process.stdout.write(x[0].filename)")"
-          echo "NPM_SPEC=pure-rand@$PURE_EXACT FILE=$PURE_TGZ SHA256=$(sha "$PURE_TGZ")"
+          qualify_npm_capsules() {
+            local caps="$ROOT/capsules"
+            mkdir -p "$caps"
+            cd "$caps"
+            for spec in 'postgres@3.4.7' '@postgres-language-server/wasm@0.25.7' 'fast-check@4.9.0' '@supabase/pg-delta@1.0.0-alpha.33'; do
+              local safe tgz
+              safe="$(printf '%s' "$spec" | tr '/@' '__')"
+              echo "--- $spec ---"
+              npm view "$spec" name version dist.tarball dist.integrity dependencies --json
+              npm pack "$spec" --ignore-scripts --json > "$safe.pack.json"
+              tgz="$(node -e "const x=require('./$safe.pack.json');process.stdout.write(x[0].filename)")"
+              echo "NPM_SPEC=$spec FILE=$tgz SHA256=$(sha "$tgz")"
+            done
+            local range exact pure_tgz
+            range="$(npm view fast-check@4.9.0 dependencies.pure-rand)"
+            echo "FAST_CHECK_PURE_RAND_RANGE=$range"
+            exact="$(npm view "pure-rand@$range" version --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(Array.isArray(v)?v[v.length-1]:v)})')"
+            npm view "pure-rand@$exact" name version dist.tarball dist.integrity dependencies --json
+            npm pack "pure-rand@$exact" --ignore-scripts --json > pure-rand.pack.json
+            pure_tgz="$(node -e "const x=require('./pure-rand.pack.json');process.stdout.write(x[0].filename)")"
+            echo "NPM_SPEC=pure-rand@$exact FILE=$pure_tgz SHA256=$(sha "$pure_tgz")"
+            printf '%s\n' "$pure_tgz" > "$ROOT/pure-rand-filename"
+          }
 
-          section "Fast-check deterministic model/shrink smoke"
-          mkdir -p "$ROOT/fc-test"
-          cd "$ROOT/fc-test"
-          npm init -y >/dev/null
-          npm install --ignore-scripts --no-audit --no-fund "$CAPS"/fast-check-4.9.0.tgz "$CAPS"/"$PURE_TGZ" >/dev/null
-          node --input-type=module <<'NODE'
+          qualify_fast_check() {
+            local caps="$ROOT/capsules"
+            local pure
+            pure="$(cat "$ROOT/pure-rand-filename")"
+            mkdir -p "$ROOT/fc-test"
+            cd "$ROOT/fc-test"
+            npm init -y >/dev/null
+            npm install --ignore-scripts --no-audit --no-fund "$caps/fast-check-4.9.0.tgz" "$caps/$pure" >/dev/null
+            node --input-type=module <<'NODE'
           import fc from 'fast-check';
           const seed=424242;
           let saw=false;
@@ -260,28 +339,35 @@ jobs:
           if (JSON.stringify(a)!==JSON.stringify(b)) throw new Error('seed replay was not deterministic');
           console.log('fast-check deterministic replay and shrink smoke passed');
           NODE
-          echo FAST_CHECK_GATE=pass
+          }
 
-          section "pg-delta Node viability"
-          mkdir -p "$ROOT/pgdelta-test"
-          cd "$ROOT/pgdelta-test"
-          npm init -y >/dev/null
-          PGDELTA_TGZ="$(node -e "const x=require('$CAPS/_supabase_pg-delta_1.0.0-alpha.33.pack.json');process.stdout.write(x[0].filename)")"
-          npm install --ignore-scripts --no-audit --no-fund "$CAPS/$PGDELTA_TGZ" >/dev/null
-          node --input-type=module <<'NODE'
+          qualify_pgdelta() {
+            local caps="$ROOT/capsules"
+            local meta="$caps/_supabase_pg-delta_1.0.0-alpha.33.pack.json"
+            local tgz
+            tgz="$(node -e "const x=require('$meta');process.stdout.write(x[0].filename)")"
+            mkdir -p "$ROOT/pgdelta-test"
+            cd "$ROOT/pgdelta-test"
+            npm init -y >/dev/null
+            npm install --ignore-scripts --no-audit --no-fund "$caps/$tgz" >/dev/null
+            node --input-type=module <<'NODE'
           import * as pgd from '@supabase/pg-delta';
           console.log('PGDELTA_EXPORTS='+Object.keys(pgd).sort().join(','));
           for (const k of ['createPlan','renderPlanFiles']) if (typeof pgd[k] !== 'function') throw new Error(`missing ${k}`);
           NODE
-          echo PGDELTA_NODE_IMPORT=pass
+            echo 'PGDELTA_TRANSITIVE_TREE_BEGIN'
+            npm ls --all --json
+            echo 'PGDELTA_TRANSITIVE_TREE_END'
+          }
 
-          section "Candidate Python lock"
-          cd "$GITHUB_WORKSPACE"
-          UV_AR="$ROOT/uv.tar.gz"
-          curl -fL --retry 3 -o "$UV_AR" "https://releases.astral.sh/github/uv/releases/download/0.12.5/uv-x86_64-unknown-linux-gnu.tar.gz"
-          mkdir -p "$ROOT/uv" && tar -xzf "$UV_AR" -C "$ROOT/uv"
-          UV_BIN="$(find "$ROOT/uv" -type f -name uv -print -quit)"
-          cat > "$ROOT/requirements.in" <<'REQ'
+          qualify_python_lock() {
+            local ar="$ROOT/uv.tar.gz"
+            curl -fL --retry 3 -o "$ar" 'https://releases.astral.sh/github/uv/releases/download/0.12.5/uv-x86_64-unknown-linux-gnu.tar.gz'
+            mkdir -p "$ROOT/uv"
+            tar -xzf "$ar" -C "$ROOT/uv"
+            local uv
+            uv="$(find "$ROOT/uv" -type f -name uv -print -quit)"
+            cat > "$ROOT/requirements.in" <<'REQ'
           httpx[cli]==0.28.1
           jsonschema==4.26.0
           packaging==26.2
@@ -289,12 +375,24 @@ jobs:
           tomlkit==0.15.1
           pip==26.1.2
           REQ
-          "$UV_BIN" pip compile --generate-hashes --no-header --no-annotate "$ROOT/requirements.in" -o "$ROOT/requirements.lock"
-          echo "PYTHON_LOCK_SHA256=$(sha "$ROOT/requirements.lock")"
-          cat "$ROOT/requirements.lock"
+            "$uv" pip compile --generate-hashes --no-header --no-annotate "$ROOT/requirements.in" -o "$ROOT/requirements.lock"
+            echo "PYTHON_LOCK_SHA256=$(sha "$ROOT/requirements.lock")"
+            grep -E '^[A-Za-z0-9_.-]+==' "$ROOT/requirements.lock"
+          }
 
-          section "Qualification complete"
-          echo QUALIFICATION=pass
+          phase 'postgres-client-build' qualify_postgres_build
+          phase 'combined-postgres-runtime' qualify_combined_postgres
+          phase 'pgtap-plpgsql-check' qualify_pgtap_plcheck
+          phase 'shellcheck' qualify_shellcheck
+          phase 'miller' qualify_miller
+          phase 'npm-capsules' qualify_npm_capsules
+          phase 'fast-check' qualify_fast_check
+          phase 'pg-delta' qualify_pgdelta
+          phase 'python-lock' qualify_python_lock
+
+          section 'Qualification summary'
+          echo "QUALIFICATION_FAILURES=$FAILURES"
+          test "$FAILURES" -eq 0
 
       - name: Collect qualification outputs
         if: always()
@@ -303,9 +401,9 @@ jobs:
           set -euo pipefail
           ROOT="$RUNNER_TEMP/v020-qualification"
           mkdir -p "$ROOT/out"
-          cp -f "$ROOT/report.txt" "$ROOT/out/" 2>/dev/null || true
-          cp -f "$ROOT/requirements.in" "$ROOT/out/" 2>/dev/null || true
-          cp -f "$ROOT/requirements.lock" "$ROOT/out/" 2>/dev/null || true
+          for file in report.txt requirements.in requirements.lock postgresql-client-17.10-linux-x64-gnu.tar.gz plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz; do
+            cp -f "$ROOT/$file" "$ROOT/out/" 2>/dev/null || true
+          done
           find "$ROOT/capsules" -maxdepth 1 -type f \( -name '*.tgz' -o -name '*.pack.json' \) -exec cp -f {} "$ROOT/out/" \; 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
