@@ -1,0 +1,43 @@
+name: tmp-v0.2.0 source export
+
+on:
+  push:
+    branches:
+      - agent/v020-database-capabilities
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Package exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GITHUB_SHA" > SOURCE_SHA
+          tar \
+            --exclude=.git \
+            --sort=name \
+            --mtime='UTC 2026-08-20' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf "$RUNNER_TEMP/magnet-photos-env-source.tar.gz" .
+          sha256sum "$RUNNER_TEMP/magnet-photos-env-source.tar.gz" > "$RUNNER_TEMP/magnet-photos-env-source.tar.gz.sha256"
+          cp SOURCE_SHA "$RUNNER_TEMP/SOURCE_SHA"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v020-source
+          path: |
+            ${{ runner.temp }}/magnet-photos-env-source.tar.gz
+            ${{ runner.temp }}/magnet-photos-env-source.tar.gz.sha256
+            ${{ runner.temp }}/SOURCE_SHA
+          retention-days: 2
