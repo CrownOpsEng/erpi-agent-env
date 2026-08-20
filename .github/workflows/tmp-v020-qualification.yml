@@ -225,7 +225,7 @@ jobs:
           "$MOVED/client/bin/pg_dump" -Fc postgres -f "$ROOT/postgres.dump"
           "$MOVED/client/bin/createdb" restorecheck
           "$MOVED/client/bin/pg_restore" --exit-on-error -d restorecheck "$ROOT/postgres.dump"
-          PGDATABASE=restorecheck "$MOVED/client/bin/pg_amcheck" --all-indexes --heapallindexed
+          PGDATABASE=restorecheck "$MOVED/client/bin/pg_amcheck" --heapallindexed --checkunique --parent-check --rootdescend
           PGDATABASE=restorecheck "$MOVED/client/bin/psql" -Atc 'select value from q where id=1' | grep -Fx 0
 
           "$MOVED/server/bin/pg_ctl" -D "$DATA" -m fast -w stop
