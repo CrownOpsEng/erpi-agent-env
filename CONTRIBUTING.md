@@ -64,15 +64,16 @@ Do **not** manually refresh candidate hashes, run IDs, versions, or per-run chro
 
 ## Releases
 
-`BUNDLE_VERSION` in `versions.env` is the source version. Release candidates use SemVer prerelease identities such as `0.2.0-rc.1` and are not published through the stable release workflow. Stable release tags are exactly `v$BUNDLE_VERSION`.
+`BUNDLE_VERSION` in `versions.env` is the source lifecycle version. Active work uses `x.y.z-dev`; release candidates use SemVer prerelease identities such as `0.2.0-rc.1` and are not published through the stable release workflow. Stable release tags are exactly `v$BUNDLE_VERSION`.
 
-Candidate flow:
+Development/candidate flow:
 
-1. set `BUNDLE_VERSION` to `x.y.z-rc.N`;
-2. pass source validation and **Accept runtime** for that exact candidate source;
-3. inspect/test the produced candidate archive directly;
-4. repair and increment the RC number as needed;
-5. only after approval, change the source version to stable `x.y.z` and accept the exact final commit again.
+1. keep `BUNDLE_VERSION` at `x.y.z-dev` while implementation, debugging, validation, or any known release blocker remains;
+2. run the inexpensive and targeted checks appropriate to the current change while staying in development state;
+3. only when the source is believed releasable, deliberately change `BUNDLE_VERSION` to the next unused `x.y.z-rc.N` and treat that candidate source as immutable;
+4. pass source validation and **Accept runtime** for that exact candidate source, then inspect/test the candidate archive directly and complete any required motivating-project promotion proof;
+5. if the candidate exposes a defect, reject it: the next development commit returns `BUNDLE_VERSION` to `x.y.z-dev`, fixes and validates normally, and a later candidate uses a new monotonically increasing RC number;
+6. only after candidate approval, change the source version to stable `x.y.z` and accept the exact final commit again.
 
 Normal stable release flow:
 
