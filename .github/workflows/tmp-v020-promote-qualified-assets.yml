@@ -1,9 +1,9 @@
 name: tmp-v0.2.0 materialize qualified database assets
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/v020-database-capabilities
+      - main
     paths:
       - .github/workflows/tmp-v020-promote-qualified-assets.yml
 
@@ -11,8 +11,13 @@ permissions:
   actions: read
   contents: write
 
+concurrency:
+  group: tmp-v020-materialize-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   materialize:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     name: Materialize exact qualified database payloads
     runs-on: ubuntu-24.04
     timeout-minutes: 10
