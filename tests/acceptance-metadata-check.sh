@@ -25,7 +25,7 @@ import json, pathlib, re, sys
 record = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
 assert record['schema_version'] == 1
 assert record['status'] == 'accepted'
-assert re.fullmatch(r'\d+\.\d+\.\d+', record['bundle_version'])
+assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?', record['bundle_version'])
 assert record['target'] == 'linux-x86_64-gnu'
 assert record['source_commit'] == '0123456789abcdef0123456789abcdef01234567'
 assert record['repository'] == 'CrownOpsEng/magnet-photos-env'

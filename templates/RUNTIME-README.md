@@ -1,4 +1,4 @@
-# Magnet Agent Environment 0.2.0
+# Magnet Agent Environment @BUNDLE_VERSION@
 
 Portable Linux x86-64 execution capability for AI-agent work. The target repository remains authoritative for dependencies, schemas, commands, safety rules, and application architecture.
 

@@ -64,11 +64,19 @@ Do **not** manually refresh candidate hashes, run IDs, versions, or per-run chro
 
 ## Releases
 
-`BUNDLE_VERSION` in `versions.env` is the source version. Release tags are exactly `v$BUNDLE_VERSION`.
+`BUNDLE_VERSION` in `versions.env` is the source version. Release candidates use SemVer prerelease identities such as `0.2.0-rc.1` and are not published through the stable release workflow. Stable release tags are exactly `v$BUNDLE_VERSION`.
 
-Normal release flow:
+Candidate flow:
 
-1. change `BUNDLE_VERSION` on `main` as part of the intended release source;
+1. set `BUNDLE_VERSION` to `x.y.z-rc.N`;
+2. pass source validation and **Accept runtime** for that exact candidate source;
+3. inspect/test the produced candidate archive directly;
+4. repair and increment the RC number as needed;
+5. only after approval, change the source version to stable `x.y.z` and accept the exact final commit again.
+
+Normal stable release flow:
+
+1. change `BUNDLE_VERSION` from the accepted candidate identity to the intended stable version on `main`;
 2. require that exact commit's **Validate** and **Accept runtime** runs to succeed;
 3. invoke permanent **Publish release** for that exact accepted source;
 4. **Publish release** verifies acceptance, creates/verifies the exact lightweight Git tag, and creates/reuses only a matching **draft** Release;

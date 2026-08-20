@@ -49,6 +49,10 @@ magnet-agent-env-linux-x64-v<version>.tar.gz
 magnet-agent-env-linux-x64-v<version>.tar.gz.sha256
 ```
 
+Release candidates use SemVer prerelease identities such as `0.2.0-rc.1`. A candidate must never use the final stable version or create the stable release tag. Only after the candidate has passed direct artifact verification is `BUNDLE_VERSION` promoted to the stable version, and that exact final source commit must pass acceptance again before publication.
+
+Archive creation normalizes tar ordering/metadata, gzip headers, and the relocatable `pyvenv.cfg` placeholder so repeated packaging of the same accepted payload is byte-for-byte deterministic.
+
 Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under `.download-cache/` and are never shipped.
 The small source-controlled PostgreSQL client/plpgsql_check payloads are qualified inputs, not ordinary build products. Maintainers can reproduce them from pinned upstream source in the pinned manylinux 2.28 container with `scripts/rebuild-qualified-database-assets.sh`; ordinary builds do not require Docker or a compiler.
 Because ShellCheck is GPL-3.0-only, the runtime also carries its license and exact pinned upstream source archive under `licenses/`; the binary is not redistributed without its source material.

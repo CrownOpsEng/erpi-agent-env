@@ -21,8 +21,10 @@ A payload-affecting source commit is releasable only after **Accept runtime** bu
 - hostile relocation with spaces/unicode/deep paths
 - PostgreSQL lifecycle under that hostile relocation path over explicit `127.0.0.1` TCP with Unix-domain sockets disabled, preventing relocation depth from becoming a socket-path failure mode
 - rejection of original build-root residue and absolute symlinks
-- pristine mutable state before packaging
+- pristine mutable state before packaging and no group/world-writable immutable regular files
 - immutable checksum/symlink manifest verification
+- bundled third-party compliance material required by the builder contract, including ShellCheck corresponding source/license
+- deterministic archive ordering/timestamps/gzip metadata and a stable first-use `pyvenv.cfg` sentinel
 - fresh archive extraction, repair, self-test, and stale-path rejection
 
 The accepted archive hash and exact source SHA belong in machine-generated `acceptance.json` and the archive sidecar, not copied into narrative docs.
@@ -63,11 +65,13 @@ That project proof should use the repository's real pinned client dependency and
 
 ## Release authority
 
+A stable release requires a separately identified candidate first. Candidate builds use SemVer prerelease versions (`x.y.z-rc.N`) and are validation artifacts only; they must not create the stable tag or masquerade as `x.y.z`. After direct artifact verification, promote the source version to the stable `x.y.z` and accept that exact final commit again.
+
 A release requires:
 
 1. source commit passes source validation;
 2. the exact payload-affecting source commit passes **Accept runtime**;
-3. release version is updated intentionally;
+3. release version is updated intentionally and is not a prerelease identifier;
 4. permanent release workflow verifies the accepted source/tag relationship;
 5. **Build distribution** rebuilds and accepts the tagged distribution before publication;
 6. release assets include the archive, SHA-256 sidecar, and `acceptance.json`.

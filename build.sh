@@ -30,7 +30,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Required build command missing: $1" >&2; exit 1; }; }
-for cmd in bash curl tar xz sha256sum find grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname env; do need "$cmd"; done
+for cmd in bash curl tar gzip xz sha256sum find grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname env; do need "$cmd"; done
 TAR_VERSION="$(tar --version 2>/dev/null || true)"
 grep -q 'GNU tar' <<<"$TAR_VERSION" || { echo "GNU tar is required by this builder." >&2; exit 1; }
 [[ "$(uname -s)" == Linux ]] || { echo "Builder target is Linux only." >&2; exit 1; }
@@ -68,7 +68,7 @@ BUILDER_UV_CACHE="$CACHE_DIR/uv-cache"
 BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"
 BUILDER_PIP_CACHE="$CACHE_DIR/pip-cache"
 mkdir -p "$BUILDER_UV_CACHE" "$BUILDER_UV_PYTHON_CACHE" "$BUILDER_PIP_CACHE"
-mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/env" "$BUILD/wheelhouse" \
+mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" \
   "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" \
   "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
 ORIGINAL_BUILD_ROOT="$BUILD"
@@ -130,6 +130,11 @@ cp "$SELF_DIR/requirements.in" "$BUILD/manifest/requirements.in"
 verify_one "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"
 cp "$SELF_DIR/requirements.lock" "$BUILD/manifest/requirements.lock"
 cp "$SELF_DIR/templates/RUNTIME-README.md" "$BUILD/README.md"
+sed -i "s/@BUNDLE_VERSION@/$BUNDLE_VERSION/g" "$BUILD/README.md"
+if grep -Fq '@BUNDLE_VERSION@' "$BUILD/README.md"; then
+  echo "Runtime README version placeholder was not rendered." >&2
+  exit 1
+fi
 cp "$SELF_DIR/templates/AGENTS.md" "$BUILD/AGENTS.md"
 cp "$SELF_DIR/templates/THIRD-PARTY.md" "$BUILD/THIRD-PARTY.md"
 printf '%s\n' "$BUNDLE_VERSION" > "$BUILD/VERSION"
@@ -269,6 +274,22 @@ SHELLCHECK_AR="$DL/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
 fetch "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" "$SHELLCHECK_AR"
 verify_one "$SHELLCHECK_AR" "$SHELLCHECK_SHA256"
 extract_single "$SHELLCHECK_AR" shellcheck "$BUILD/bin/shellcheck"
+SHELLCHECK_SOURCE_AR="$DL/shellcheck-v${SHELLCHECK_VERSION}-source.tar.gz"
+fetch "https://github.com/koalaman/shellcheck/archive/refs/tags/v${SHELLCHECK_VERSION}.tar.gz" "$SHELLCHECK_SOURCE_AR"
+verify_one "$SHELLCHECK_SOURCE_AR" "$SHELLCHECK_SOURCE_SHA256"
+install -m 0644 "$SHELLCHECK_SOURCE_AR" "$BUILD/licenses/source/shellcheck-v${SHELLCHECK_VERSION}-source.tar.gz"
+rm -rf "$WORK/shellcheck-source"; mkdir -p "$WORK/shellcheck-source"
+tar -xzf "$SHELLCHECK_SOURCE_AR" -C "$WORK/shellcheck-source"
+SHELLCHECK_SOURCE_ROOT="$WORK/shellcheck-source/shellcheck-${SHELLCHECK_VERSION}"
+[[ -s "$SHELLCHECK_SOURCE_ROOT/LICENSE" && -s "$SHELLCHECK_SOURCE_ROOT/ShellCheck.cabal" ]] || {
+  echo "ShellCheck source archive is missing expected license/package metadata." >&2
+  exit 1
+}
+grep -Eiq "^version:[[:space:]]*${SHELLCHECK_VERSION}([[:space:]]|$)" "$SHELLCHECK_SOURCE_ROOT/ShellCheck.cabal" || {
+  echo "ShellCheck source metadata version does not match ${SHELLCHECK_VERSION}." >&2
+  exit 1
+}
+install -m 0644 "$SHELLCHECK_SOURCE_ROOT/LICENSE" "$BUILD/licenses/shellcheck/LICENSE"
 
 log "Miller $MILLER_VERSION"
 MILLER_AR="$DL/miller-${MILLER_VERSION}-linux-amd64.tar.gz"
@@ -359,6 +380,7 @@ ripgrep\t$RIPGREP_VERSION\thttps://github.com/BurntSushi/ripgrep/releases/downlo
 actionlint\t$ACTIONLINT_VERSION\thttps://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz\t$ACTIONLINT_SHA256
 gitleaks\t$GITLEAKS_VERSION\thttps://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz\t$GITLEAKS_SHA256
 shellcheck	$SHELLCHECK_VERSION	https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/shellcheck-v$SHELLCHECK_VERSION.linux.x86_64.tar.xz	$SHELLCHECK_SHA256
+shellcheck-source	$SHELLCHECK_VERSION	https://github.com/koalaman/shellcheck/archive/refs/tags/v$SHELLCHECK_VERSION.tar.gz	$SHELLCHECK_SOURCE_SHA256
 miller	$MILLER_VERSION	https://github.com/johnkerl/miller/releases/download/v$MILLER_VERSION/miller-$MILLER_VERSION-linux-amd64.tar.gz	$MILLER_SHA256
 postgres-server	$POSTGRES_VERSION	vendor/database/postgres-server-$POSTGRES_VERSION-linux-x64.txz	$POSTGRES_SERVER_SHA256
 postgres-client	$POSTGRES_VERSION	vendor/database/postgresql-client-$POSTGRES_VERSION-linux-x64-gnu.tar.gz	$POSTGRES_CLIENT_SHA256
@@ -441,6 +463,32 @@ if [[ -n "$state_residue" ]]; then
   exit 1
 fi
 
+# uv creates zero-byte lock files with permissive modes. They are retained for
+# uv semantics but normalized so the immutable archive contains no writable-by-
+# group/world regular files.
+for lock_file in "$BUILD/env/.lock" "$BUILD/runtime/python/.lock"; do
+  [[ ! -e "$lock_file" ]] || chmod 0644 "$lock_file"
+done
+writable_payload="$(find "$BUILD" -type f ! -path "$BUILD/state/*" -perm /022 -print -quit)"
+if [[ -n "$writable_payload" ]]; then
+  echo "Immutable payload contains a group/world-writable regular file: $writable_payload" >&2
+  exit 1
+fi
+
+# pyvenv.cfg is repaired on first Python invocation. Ship a deterministic
+# sentinel instead of leaking the random builder path into the archive.
+PYVENV_CFG="$BUILD/env/pyvenv.cfg"
+awk '
+  /^home = / { print "home = __MAGNET_AGENT_RELOCATE__/runtime/python/current/bin"; next }
+  { print }
+' "$PYVENV_CFG" > "$PYVENV_CFG.tmp"
+mv "$PYVENV_CFG.tmp" "$PYVENV_CFG"
+if grep -r -a -F -l "$BUILD" "$BUILD" > "$WORK/current-build-residue.txt" 2>/dev/null; then
+  echo "Current random build path remains in distribution payload:" >&2
+  cat "$WORK/current-build-residue.txt" >&2
+  exit 1
+fi
+
 log "Immutable payload checksum manifest"
 cd "$BUILD"
 find . -type l ! -path './state/*' -printf '%p\t%l\n' | LC_ALL=C sort > manifest/SYMLINKS
@@ -455,8 +503,21 @@ log "Archive/extract proof"
 ARTIFACT="$OUT_DIR/magnet-agent-env-linux-x64-v${BUNDLE_VERSION}.tar.gz"
 TMP_ART="$ARTIFACT.part.$$"
 rm -f "$TMP_ART" "$ARTIFACT"
-# Normalize owner metadata; preserve modes and symlinks.
-tar --numeric-owner --owner=0 --group=0 -czf "$TMP_ART" -C "$(dirname -- "$BUILD")" "$(basename -- "$BUILD")"
+# Normalize ordering, timestamps, owner metadata, and gzip headers so the
+# same accepted payload produces identical archive bytes.
+write_archive() {
+  local dest="$1"
+  tar --sort=name --format=gnu --numeric-owner --owner=0 --group=0 \
+    --mtime="$ARCHIVE_MTIME" --clamp-mtime \
+    -cf - -C "$(dirname -- "$BUILD")" "$(basename -- "$BUILD")" | gzip -n > "$dest"
+}
+write_archive "$TMP_ART"
+REPRO_ART="$WORK_PARENT/reproducibility-proof.tar.gz"
+write_archive "$REPRO_ART"
+[[ "$(sha256sum "$TMP_ART" | awk '{print $1}')" == "$(sha256sum "$REPRO_ART" | awk '{print $1}')" ]] || {
+  echo "Archive packaging is not deterministic for the accepted payload." >&2
+  exit 1
+}
 mv "$TMP_ART" "$ARTIFACT"
 (cd "$OUT_DIR" && sha256sum "$(basename -- "$ARTIFACT")") > "$ARTIFACT.sha256"
 (cd "$OUT_DIR" && sha256sum -c "$(basename -- "$ARTIFACT.sha256")") >/dev/null

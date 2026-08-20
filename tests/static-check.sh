@@ -124,7 +124,24 @@ if grep -R -nE 'git[[:space:]]+config[[:space:]]+--global.*credential' "$ROOT/te
   echo "Do not write Git credential helpers globally from the portable bundle." >&2
   exit 1
 fi
-grep -F 'BUNDLE_VERSION="0.2.0"' "$ROOT/versions.env" >/dev/null
+python3 - <<'PY_VERSION' "$ROOT/versions.env"
+import re,sys
+text=open(sys.argv[1],encoding='utf-8').read()
+m=re.search(r'^BUNDLE_VERSION="([^"]+)"$',text,re.M)
+assert m and re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?',m.group(1)),m.group(1) if m else None
+PY_VERSION
+grep -F 'BUILD_CUTOFF="2026-08-20T04:30:00Z"' "$ROOT/versions.env" >/dev/null
+grep -F 'ARCHIVE_MTIME="2026-08-20T04:30:00Z"' "$ROOT/versions.env" >/dev/null
+grep -F 'SHELLCHECK_SOURCE_SHA256="8b07554f92e4fbfc33f1539a1f475f21c6503ceae8f806efcc518b1f529f7102"' "$ROOT/versions.env" >/dev/null
+grep -F '@BUNDLE_VERSION@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
+grep -F 'shellcheck-v${SHELLCHECK_VERSION}-source.tar.gz' "$ROOT/build.sh" >/dev/null
+grep -F 'SHELLCHECK_SOURCE_SHA256' "$ROOT/build.sh" >/dev/null
+grep -F '__MAGNET_AGENT_RELOCATE__/runtime/python/current/bin' "$ROOT/build.sh" >/dev/null
+grep -F -- '--sort=name --format=gnu --numeric-owner --owner=0 --group=0' "$ROOT/build.sh" >/dev/null
+grep -F 'gzip -n > "$dest"' "$ROOT/build.sh" >/dev/null
+grep -F 'Archive packaging is not deterministic for the accepted payload.' "$ROOT/build.sh" >/dev/null
+grep -F 'Immutable payload contains a group/world-writable regular file' "$ROOT/build.sh" >/dev/null
+grep -F 'Publish release accepts stable versions only; release candidates are validation artifacts.' "$ROOT/.github/workflows/publish-release.yml" >/dev/null
 grep -F 'POSTGRES_VERSION="17.10"' "$ROOT/versions.env" >/dev/null
 grep -F 'agent-env postgres run' "$ROOT/templates/RUNTIME-README.md" >/dev/null
 grep -F 'agent-env node-deps hydrate' "$ROOT/templates/RUNTIME-README.md" >/dev/null
