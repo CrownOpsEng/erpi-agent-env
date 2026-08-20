@@ -73,6 +73,16 @@ A generic environment capability is not proven useful to Magnet Photos merely be
 
 That project proof should use the repository's real pinned client dependency and existing suites unchanged wherever possible. The environment must not carry project schema, business logic, roles, migrations, or test expectations solely to manufacture a passing result.
 
+## Build identity and candidate boundary
+
+`BUNDLE_VERSION` carries lifecycle state, not per-commit uniqueness. Source-controlled values are restricted to stable `X.Y.Z`, active-development `X.Y.Z-dev`, or candidate `X.Y.Z-rc.N`.
+
+For a development build, `acceptance.json`'s `source_commit` plus the bundle version is the canonical exact source identity; human-facing references may render that pair as `X.Y.Z-dev+g<short-commit-sha>`. Artifact SHA-256 remains the authority for exact bytes.
+
+A release candidate is not a debugging label. Before changing `BUNDLE_VERSION` from `X.Y.Z-dev` to `X.Y.Z-rc.N`, all known release blockers must be closed and the strongest relevant inexpensive/targeted checks must already pass. Any source correction after a candidate is cut rejects that candidate: the next development commit returns to `X.Y.Z-dev`, and a later candidate uses a new monotonically increasing `N`.
+
+Pull-request validation and candidate acceptance are intentionally different layers. `Validate` is normal PR feedback. `Accept runtime` is a deliberate full-runtime proof (and remains automatic on the documented main-branch path), not the default feedback loop for each development edit.
+
 ## Release authority
 
 A stable release requires a separately identified candidate first. Candidate builds use SemVer prerelease versions (`x.y.z-rc.N`) and are validation artifacts only; they must not create the stable tag or masquerade as `x.y.z`. After direct artifact verification, promote the source version to the stable `x.y.z` and accept that exact final commit again.

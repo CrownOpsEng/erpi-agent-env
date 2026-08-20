@@ -1,19 +1,6 @@
 name: Accept runtime
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - .gitattributes
-      - build.sh
-      - versions.env
-      - requirements.in
-      - requirements.lock
-      - scripts/**
-      - templates/**
-      - tests/**
-      - vendor/**
-      - .github/workflows/accept-runtime.yml
   push:
     branches: [main]
     paths:

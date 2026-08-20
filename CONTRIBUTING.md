@@ -110,3 +110,15 @@ The release pipeline is intentionally tag-first/draft-first so GitHub release im
 Recommended repository setting for future releases when available: **Settings → General → Releases → Enable release immutability**. This setting is administrative and is not changed by the build workflows themselves.
 
 Pre-1.0 versions are appropriate while the environment accumulates real-world usage evidence. `1.0.0` should signal a deliberately proven/stable compatibility contract, not merely a working package.
+
+## Development and release version lifecycle
+
+Version identifiers describe lifecycle state; commits and artifact hashes describe exact bytes.
+
+- **Development:** keep `BUNDLE_VERSION` at `X.Y.Z-dev` while payload, validation, or release work is still changing or any known blocker remains. The exact identity of a development snapshot is the pair `(BUNDLE_VERSION, source commit)` and may be written for humans as `X.Y.Z-dev+g<short-commit-sha>`. The `+g...` form is derived metadata; never hand-maintain it in `versions.env`.
+- **Release candidate:** use `X.Y.Z-rc.N` only after the development source has no known release blockers and the strongest inexpensive/targeted checks have passed. Cutting an RC is a deliberate version-only promotion whenever practical. An RC identifies one immutable source commit; never modify code while retaining that RC identity.
+- **Rejected candidate:** if an RC exposes a defect, reject it, make the next development commit return `BUNDLE_VERSION` to `X.Y.Z-dev`, fix and validate normally, and never reuse the rejected RC number. Cut the next `rc.N` only when the branch is again believed releasable.
+- **Stable:** use `X.Y.Z` only after the candidate has passed the required direct artifact and motivating-project promotion proofs. The stable version change is deliberate and the exact stable commit must be accepted again because version bytes are part of the payload.
+- **Build metadata:** SemVer `+...` metadata is for derived snapshot identification, not readiness or precedence. Do not append metadata to an RC as a way to keep changing its source.
+
+Normal pull-request commits are development checkpoints. Run the inexpensive source gate locally before pushing; PR CI should provide lightweight `Validate` feedback. Use full `Accept runtime` deliberately when runtime proof is warranted, for a candidate, or automatically on the documented main-branch path. Do not use release-candidate numbering or full clean builds as an inner debugging loop.

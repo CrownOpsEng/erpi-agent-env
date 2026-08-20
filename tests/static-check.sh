@@ -167,6 +167,22 @@ grep -F 'gzip -n > "$dest"' "$ROOT/build.sh" >/dev/null
 grep -F 'Archive packaging is not deterministic for the accepted payload.' "$ROOT/build.sh" >/dev/null
 grep -F 'Immutable payload contains a group/world-writable regular file' "$ROOT/build.sh" >/dev/null
 grep -F 'Publish release accepts stable versions only; release candidates are validation artifacts.' "$ROOT/.github/workflows/publish-release.yml" >/dev/null
+# Version lifecycle policy.
+python3 - "$ROOT/versions.env" <<'PY_VERSION_LIFECYCLE'
+import re, sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+matches = re.findall(r'^BUNDLE_VERSION="([^"]+)"$', text, flags=re.M)
+assert len(matches) == 1, matches
+version = matches[0]
+assert "+" not in version, "build metadata is derived from source_commit, not stored in BUNDLE_VERSION"
+assert re.fullmatch(r"\d+\.\d+\.\d+(?:-dev|-rc\.[1-9]\d*)?", version), version
+PY_VERSION_LIFECYCLE
+! grep -q '^  pull_request:' "$ROOT/.github/workflows/accept-runtime.yml"
+grep -q '^  push:' "$ROOT/.github/workflows/accept-runtime.yml"
+grep -q '^  workflow_dispatch:' "$ROOT/.github/workflows/accept-runtime.yml"
+grep -F '## Development and release version lifecycle' "$ROOT/CONTRIBUTING.md" >/dev/null
+grep -F '## Build identity and candidate boundary' "$ROOT/VALIDATION.md" >/dev/null
 grep -F 'POSTGRES_VERSION="17.10"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGRES_SOURCE_URL="https://ftp.postgresql.org/pub/source/v17.10/postgresql-17.10.tar.bz2"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGRES_SOURCE_SHA256="078a03516dcdbdb705fecaf415ea3d13a956c589e46f09fed68a06fb00598c90"' "$ROOT/versions.env" >/dev/null
