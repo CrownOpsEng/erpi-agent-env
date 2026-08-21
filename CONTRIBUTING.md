@@ -62,9 +62,26 @@ A connector-only agent may not have a usable shell checkout. In that case it mus
 
 Do **not** manually refresh candidate hashes, run IDs, versions, or per-run chronology in tracked narrative files. `VALIDATION.md` defines the stable validation contract; successful **Accept runtime** runs upload `acceptance.json` evidence for the exact commit, and published Releases carry their runtime archive, checksum, and `acceptance.json`. Git history preserves why/what/validation for changes, and GitHub Actions preserves execution history. Superseded historical documents should be removed from the live tree once they no longer serve current operation or authority—their content remains recoverable from Git.
 
+## Compatibility and version selection
+
+`BUNDLE_VERSION` is the SemVer compatibility/lifecycle authority for the environment. It is **not** a commit counter and does not identify each development archive by itself. Git owns exact source identity; the builder combines the development lifecycle version with the source commit when it needs a unique distributable build identity.
+
+The supported compatibility surface is the documented environment contract: `agent-env` commands/options and intentionally exported behavior, archive activation and relocation guarantees, documented offline/credential/security boundaries, and the supported runtime-host envelope. Builder source layout, private helper implementation, temporary build paths, test-fixture structure, and undocumented internal runtime paths are not compatibility promises.
+
+Classify material changes by their real contract effect, regardless of Conventional Commit label or diff size:
+
+- **Internal** — no supported behavior changes.
+- **Fix** — restores/corrects supported behavior without incompatibility.
+- **Additive** — adds a backward-compatible supported capability.
+- **Breaking** — makes a supported behavior or interface incompatible.
+
+Before `1.0.0`, a Fix selects a PATCH release; Additive or Breaking work selects the next MINOR release. From `1.0.0` onward, use normal SemVer: Fix → PATCH, Additive → MINOR, Breaking → MAJOR. Internal work does not force a release by itself. The release target is chosen from the cumulative compatibility impact of the work being released; ordinary commits and PRs do not increment SemVer one-by-one.
+
+Conventional Commit syntax and automation may help discover likely impact, but actual supported-contract impact is authoritative. When compatibility, persistence, security, packaging, or operations materially change, make that consequence explicit in the commit/PR record without creating a second version authority.
+
 ## Releases
 
-`BUNDLE_VERSION` in `versions.env` is the source lifecycle version. Active work uses `x.y.z-dev`; release candidates use SemVer prerelease identities such as `0.2.0-rc.1` and are not published through the stable release workflow. Stable release tags are exactly `v$BUNDLE_VERSION`.
+`BUNDLE_VERSION` in `versions.env` is the compatibility/lifecycle version authority. Active work uses `x.y.z-dev`; release candidates use SemVer prerelease identities such as `0.2.0-rc.1` and are not published through the stable release workflow. Stable release tags are exactly `v$BUNDLE_VERSION`. Exact development-build identity is derived from Git source identity rather than stored in `versions.env`.
 
 Development/candidate flow:
 
@@ -116,7 +133,7 @@ Pre-1.0 versions are appropriate while the environment accumulates real-world us
 
 Version identifiers describe lifecycle state; commits and artifact hashes describe exact bytes.
 
-- **Development:** keep `BUNDLE_VERSION` at `X.Y.Z-dev` while payload, validation, or release work is still changing or any known blocker remains. The exact identity of a development snapshot is the pair `(BUNDLE_VERSION, source commit)` and may be written for humans as `X.Y.Z-dev+g<short-commit-sha>`. The `+g...` form is derived metadata; never hand-maintain it in `versions.env`.
+- **Development:** keep `BUNDLE_VERSION` at `X.Y.Z-dev` while payload, validation, or release work is still changing or any known blocker remains. The exact source identity is the full Git commit. Distributable development builds derive `BUILD_ID=X.Y.Z-dev+g<12-char-source>` and use that identity in the archive filename; the full source SHA remains in runtime/acceptance provenance. The builder refuses dirty Git worktrees because an uncommitted tree cannot truthfully claim a commit identity. Exported source without `.git` must supply the exact commit through `MAGNET_AGENT_SOURCE_COMMIT`. Never hand-maintain `+g...` metadata in `versions.env`.
 - **Release candidate:** use `X.Y.Z-rc.N` only after the development source has no known release blockers and the strongest inexpensive/targeted checks have passed. Cutting an RC is a deliberate version-only promotion whenever practical. An RC identifies one immutable source commit; never modify code while retaining that RC identity.
 - **Rejected candidate:** if an RC exposes a defect, reject it, make the next development commit return `BUNDLE_VERSION` to `X.Y.Z-dev`, fix and validate normally, and never reuse the rejected RC number. Cut the next `rc.N` only when the branch is again believed releasable.
 - **Stable:** use `X.Y.Z` only after the candidate has passed the required direct artifact and motivating-project promotion proofs. The stable version change is deliberate and the exact stable commit must be accepted again because version bytes are part of the payload.

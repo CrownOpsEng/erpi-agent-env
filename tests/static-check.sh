@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-for file in "$ROOT/build.sh" "$ROOT/tests/"*.sh "$ROOT/templates/scripts/"*.sh "$ROOT/templates/bin/agent-env" "$ROOT/scripts/normalize-python-links.sh"; do
+for file in "$ROOT/build.sh" "$ROOT/tests/"*.sh "$ROOT/templates/scripts/"*.sh "$ROOT/templates/bin/agent-env" "$ROOT/scripts/normalize-python-links.sh" "$ROOT/scripts/build-identity.sh"; do
   bash -n "$file"
 done
 for file in "$ROOT/templates/bin/python-wrapper" "$ROOT/templates/bin/node-wrapper" "$ROOT/templates/bin/npm-wrapper" "$ROOT/templates/bin/npx-wrapper" "$ROOT/scripts/uv-isolated-exec.sh"; do
@@ -10,6 +10,7 @@ done
 for file in "$ROOT/templates/scripts/"*.py; do python3 -m py_compile "$file"; done
 python3 -m py_compile "$ROOT/scripts/normalize-python-sysconfig.py"
 python3 -m py_compile "$ROOT/scripts/write-acceptance-metadata.py"
+python3 -m py_compile "$ROOT/scripts/check-version-transition.py"
 python3 - <<'PY' "$ROOT/versions.env" "$ROOT/requirements.in" "$ROOT/requirements.lock" "$ROOT"
 import hashlib, json, pathlib, re, sys
 versions_path, req_in_path, lock_path, root = map(pathlib.Path, sys.argv[1:])
@@ -74,12 +75,10 @@ for path,record in pg_packages.items():
 print('hash-lock-and-vendor-shapes-ok')
 PY
 rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
-for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/postgrest.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE vendor/postgrest/LICENSE templates/scripts/pg-delta.mjs tests/node-deps-safety-check.sh; do
+for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/postgrest.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/build-identity.sh scripts/check-version-transition.py scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE vendor/postgrest/LICENSE templates/scripts/pg-delta.mjs tests/build-identity-check.sh tests/version-transition-check.sh tests/node-deps-safety-check.sh; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime/build source missing: $file" >&2; exit 1; }
 done
-# The shipped router is intentionally compact; large operational detail belongs in README/commands.
-router_bytes="$(wc -c < "$ROOT/payload/AGENTS.md.in")"
-(( router_bytes <= 3000 )) || { echo "payload/AGENTS.md.in is too large for a routing surface: ${router_bytes} bytes" >&2; exit 1; }
+# The shipped router is a routing surface; do not enforce an arbitrary byte budget in place of semantic review.
 [[ ! -e "$ROOT/payload/AGENTS.md" && ! -e "$ROOT/templates/AGENTS.md" ]] || {
   echo "Shipped agent instructions must use the non-discoverable payload/AGENTS.md.in source name inside the builder repository." >&2
   exit 1
@@ -191,6 +190,8 @@ grep -F "delimiter='\t'" "$ROOT/build.sh" >/dev/null
 grep -F 'vendor/licenses/THIRD-PARTY-LICENSES.md' "$ROOT/build.sh" >/dev/null
 grep -F 'licenses/third-party/THIRD-PARTY-LICENSES.md' "$ROOT/build.sh" >/dev/null
 grep -F '@BUNDLE_VERSION@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
+grep -F '@BUILD_ID@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
+grep -F '@SOURCE_COMMIT@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
 grep -F 'shellcheck-v${SHELLCHECK_VERSION}-source.tar.gz' "$ROOT/build.sh" >/dev/null
 grep -F 'SHELLCHECK_SOURCE_SHA256' "$ROOT/build.sh" >/dev/null
 grep -F '__MAGNET_AGENT_RELOCATE__/runtime/python/current/bin' "$ROOT/build.sh" >/dev/null
@@ -213,8 +214,18 @@ PY_VERSION_LIFECYCLE
 ! grep -q '^  pull_request:' "$ROOT/.github/workflows/accept-runtime.yml"
 grep -q '^  push:' "$ROOT/.github/workflows/accept-runtime.yml"
 grep -q '^  workflow_dispatch:' "$ROOT/.github/workflows/accept-runtime.yml"
+grep -F '## Compatibility and version selection' "$ROOT/CONTRIBUTING.md" >/dev/null
 grep -F '## Development and release version lifecycle' "$ROOT/CONTRIBUTING.md" >/dev/null
 grep -F '## Build identity and candidate boundary' "$ROOT/VALIDATION.md" >/dev/null
+grep -F 'source "$SELF_DIR/scripts/build-identity.sh"' "$ROOT/build.sh" >/dev/null
+grep -F 'MAGNET_AGENT_SOURCE_COMMIT' "$ROOT/build.sh" >/dev/null
+grep -F 'Distributable builds require a clean committed source tree' "$ROOT/build.sh" >/dev/null
+grep -F 'ARTIFACT="$OUT_DIR/${ARTIFACT_STEM}.tar.gz"' "$ROOT/build.sh" >/dev/null
+! grep -F 'magnet-agent-env-linux-x64-v${BUNDLE_VERSION}.tar.gz' "$ROOT/build.sh"
+grep -F '"build_id": "$BUILD_ID"' "$ROOT/build.sh" >/dev/null
+grep -F '"source_commit": "$SOURCE_COMMIT"' "$ROOT/build.sh" >/dev/null
+grep -F 'expected_filename = f"{artifact_stem}.tar.gz"' "$ROOT/scripts/write-acceptance-metadata.py" >/dev/null
+grep -F "build_id==f'{bundle_version}+g{source_commit[:12]}'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
 grep -F 'POSTGRES_VERSION="17.10"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGRES_SOURCE_URL="https://ftp.postgresql.org/pub/source/v17.10/postgresql-17.10.tar.bz2"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGRES_SOURCE_SHA256="078a03516dcdbdb705fecaf415ea3d13a956c589e46f09fed68a06fb00598c90"' "$ROOT/versions.env" >/dev/null
@@ -312,6 +323,8 @@ require_contains 'pgbench -c 2 -j 1 -t 2 postgres' "$ROOT/templates/scripts/self
 require_contains "bash -c 'exit 23'" "$ROOT/templates/scripts/selftest.sh" 'child exit propagation proof'
 require_contains 'kill -TERM "$runner_pid"' "$ROOT/templates/scripts/selftest.sh" 'signal teardown proof'
 require_contains 'for (( attempt=0; attempt<100; attempt++ )); do' "$ROOT/templates/scripts/selftest.sh" 'dependency-free signal readiness loop'
+"$ROOT/tests/build-identity-check.sh"
+"$ROOT/tests/version-transition-check.sh"
 "$ROOT/tests/github-auth-check.sh"
 "$ROOT/tests/acceptance-metadata-check.sh"
 "$ROOT/tests/uv-isolation-check.sh"

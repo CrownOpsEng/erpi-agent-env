@@ -1,5 +1,9 @@
 # Magnet Agent Environment @BUNDLE_VERSION@
 
+Build identity: `@BUILD_ID@`
+
+Source commit: `@SOURCE_COMMIT@`
+
 Portable Linux x86-64 execution capability for AI-agent work. The target repository remains authoritative for dependencies, schemas, commands, safety rules, and application architecture.
 
 ## Start
@@ -79,7 +83,7 @@ Probe shell GitHub only when it is actually needed. If shell networking is known
 
 ## Provenance and licenses
 
-`manifest/environment.json`, `manifest/versions.env`, and the machine-readable `manifest/sources.tsv` record the exact runtime/tool provenance, including the managed python-build-standalone build selected by pinned uv. Direct third-party license/notice material is under `licenses/third-party/`; ShellCheck's GPL license and exact corresponding source are under `licenses/shellcheck/` and `licenses/source/`. Node and CPython also retain their upstream license files inside their bundled runtime trees.
+`manifest/environment.json` records the compatibility version, derived build identity, exact source commit, and runtime/tool provenance. `manifest/versions.env` and the machine-readable `manifest/sources.tsv` record lifecycle/tool pins and source artifacts, including the managed python-build-standalone build selected by pinned uv. Direct third-party license/notice material is under `licenses/third-party/`; ShellCheck's GPL license and exact corresponding source are under `licenses/shellcheck/` and `licenses/source/`. Node and CPython also retain their upstream license files inside their bundled runtime trees.
 
 ## Mutable state
 

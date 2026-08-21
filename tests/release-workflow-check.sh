@@ -48,6 +48,9 @@ grep -F 'not checked-out source' "$BUILD" >/dev/null
 grep -F 'refusing to alter published assets' "$BUILD" >/dev/null
 grep -F 'gh release upload "$RELEASE_TAG"' "$BUILD" >/dev/null
 grep -F 'gh release edit "$RELEASE_TAG" --draft=false' "$BUILD" >/dev/null
+grep -F 'MAGNET_AGENT_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}' "$BUILD" >/dev/null
+grep -F "jq -er '.artifact.filename' dist/acceptance.json" "$BUILD" >/dev/null
+grep -F 'echo "name=${archive_name%.tar.gz}"' "$BUILD" >/dev/null
 
 attach_line="$(grep -nF 'gh release upload "$RELEASE_TAG"' "$BUILD" | cut -d: -f1)"
 publish_line="$(grep -nF 'gh release edit "$RELEASE_TAG" --draft=false' "$BUILD" | cut -d: -f1)"
@@ -60,8 +63,11 @@ publish_line="$(grep -nF 'gh release edit "$RELEASE_TAG" --draft=false' "$BUILD"
 # retired manual history ledgers.
 ! grep -F 'v1.0.0' "$README"
 grep -F '**Publish release**' "$README" >/dev/null
-grep -F '.github/release-request.json' "$AGENTS" >/dev/null
-grep -F 'connector-only session' "$AGENTS" >/dev/null
+grep -F 'Change, commit, version, and release policy: `CONTRIBUTING.md`.' "$AGENTS" >/dev/null
+if grep -F '.github/release-request.json' "$AGENTS" >/dev/null; then
+  echo 'Root AGENTS.md should route release policy, not duplicate release-command procedure.' >&2
+  exit 1
+fi
 for retired in 'BUILD-REVIEW.md' 'docs/validation-history.md'; do
   if grep -nF "$retired" "$README" "$VALIDATION" "$AGENTS" "$CONTRIBUTING"; then
     echo "Live authority docs reference retired history ledger: $retired" >&2

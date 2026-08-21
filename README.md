@@ -29,7 +29,7 @@ PostgreSQL is intentionally **not** placed on the activated `PATH`; use `agent-e
 
 ## Portability model
 
-The J2911 portable venv was used as a reference. Its strongest idea—self-locating repair of the venv base-Python `home` after a move—is retained. Its stale absolute console-script failure is not: `uv venv --relocatable` owns standard activation/entrypoint portability, the bundle repairs only the one `pyvenv.cfg` value that cannot remain valid when the bundled interpreter itself moves, and stale build-root residue is a hard failure.
+Relocation uses self-locating repair of the venv base-Python `home` while `uv venv --relocatable` owns standard activation/entrypoint portability. The bundle repairs only the one `pyvenv.cfg` value that cannot remain valid when the bundled interpreter itself moves, and stale build-root residue is a hard failure.
 
 The uv-managed python-build-standalone runtime remains intact under `runtime/python/`; the venv reaches it through relative internal topology. The selected distribution's exact build identifier, upstream URL and SHA-256 are pinned in `versions.env`, asserted against the installed runtime's `BUILD` file, and copied into runtime provenance. uv install-time sysconfig prefix metadata is normalized into a location-derived form so the base runtime can move without making sysconfig mutable.
 
@@ -37,19 +37,22 @@ The supported runtime contract is GNU/Linux x86-64 with kernel >= 4.18, glibc >=
 
 ## Build
 
-Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256sum, find, sed/awk/grep, a working Docker daemon, and internet access. No sudo is used. Docker is a builder capability only; it is not bundled into the runtime.
+Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256sum, find, sed/awk/grep, a working Docker daemon, and internet access. A normal Git checkout is used to derive and verify exact source identity; an exported source tree without `.git` must provide `MAGNET_AGENT_SOURCE_COMMIT=<40-hex-sha>`. No sudo is used. Docker is a builder capability only; it is not bundled into the runtime.
 
 ```bash
 ./tests/static-check.sh
 ./build.sh
 ```
 
-The artifact name is derived from `BUNDLE_VERSION` in `versions.env`:
+`BUNDLE_VERSION` in `versions.env` is the compatibility/lifecycle version, not a per-build identifier. The builder derives exact development build identity from the committed source SHA and refuses dirty Git worktrees:
 
 ```text
-magnet-agent-env-linux-x64-v<version>.tar.gz
-magnet-agent-env-linux-x64-v<version>.tar.gz.sha256
+development: magnet-agent-env-linux-x64-v0.2.0-dev+g<12-char-source>.tar.gz
+candidate:   magnet-agent-env-linux-x64-v0.2.0-rc.8.tar.gz
+stable:      magnet-agent-env-linux-x64-v0.2.0.tar.gz
 ```
+
+The full 40-character source commit and derived build ID are recorded inside `manifest/environment.json` and in generated `acceptance.json`; the SHA-256 sidecar identifies the exact archive bytes. Release-candidate and stable filenames intentionally omit source metadata because those version identities are immutable and executable transition checks prevent a second source commit from retaining the same RC/stable identity.
 
 Release candidates use SemVer prerelease identities such as `0.2.0-rc.1`. A candidate must never use the final stable version or create the stable release tag. Only after the candidate has passed direct artifact verification is `BUNDLE_VERSION` promoted to the stable version, and that exact final source commit must pass acceptance again before publication.
 
@@ -58,7 +61,7 @@ Archive creation normalizes tar ordering/metadata, gzip headers, and the relocat
 Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under `.download-cache/` and are never shipped. GitHub Actions derives the shared download-cache key with `scripts/download-cache-key.sh` from dependency/build-input pins plus `requirements.lock`; lifecycle/archive metadata such as `BUNDLE_VERSION` does not churn that cache, while every reused artifact is still verified by its own pinned hash before use.
 The PostgreSQL server is built during every full acceptance/distribution build from the exact official PostgreSQL 17.10 source tarball inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10 regenerates scanner sources during this build, so the exact qualified AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM is a pinned build-only input: its SHA-256 is verified, its package identity/signature are checked inside the pinned image, it is installed from local bytes with container networking disabled, and it is not shipped in the runtime. The builder keeps the normal installed PostgreSQL prefix and deterministic GNU `ar` mode; optional readline, zlib, and ICU integrations are disabled only to reduce external runtime dependencies. The source-controlled PostgreSQL client/plpgsql_check payloads remain separately qualified inputs and can be reproduced with `scripts/rebuild-qualified-database-assets.sh` using the same pinned/offline PostgreSQL build prerequisites.
 
-Direct third-party license/attribution texts for redistributed command/database/capsule components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. PostgreSQL server provenance now terminates at the pinned official source artifact and pinned build image rather than an opaque prebuilt server bundle; the official PostgreSQL copyright notice is retained in the runtime.
+Direct third-party license/attribution texts for redistributed command/database/capsule components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. PostgreSQL server provenance terminates at the pinned official source artifact and pinned build image rather than an opaque prebuilt server bundle; the official PostgreSQL copyright notice is retained in the runtime.
 
 ## Offline Node capsule boundary
 

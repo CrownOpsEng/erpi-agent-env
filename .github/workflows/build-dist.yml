@@ -30,6 +30,11 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.release_tag || github.sha }}
 
+      - name: Record exact source SHA
+        id: source
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Compute builder download cache key
         id: download-cache
         run: echo "key=$(./scripts/download-cache-key.sh)" >> "$GITHUB_OUTPUT"
@@ -77,34 +82,36 @@ jobs:
           }
 
       - name: Build and accept distribution
+        env:
+          MAGNET_AGENT_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}
         run: ./build.sh
 
       - name: Write acceptance metadata
         id: metadata
         shell: bash
+        env:
+          ACCEPTED_SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
-          source ./versions.env
-          echo "name=magnet-agent-env-linux-x64-${BUNDLE_VERSION}" >> "$GITHUB_OUTPUT"
           sidecar="$(printf '%s\n' dist/*.tar.gz.sha256)"
-          source_sha="$(git rev-parse HEAD)"
           python3 scripts/write-acceptance-metadata.py \
             --sidecar "$sidecar" \
             --output dist/acceptance.json \
-            --source-sha "$source_sha" \
+            --source-sha "$ACCEPTED_SOURCE_SHA" \
             --repository "$GITHUB_REPOSITORY" \
             --workflow "$GITHUB_WORKFLOW" \
             --run-id "$GITHUB_RUN_ID" \
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --event "$GITHUB_EVENT_NAME" \
             --release-tag "$RELEASE_TAG"
+          archive_name="$(jq -er '.artifact.filename' dist/acceptance.json)"
+          echo "name=${archive_name%.tar.gz}" >> "$GITHUB_OUTPUT"
           cat "$sidecar"
           {
             echo '```json'
             cat dist/acceptance.json
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Upload distribution
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

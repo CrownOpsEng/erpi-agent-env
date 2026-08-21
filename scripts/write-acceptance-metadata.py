@@ -7,6 +7,7 @@ import argparse
 import json
 import pathlib
 import re
+import subprocess
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,6 +32,23 @@ def quoted_env_value(text: str, name: str) -> str:
     return match.group(1)
 
 
+def derive_identity(bundle_version: str, source_sha: str, target: str) -> tuple[str, str]:
+    tool = pathlib.Path(__file__).with_name("build-identity.sh")
+    try:
+        result = subprocess.run(
+            [str(tool), bundle_version, source_sha, target],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(exc.stderr.strip() or "Build identity derivation failed") from exc
+    fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    if set(fields) != {"build_id", "artifact_stem"}:
+        raise SystemExit(f"Malformed build identity output: {result.stdout!r}")
+    return fields["build_id"], fields["artifact_stem"]
+
+
 def main() -> None:
     args = parse_args()
     versions_path = pathlib.Path(args.versions)
@@ -40,11 +58,17 @@ def main() -> None:
     versions = versions_path.read_text(encoding="utf-8")
     bundle_version = quoted_env_value(versions, "BUNDLE_VERSION")
     target = quoted_env_value(versions, "TARGET")
+    build_id, artifact_stem = derive_identity(bundle_version, args.source_sha, target)
 
     fields = sidecar_path.read_text(encoding="utf-8").strip().split()
     if len(fields) != 2 or not re.fullmatch(r"[0-9a-f]{64}", fields[0]):
         raise SystemExit(f"Malformed SHA-256 sidecar: {sidecar_path}")
     digest, filename = fields
+    expected_filename = f"{artifact_stem}.tar.gz"
+    if filename != expected_filename:
+        raise SystemExit(
+            f"Artifact filename {filename!r} does not match build identity {build_id!r}; expected {expected_filename!r}"
+        )
 
     artifact_path = sidecar_path.parent / filename
     if not artifact_path.is_file():
@@ -54,6 +78,7 @@ def main() -> None:
         "schema_version": 1,
         "status": "accepted",
         "bundle_version": bundle_version,
+        "build_id": build_id,
         "target": target,
         "source_commit": args.source_sha,
         "repository": args.repository,
