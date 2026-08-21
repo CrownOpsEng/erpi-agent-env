@@ -18,7 +18,7 @@ jobs:
           ref: agent/git-handoff-restore-v2
           fetch-depth: 0
 
-      - name: Verify and apply permanent patches
+      - name: Verify and apply permanent source
         shell: bash
         run: |
           set -euo pipefail
@@ -30,6 +30,52 @@ jobs:
             git apply --check "$patch"
             git apply "$patch"
           done
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/static-check.sh')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+              ('templates/scripts/github.sh templates/scripts/doctor.py',
+               'templates/scripts/github.sh templates/scripts/git-handoff.py templates/scripts/doctor.py'),
+              ('tests/version-transition-check.sh tests/node-deps-safety-check.sh; do',
+               'tests/version-transition-check.sh tests/node-deps-safety-check.sh tests/git-handoff-check.sh; do'),
+              ("grep -F 'github-git' \"$ROOT/payload/AGENTS.md.in\" >/dev/null\n",
+               "grep -F 'github-git' \"$ROOT/payload/AGENTS.md.in\" >/dev/null\n"
+               "grep -F 'git-handoff restore' \"$ROOT/templates/bin/agent-env\" >/dev/null\n"
+               "grep -F 'git-handoff restore' \"$ROOT/payload/AGENTS.md.in\" >/dev/null\n"
+               "grep -F 'git-bundle-zip-v1' \"$ROOT/build.sh\" >/dev/null\n"
+               "grep -F 'GIT_CONFIG_NOSYSTEM' \"$ROOT/templates/scripts/git-handoff.py\" >/dev/null\n"
+               "grep -F 'GIT_CONFIG_GLOBAL' \"$ROOT/templates/scripts/git-handoff.py\" >/dev/null\n"
+               "grep -F 'bundle\", \"verify\"' \"$ROOT/templates/scripts/git-handoff.py\" >/dev/null\n"
+               "grep -F 'https://github.com/{repository}.git' \"$ROOT/templates/scripts/git-handoff.py\" >/dev/null\n"
+               "grep -F 'cp \"$SELF_DIR/templates/scripts/git-handoff.py\" \"$BUILD/scripts/git-handoff.py\"' \"$ROOT/build.sh\" >/dev/null\n"),
+              ('"$ROOT/tests/node-deps-safety-check.sh"\n',
+               '"$ROOT/tests/node-deps-safety-check.sh"\n"$ROOT/tests/git-handoff-check.sh"\n'),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'static-check anchor count {count}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          cat > /tmp/expected-product-blobs <<'EOF'
+          ff7ff811009c557c4d10ac63833acc27f1800276 README.md
+          6d9bc0d0ae6945e1717e055860d4b8ae71ba8057 VALIDATION.md
+          af811f4ab5a37ee0b9a7eccba5e1538e7cf373f2 build.sh
+          da23d544f7f11637ca84304485412d70273303b2 payload/AGENTS.md.in
+          a0e6055f015466c559a7c58ed8f292758ba96d38 templates/RUNTIME-README.md
+          b9969d5f42c8a2351c3bf3fe91d32c4c34d81f46 templates/bin/agent-env
+          fa24caff373e276c65ff9c7ff42f8705fec1aaad templates/scripts/git-handoff.py
+          a46ab4ffdcc93d7ce14737b5b631dd253f06d300 templates/scripts/selftest.sh
+          8f501b828d215b0a62a213e9b2dc55447cf223c8 tests/git-handoff-check.sh
+          ecf577afb6268a010471dccee9fe32a8e85808ae tests/static-check.sh
+          EOF
+          sed -i 's/^          //' /tmp/expected-product-blobs
+          while read -r expected path; do
+            actual="$(git hash-object "$path")"
+            [[ "$actual" == "$expected" ]] || { echo "Product blob drift: $path expected $expected got $actual" >&2; exit 1; }
+          done < /tmp/expected-product-blobs
           test -x templates/scripts/git-handoff.py
           test -x tests/git-handoff-check.sh
           rm -rf .github/git-handoff-patches
