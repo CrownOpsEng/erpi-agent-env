@@ -4,7 +4,7 @@ This file defines the stable validation authority for Magnet Agent Environment. 
 
 ## Source validation
 
-`./tests/static-check.sh` is the fast source gate. It must fail closed on malformed scripts, inconsistent pins/locks, missing required source, unsafe credential handling, router bloat, invalid portability assumptions, mismatched source-controlled qualified native payloads, malformed provenance metadata, incomplete required direct-license material, and unsafe Node-capsule filesystem/ownership behavior.
+`./tests/static-check.sh` is the fast source gate. It must fail closed on malformed scripts, inconsistent pins/locks, missing required source, unsafe credential handling, router ownership/structure drift, invalid portability assumptions, mismatched source-controlled qualified native payloads, malformed provenance metadata, incomplete required direct-license material, and unsafe Node-capsule filesystem/ownership behavior.
 
 Source validation does not prove the runtime.
 
@@ -38,7 +38,7 @@ The accepted archive hash and exact source SHA belong in machine-generated `acce
 
 The PostgreSQL server is not accepted from a prebuilt third-party binary bundle. Every full runtime build fetches the exact pinned official PostgreSQL source tarball, verifies its SHA-256, and builds the normal install prefix inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10's normal build regenerates scanner sources, so its Flex prerequisite is also immutable: the builder verifies the exact pinned AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM SHA-256 and package identity/signature, installs that local RPM without dependency resolution or package scripts, and disables container networking for the PostgreSQL compilation. Flex is a build input recorded in provenance, not redistributed runtime payload. Deterministic GNU `ar` mode (`AROPT=crsD`) is required for PostgreSQL static archives. Optional readline, zlib, and ICU integrations are disabled to avoid unnecessary external runtime-library dependencies; the resulting ELF symbol floor and dynamic dependencies are checked before runtime acceptance.
 
-The source-controlled PostgreSQL client and plpgsql_check payloads remain qualified build inputs. Their pinned hashes are validated by source checks and by `build.sh` before extraction. Their existing promotion baseline is a controlled GLIBC 2.28 build from pinned PostgreSQL 17.10/plpgsql_check sources; qualified maximum GLIBC requirements were 2.25 for the client payload and 2.17 for plpgsql_check. `scripts/rebuild-qualified-database-assets.sh` retains their pinned maintainer reproduction path.
+The source-controlled PostgreSQL client and plpgsql_check payloads are qualified build inputs. Their pinned hashes are validated by source checks and by `build.sh` before extraction. They are qualified from a controlled GLIBC 2.28 build using pinned PostgreSQL 17.10/plpgsql_check sources; maximum GLIBC requirements are 2.25 for the client payload and 2.17 for plpgsql_check. `scripts/rebuild-qualified-database-assets.sh` provides their pinned maintainer reproduction path.
 
 Any future server source, configure, build-image, Flex build-input, client, or extension-native change requires full source validation and runtime acceptance. A harness defect is fixed and the complete relevant qualification is rerun; partial progress is not promoted as success.
 
@@ -91,13 +91,15 @@ That project proof should use the repository's real pinned client dependency and
 
 ## Build identity and candidate boundary
 
-`BUNDLE_VERSION` carries lifecycle state, not per-commit uniqueness. Source-controlled values are restricted to stable `X.Y.Z`, active-development `X.Y.Z-dev`, or candidate `X.Y.Z-rc.N`.
+`BUNDLE_VERSION` carries compatibility/lifecycle state, not per-commit uniqueness. Source-controlled values are restricted to stable `X.Y.Z`, active-development `X.Y.Z-dev`, or candidate `X.Y.Z-rc.N`. Git owns exact source identity.
 
-For a development build, `acceptance.json`'s `source_commit` plus the bundle version is the canonical exact source identity; human-facing references may render that pair as `X.Y.Z-dev+g<short-commit-sha>`. Artifact SHA-256 remains the authority for exact bytes.
+A distributable development build derives `BUILD_ID=X.Y.Z-dev+g<12-char-source>` from the exact 40-character source commit and names the archive `magnet-agent-env-linux-x64-v<BUILD_ID>.tar.gz`. Runtime `manifest/environment.json` and generated `acceptance.json` both retain the full source commit plus `build_id`; the archive SHA-256 remains authority for exact bytes. The `+g...` identifier is generated metadata and never belongs in `versions.env`.
 
-A release candidate is not a debugging label. Before changing `BUNDLE_VERSION` from `X.Y.Z-dev` to `X.Y.Z-rc.N`, all known release blockers must be closed and the strongest relevant inexpensive/targeted checks must already pass. Any source correction after a candidate is cut rejects that candidate: the next development commit returns to `X.Y.Z-dev`, and a later candidate uses a new monotonically increasing `N`.
+The builder refuses a dirty Git worktree because uncommitted bytes cannot truthfully claim the checked-out commit identity. When building an exported source tree without `.git`, the caller must provide `MAGNET_AGENT_SOURCE_COMMIT=<40-hex-sha>` explicitly. When Git is available, any supplied source identity must exactly match `HEAD`.
 
-Pull-request validation and candidate acceptance are intentionally different layers. `Validate` is normal PR feedback. `Accept runtime` is a deliberate full-runtime proof (and remains automatic on the documented main-branch path), not the default feedback loop for each development edit.
+Release-candidate and stable artifact filenames use only their SemVer identities because those identities are immutable. Commit-range validation mechanically rejects a second source commit retaining the same RC/stable version, requires RC cuts to be version-only transitions from matching `X.Y.Z-dev`, requires stable finalization to be a version-only transition from matching `X.Y.Z-rc.N`, and requires a rejected candidate to return to matching development state before further source changes.
+
+A release candidate is not a debugging label. Before changing `BUNDLE_VERSION` from `X.Y.Z-dev` to `X.Y.Z-rc.N`, all known release blockers must be closed and the strongest relevant inexpensive/targeted checks must already pass. Pull-request validation and candidate acceptance remain different layers: `Validate` is normal source feedback; `Accept runtime` proves an exact committed runtime artifact.
 
 ## Release authority
 

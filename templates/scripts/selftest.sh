@@ -46,6 +46,14 @@ python - <<'PY_META'
 import csv, hashlib, json, os, pathlib, re
 root=pathlib.Path(os.environ['MAGNET_AGENT_ENV'])
 env=json.loads((root/'manifest/environment.json').read_text(encoding='utf-8'))
+bundle_version=env['bundle_version']
+build_id=env['build_id']
+source_commit=env['source_commit']
+assert re.fullmatch(r'[0-9a-f]{40}',source_commit),source_commit
+if bundle_version.endswith('-dev'):
+    assert build_id==f'{bundle_version}+g{source_commit[:12]}',(bundle_version,build_id,source_commit)
+else:
+    assert build_id==bundle_version,(bundle_version,build_id)
 python_meta=env['python_provenance']
 assert python_meta['version']=='3.13.14'
 assert python_meta['build']=='20260805'

@@ -5,6 +5,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 cp "$ROOT/scripts/check-commit-message.py" "$TMP/check-commit-message.py"
+cp "$ROOT/scripts/check-version-transition.py" "$TMP/check-version-transition.py"
 cp "$ROOT/scripts/check-commit-range.sh" "$TMP/check-commit-range.sh"
 chmod +x "$TMP/check-commit-range.sh"
 mkdir "$TMP/repo"
@@ -14,7 +15,10 @@ git config user.name 'Commit Policy Test'
 git config user.email 'commit-policy@example.invalid'
 mkdir -p scripts
 cp "$TMP/check-commit-message.py" scripts/check-commit-message.py
+cp "$TMP/check-version-transition.py" scripts/check-version-transition.py
 cp "$TMP/check-commit-range.sh" scripts/check-commit-range.sh
+
+printf 'BUNDLE_VERSION="0.2.0-dev"\nTARGET="linux-x86_64-gnu"\n' > versions.env
 
 good_message() {
   local subject="$1" detail="$2"

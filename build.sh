@@ -15,6 +15,7 @@ usage() {
 Usage: ./build.sh [--out DIR] [--cache DIR] [--keep-work]
 
 Build Magnet Agent Environment ${BUNDLE_VERSION} for ${TARGET}.
+Development archive identity is derived from the exact committed source; exported source trees must set MAGNET_AGENT_SOURCE_COMMIT=<40-hex-sha>.
 Requires an internet-connected supported Linux x86-64 host (kernel >= ${MIN_KERNEL_VERSION}, glibc >= ${MIN_GLIBC_VERSION}) with a working Docker daemon. No sudo is used.
 USAGE
 }
@@ -28,6 +29,32 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+SOURCE_COMMIT="${MAGNET_AGENT_SOURCE_COMMIT:-}"
+if command -v git >/dev/null 2>&1 && git -C "$SELF_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  CHECKOUT_COMMIT="$(git -C "$SELF_DIR" rev-parse HEAD)"
+  if [[ -n "$SOURCE_COMMIT" && "$SOURCE_COMMIT" != "$CHECKOUT_COMMIT" ]]; then
+    echo "MAGNET_AGENT_SOURCE_COMMIT $SOURCE_COMMIT does not match checked-out source $CHECKOUT_COMMIT." >&2
+    exit 1
+  fi
+  SOURCE_COMMIT="$CHECKOUT_COMMIT"
+  SOURCE_STATUS="$(git -C "$SELF_DIR" status --porcelain --untracked-files=all)"
+  if [[ -n "$SOURCE_STATUS" ]]; then
+    echo "Distributable builds require a clean committed source tree; commit or remove these changes first:" >&2
+    printf '%s\n' "$SOURCE_STATUS" >&2
+    exit 1
+  fi
+elif [[ -z "$SOURCE_COMMIT" ]]; then
+  echo "Cannot determine exact source identity. Build from a clean Git checkout or set MAGNET_AGENT_SOURCE_COMMIT to the exact exported commit SHA." >&2
+  exit 1
+fi
+[[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "Source identity must be an exact 40-character lowercase Git SHA; found: $SOURCE_COMMIT" >&2
+  exit 1
+}
+# shellcheck disable=SC1091
+source "$SELF_DIR/scripts/build-identity.sh"
+compute_build_identity "$BUNDLE_VERSION" "$SOURCE_COMMIT" "$TARGET"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Required build command missing: $1" >&2; exit 1; }; }
 for cmd in bash curl tar gzip bzip2 xz sha256sum find file readelf grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname env docker id; do need "$cmd"; done
@@ -133,9 +160,13 @@ cp "$SELF_DIR/requirements.in" "$BUILD/manifest/requirements.in"
 verify_one "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"
 cp "$SELF_DIR/requirements.lock" "$BUILD/manifest/requirements.lock"
 cp "$SELF_DIR/templates/RUNTIME-README.md" "$BUILD/README.md"
-sed -i "s/@BUNDLE_VERSION@/$BUNDLE_VERSION/g" "$BUILD/README.md"
-if grep -Fq '@BUNDLE_VERSION@' "$BUILD/README.md"; then
-  echo "Runtime README version placeholder was not rendered." >&2
+sed -i \
+  -e "s/@BUNDLE_VERSION@/$BUNDLE_VERSION/g" \
+  -e "s/@BUILD_ID@/$BUILD_ID/g" \
+  -e "s/@SOURCE_COMMIT@/$SOURCE_COMMIT/g" \
+  "$BUILD/README.md"
+if grep -Eq '@(BUNDLE_VERSION|BUILD_ID|SOURCE_COMMIT)@' "$BUILD/README.md"; then
+  echo "Runtime README build-identity placeholder was not rendered." >&2
   exit 1
 fi
 cp "$SELF_DIR/payload/AGENTS.md.in" "$BUILD/AGENTS.md"
@@ -528,6 +559,8 @@ cat > "$BUILD/manifest/environment.json" <<JSON
 {
   "bundle": "Magnet Agent Environment",
   "bundle_version": "$BUNDLE_VERSION",
+  "build_id": "$BUILD_ID",
+  "source_commit": "$SOURCE_COMMIT",
   "target": "$TARGET",
   "python_lock_resolution_cutoff": "$BUILD_CUTOFF",
   "python_lock_sha256": "$PYTHON_LOCK_SHA256",
@@ -706,7 +739,7 @@ find . -type f \
 "$BUILD/bin/agent-env" verify >/dev/null
 
 log "Archive/extract proof"
-ARTIFACT="$OUT_DIR/magnet-agent-env-linux-x64-v${BUNDLE_VERSION}.tar.gz"
+ARTIFACT="$OUT_DIR/${ARTIFACT_STEM}.tar.gz"
 TMP_ART="$ARTIFACT.part.$$"
 rm -f "$TMP_ART" "$ARTIFACT"
 # Normalize ordering, timestamps, owner metadata, and gzip headers so the
@@ -743,6 +776,8 @@ fi
 "$EXTRACTED/bin/agent-env" verify >/dev/null
 
 log "Build complete"
+echo "Build identity: $BUILD_ID"
+echo "Source commit: $SOURCE_COMMIT"
 echo "$ARTIFACT"
 echo "$ARTIFACT.sha256"
 echo "Size: $(du -h "$ARTIFACT" | awk '{print $1}')"
