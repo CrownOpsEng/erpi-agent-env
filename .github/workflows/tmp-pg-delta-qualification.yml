@@ -27,6 +27,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Qualify exact package, Supabase contract, and PostgreSQL behavior
         shell: bash
@@ -38,6 +39,9 @@ jobs:
           NODE_ROOT="$ROOT/node"
           TOOL="$ROOT/tool"
           REPORT="$ROOT/report.txt"
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          EXPECTED_LOCK_SHA256='b61b7ff9631db90b051a52e87d6d317a303b5a7584db06cc4b351baa1e82f282'
+          PG_IMAGE='postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f'
           mkdir -p "$NODE_ROOT" "$TOOL"
           exec > >(tee "$REPORT") 2>&1
 
@@ -45,7 +49,16 @@ jobs:
           cleanup() {
             docker rm -f pgdelta-qual >/dev/null 2>&1 || true
           }
+          schema_fingerprint() {
+            local db="$1"
+            docker exec pgdelta-qual pg_dump -U postgres --schema-only --no-owner "$db" \
+              | sed -E '/^-- Dumped from database version /d; /^-- Dumped by pg_dump version /d; /^\\(un)?restrict /d' \
+              | sha256sum \
+              | awk '{print $1}'
+          }
           trap cleanup EXIT
+
+          printf 'SOURCE_SHA=%s\n' "$SOURCE_SHA"
 
           log "Exact Supabase CLI 2.114.0 compatibility contract"
           curl --fail --location --retry 4 --retry-all-errors \
@@ -72,7 +85,7 @@ jobs:
           [[ "$(node --version)" == "v${NODE_VERSION}" ]]
           echo "NODE=$(node --version) NPM=$(npm --version)"
 
-          log "Resolve one exact runtime-owned lock"
+          log "Resolve and bind one exact runtime-owned lock"
           cat > "$TOOL/package.json" <<'JSON'
           {
             "name": "magnet-agent-env-pg-delta-runtime",
@@ -87,6 +100,11 @@ jobs:
           (
             cd "$TOOL"
             npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+            actual_lock_sha="$(sha256sum package-lock.json | awk '{print $1}')"
+            [[ "$actual_lock_sha" == "$EXPECTED_LOCK_SHA256" ]] || {
+              echo "Resolved pg-delta lock drifted: $actual_lock_sha != $EXPECTED_LOCK_SHA256" >&2
+              exit 1
+            }
             node - <<'NODE'
           const fs = require('fs');
           const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
@@ -126,7 +144,7 @@ jobs:
           docker run -d --rm --name pgdelta-qual \
             -e POSTGRES_HOST_AUTH_METHOD=trust \
             -p 127.0.0.1:55439:5432 \
-            postgres:17.10-bookworm >/dev/null
+            "$PG_IMAGE" >/dev/null
           for attempt in $(seq 1 90); do
             if docker exec pgdelta-qual pg_isready -U postgres >/dev/null 2>&1; then break; fi
             sleep 1
@@ -326,17 +344,19 @@ jobs:
           grep -Eiq 'DROP[[:space:]]+(TABLE|VIEW|FUNCTION|INDEX|POLICY|TRIGGER)|DROP[[:space:]]+COLUMN' "$ROOT/destructive.sql"
           echo "DESTRUCTIVE_CHANGE_VISIBLE_IN_PROPOSAL=pass"
 
-          before_source="$(docker exec pgdelta-qual pg_dump -U postgres --schema-only --no-owner source_db | sha256sum | awk '{print $1}')"
-          before_target="$(docker exec pgdelta-qual pg_dump -U postgres --schema-only --no-owner target_db | sha256sum | awk '{print $1}')"
+          before_source="$(schema_fingerprint source_db)"
+          before_target="$(schema_fingerprint target_db)"
           timeout 60 node "$TOOL/qualify.mjs" "$source_url" "$target_url" "$ROOT/read-only-repeat" >/dev/null
-          after_source="$(docker exec pgdelta-qual pg_dump -U postgres --schema-only --no-owner source_db | sha256sum | awk '{print $1}')"
-          after_target="$(docker exec pgdelta-qual pg_dump -U postgres --schema-only --no-owner target_db | sha256sum | awk '{print $1}')"
+          after_source="$(schema_fingerprint source_db)"
+          after_target="$(schema_fingerprint target_db)"
           [[ "$before_source" == "$after_source" && "$before_target" == "$after_target" ]]
           echo "PLAN_GENERATION_NON_MUTATING=pass"
 
           log "Qualification summary"
           printf '%s\n' \
+            "SOURCE_SHA=$SOURCE_SHA" \
             "PGDELTA_VERSION=1.0.0-alpha.33" \
+            "PGDELTA_LOCK_SHA256=$EXPECTED_LOCK_SHA256" \
             "SUPABASE_CLI_BASELINE=2.114.0" \
             "NODE_API_IMPORT=pass" \
             "WARM_CACHE_OFFLINE_REINSTALL=pass" \
@@ -352,7 +372,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: pg-delta-qualification-${{ github.sha }}
+          name: pg-delta-qualification-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/pgdelta-qualification/report.txt
             ${{ runner.temp }}/pgdelta-qualification/summary.txt
