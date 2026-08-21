@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "packages": {
+    "postgres": {"version": "3.4.7", "file": "postgres-3.4.7.tgz", "sha256": "0e861c8b40520c729f79c5d316bd97a4b639c03e3c9fc3c5006001ff1feb4c4e", "integrity": "sha512-Jtc2612XINuBjIl/QTWsV5UvE8UHuNblcO3vVADSrKsrc6RqGX6lOW1cEo3CM2v0XG4Nat8nI+YM7/f26VxXLw=="},
+    "@postgres-language-server/wasm": {"version": "0.25.7", "file": "postgres-language-server-wasm-0.25.7.tgz", "sha256": "42a33402c0a7edf32a93600786a6f68119a72d83f51f8c6a67ffb9c9d8175518", "integrity": "sha512-Q+MIVjh4AHwy4bppJBNpKxrkLxpO9Uro9JjU5hn3SExe4xumnYoogK0ebOSLej7wriLpmqXVpiIlDqxDMkaSYw=="},
+    "fast-check": {"version": "4.9.0", "file": "fast-check-4.9.0.tgz", "sha256": "1f489d24fa2955e65118eccb9d3cb638c1f17cd646cb7dd0e0ba9645daaf35ad", "integrity": "sha512-7ms6T7SybUev/PQITciI0yLM2pOSFy5zpG8Ty7tQofcVaQUvrMXp6CBwqF6fThLCLOrfBtuHAtwq6Yu4XPCllg=="},
+    "pure-rand": {"version": "8.4.2", "file": "pure-rand-8.4.2.tgz", "sha256": "3ce449c758cb2ea0db7ff30a1b378d381d9e74681acec74e1e2591ea6aa381ca", "integrity": "sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng=="}
+  }
+}

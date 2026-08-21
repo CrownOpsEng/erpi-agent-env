@@ -7,6 +7,7 @@ Before changing builder/runtime source:
 1. Read `README.md` and the directly affected files.
 2. Preserve the fail-closed portability, integrity, credential-isolation, offline-recovery, and host-capability boundaries already encoded by the tests.
 3. If a shell checkout is available, run `./tests/static-check.sh` after source changes. In a connector-only session, make one coherent direct-to-`main` commit and inspect the resulting **Validate** run instead; do not pretend a local check ran.
+   For a coherent long-running validation, preserve one logical process: give it an adequate outer timeout, or supervise/poll that same process as described in `VALIDATION.md`; do not split a suite merely to satisfy an agent wrapper timeout.
 4. For payload-affecting changes, require the resulting **Accept runtime** run to pass before release. A local `./build.sh` is useful when available but is not required when GitHub Actions is the intended acceptance host.
 5. Never commit `dist/`, `.download-cache/`, credentials, runtime-generated state, or manual copies of CI/release evidence.
 6. Every new commit must follow the detailed commit contract in `CONTRIBUTING.md`: Conventional Commit subject plus substantive `Why:`, `What:`, and `Validation:` sections. **Validate** checks every commit introduced by a direct push and every commit in an optional PR, not only the tip. Preserve published history; do not rewrite old commits merely to improve their messages.

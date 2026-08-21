@@ -1,17 +1,29 @@
-# Third-party components
+# Third-party software
 
-The Magnet Agent Environment redistributes or downloads the following upstream components. Exact versions, artifact URLs and SHA-256 values used for the build are recorded in `manifest/sources.tsv` and `manifest/versions.env`.
+This runtime redistributes pinned third-party software. Exact versions, source URLs and SHA-256 values are recorded in `manifest/versions.env` and the machine-readable `manifest/sources.tsv`.
 
-- uv — https://github.com/astral-sh/uv
-- CPython distribution managed by uv — https://github.com/astral-sh/python-build-standalone and https://www.python.org/
-- Node.js — https://nodejs.org/
-- GitHub CLI — https://github.com/cli/cli
-- jq — https://github.com/jqlang/jq
-- yq — https://github.com/mikefarah/yq
-- ripgrep — https://github.com/BurntSushi/ripgrep
-- actionlint — https://github.com/rhysd/actionlint
-- gitleaks — https://github.com/gitleaks/gitleaks
+Direct third-party license and attribution texts for the redistributed command/database/capsule components are included under `licenses/third-party/`. ShellCheck 0.11.0 is GPL-3.0-only; its GPL license and exact pinned corresponding source archive are additionally included under `licenses/shellcheck/` and `licenses/source/`. The bundled Node and CPython distributions retain their upstream license files in their own runtime trees, and installed Python packages retain their package-provided license metadata.
 
-The Python analysis layer is installed from the source-frozen exact hash-locked `manifest/requirements.lock`; installed package metadata and bundled wheel metadata carry package-specific licensing information.
+The PostgreSQL server is built from the exact pinned official PostgreSQL source artifact in a digest-pinned manylinux 2.28 image rather than redistributed from an opaque prebuilt server bundle. Readline, zlib, and ICU integrations are disabled in that server build to avoid unnecessary external runtime-library dependencies, and the official PostgreSQL copyright notice is retained under `licenses/postgresql/`.
 
-This notice is informational and does not replace the license files or terms supplied by each upstream project.
+The direct inventory includes:
+
+- uv 0.12.5 — MIT OR Apache-2.0.
+- GitHub CLI 2.97.0 — MIT.
+- jq 1.8.2 — MIT plus the third-party notices reproduced in upstream `COPYING`.
+- yq 4.53.3 — MIT.
+- ripgrep 15.2.0 — MIT OR Unlicense.
+- actionlint 1.7.12 — MIT.
+- gitleaks 8.30.1 — MIT.
+- ShellCheck 0.11.0 — GPL-3.0-only, with corresponding source supplied.
+- Miller 6.20.2 — BSD-style license.
+- PostgreSQL 17.10 — PostgreSQL License.
+- pgTAP 1.3.3 — PostgreSQL-style license.
+- plpgsql_check 2.8.11 — MIT-style license.
+- `@supabase/pg-delta` 1.0.0-alpha.33 — MIT; its exact npm lock and transitive package license/integrity provenance are retained in `manifest/`.
+- postgres 3.4.7 npm package — Unlicense.
+- `@postgres-language-server/wasm` 0.25.7 — MIT.
+- fast-check 4.9.0 — MIT.
+- pure-rand 8.4.2 — MIT.
+
+This file is an inventory and routing notice. The reproduced license/attribution texts remain authoritative for their respective components.

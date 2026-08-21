@@ -1,151 +1,75 @@
-# Magnet Agent Environment
+# Magnet Agent Environment @BUNDLE_VERSION@
 
-A portable **supported GNU/Linux x86-64 AI-agent execution environment** built for working on Magnet Photos and similar repositories from constrained shell sessions.
+Portable Linux x86-64 execution capability for AI-agent work. The target repository remains authoritative for dependencies, schemas, commands, safety rules, and application architecture.
 
-This environment is external tooling. It is **not part of the Magnet Photos application architecture**, and it does not replace repository-owned dependencies or safety policy.
-
-Agents should read the root `AGENTS.md` first. It is intentionally short and routes environment use without loading this manual into every task.
-
-## Start here
-
-From any extraction location:
+## Start
 
 ```bash
 source /path/to/magnet-agent-env/activate
 agent-env doctor
+agent-env capabilities
 ```
 
-Activation is convenient but optional:
+Do not preload this README merely to discover tools; `agent-env help`, `doctor`, and `capabilities` are the cheap routing surfaces.
+
+## Database capability
+
+PostgreSQL is intentionally not added to ordinary PATH.
 
 ```bash
-/path/to/magnet-agent-env/bin/agent-env exec gh --version
-/path/to/magnet-agent-env/bin/agent-env doctor --json
+agent-env postgres run -- make check-pg
+agent-env postgres run --port 54322 -- bash
+agent-env pg psql -Atc 'select version()'
+agent-env pg pg_dump -Fc mydb -f dump.pg
+agent-env pgtap tests/database/*.test.sql
 ```
 
-Run `agent-env selftest` after moving/extracting the bundle, after recovery, or when environment integrity is in doubt. It is not intended as per-turn ceremony.
+`postgres run` creates a new UTF-8, checksummed, loopback-only disposable PostgreSQL 17.10 cluster under `state/postgres/`, scrubs inherited remote database targeting, uses local-only trust authentication, executes one command, shuts the cluster down, verifies page checksums, and deletes it unless `--keep` is explicitly requested. If the outer process starts as root, the database server is executed as `nobody`; the requested command remains under the invoking identity.
 
-## What is bundled
+Unix-domain sockets are deliberately disabled for this disposable runtime. All bundled database clients target `127.0.0.1`, so disabling unused sockets keeps database startup independent of the relocated bundle pathname and avoids Linux Unix-socket pathname limits under deep hostile relocation.
 
-- uv and a bundled CPython runtime
-- a relocatable Python analysis environment with offline recovery wheels
-- Node.js 24 LTS with npm/npx
-- GitHub CLI (`gh`)
-- jq and yq
-- ripgrep (`rg`)
-- actionlint
-- gitleaks
-- a small generic Python analysis layer: httpx, jsonschema, packaging, PyYAML, tomlkit, pytest, pip, setuptools and wheel
+The runtime includes pgTAP 1.3.3, plpgsql_check 2.8.11, pgbench, pg_dump/pg_restore, pg_amcheck, pg_checksums and normal client helpers. Project-specific compatibility roles, migrations, fixture data, test expectations, and production credentials do not belong in this bundle.
 
-Exact versions, sources and hashes are under `manifest/`.
+### pg-delta planning
 
-## Commands
+`agent-env pg-delta plan --source postgresql://... --target postgresql://... --out DIR` generates numbered SQL plan files plus `envelope.json`. Both live URLs must use numeric loopback (`127.0.0.1` or `::1`); inherited PostgreSQL targeting variables are scrubbed, and remote URLs are refused before connection. The output directory must be new or empty.
 
-```text
-agent-env doctor [--json]  Diagnose local bundle, host commands, and current repository
-agent-env github            Probe shell GitHub reachability, auth/API, and repo access
-agent-env github-auth       Run browser/device GitHub OAuth when reachable, then verify it
-agent-env github-git        Configure current-repo Git auth safely and verify push dry-run
-agent-env git ARGS...       Run host Git with the environment active
-agent-env selftest          Exercise bundled capabilities and portability invariants
-agent-env verify            Verify immutable-file checksums and symlink topology
-agent-env repair            Repair relocation-sensitive Python metadata
-agent-env rebuild-python    Destroy/recreate the Python venv offline from bundled artifacts
-agent-env versions          Print the environment manifest
-agent-env exec CMD ...      Run a command with the environment active
-agent-env root              Print the resolved bundle root
+This is deliberately **plan-only**. The upstream pg-delta `apply` and `sync` commands are not exposed. Version 1.0.0-alpha.33 is pinned because it is the exact default used by the qualified Supabase CLI 2.114.0 baseline; useful, safe planning compatibility is the contract, not byte-for-byte parity with every Supabase CLI wrapper option. The emitted `transactionMode` metadata remains relevant to whatever repository-owned tooling reviews or applies a plan.
+
+## Offline repository-owned Node dependencies
+
+The immutable capsule store currently contains exact bytes for postgres 3.4.7, `@postgres-language-server/wasm` 0.25.7, fast-check 4.9.0 and pure-rand 8.4.2.
+
+```bash
+agent-env node-deps status
+agent-env node-deps hydrate
+agent-env node-deps clean
 ```
 
-## GitHub authentication and shell access
+Hydration occurs only when `package-lock.json` contains the exact matching package version and npm integrity value. The command validates every destination before writing, refuses symlinked `node_modules`/scope paths or repository escapes, stages all missing packages before committing any of them, runs no lifecycle scripts, and never edits `package.json` or `package-lock.json`. A matching package already owned by the repository remains repository-owned rather than being claimed by agent-env.
 
-Credentials are deliberately **not bundled**. `gh` uses host/session authentication, including `GH_TOKEN`, `GITHUB_TOKEN`, or the normal GitHub CLI credential/config store.
+Packages hydrated by agent-env are recorded with content-bound ownership metadata. `clean` first verifies every recorded package against that metadata and refuses the whole cleanup if any package was replaced or modified. Legacy/name-only ownership markers are not trusted. The target repository remains dependency authority.
 
-For a GitHub-dependent task, validate shell access before substantial dependent work:
+## Long-running validation
+
+A foreground wrapper timeout is not a test result. Keep one logical repository validation intact: use an adequate outer timeout; otherwise keep a persistent session and poll it; if sessions are unavailable, supervise one child process and poll that same PID/output until its true exit status is known. Split only repository-defined independent phases or deliberate failure-isolation work.
+
+## GitHub
+
+Credentials are host/session state and are never bundled.
 
 ```bash
 agent-env github
-```
-
-This command first performs a short HTTPS reachability probe to GitHub before it recommends authentication. That distinction matters in constrained chat/agent sandboxes: the shell may have a working bundled `gh` binary while the host still blocks direct GitHub networking, even when the platform separately provides a GitHub connector/app.
-
-If the command reports `Shell GitHub network: unavailable` and exits `3`, treat remote GitHub access from shell commands as unavailable for the rest of that session unless the host/network changes. Do **not** keep retrying `gh auth`, `gh api`, or GitHub `git fetch/push`; local Git operations remain usable. Use the platform GitHub connector/app when one is available. This is detected at runtime rather than hardcoded as an assumption about every ChatGPT or agent host.
-
-If shell GitHub networking is reachable but no credential source exists, authenticate while the user is present:
-
-```bash
 agent-env github-auth
-```
-
-The command starts GitHub CLI's normal browser/device OAuth flow with terminal prompting disabled, then verifies the API and the current repository when one is detected. This prevents GitHub CLI from persisting this relocatable bundle's current absolute `gh` path into global Git configuration. Do not paste access tokens into chat when this flow is available.
-
-If `GH_TOKEN` or `GITHUB_TOKEN` is already set, it takes precedence over stored credentials. `agent-env github-auth` therefore refuses to start a competing stored-login flow until that environment token is fixed or unset. If a stored credential exists but is unusable, the command also refuses to overwrite it blindly; diagnose credential/account state with `agent-env github` first.
-
-Do not pre-request broader OAuth scopes. If a concrete GitHub operation requires an additional scope, add only that scope with the normal `gh auth refresh` flow while the user is engaged, verify the operation, and continue.
-
-GitHub API authentication and HTTPS Git transport are separate layers. In a GitHub worktree that will fetch or push over HTTPS, run:
-
-```bash
 agent-env github-git
 ```
 
-This configures only that repository with the location-neutral helper `!gh auth git-credential`, then performs `git push --dry-run --no-verify` against the current branch. It does not store a token, does not write the bundle path, and does not rewrite global Git configuration. The helper works while this environment is active because the bundled `gh` is on `PATH`; without activation, use `agent-env git ...`. SSH GitHub remotes continue to use host SSH credentials. Do not use `gh auth setup-git` from this portable bundle because GitHub CLI persists the current absolute `gh` executable path globally.
+Probe shell GitHub only when it is actually needed. If shell networking is known blocked, do not retry it repeatedly; use an available platform connector/app.
 
-A stored GitHub CLI token may fall back to plaintext storage when the host has no credential store. That is GitHub CLI behavior, not portable-bundle state. Review the host/session if persistence matters.
+## Provenance and licenses
 
-## Magnet Photos workflow
-
-From a Magnet Photos checkout:
-
-```bash
-source /path/to/magnet-agent-env/activate
-agent-env github      # once when GitHub is relevant to the turn/session
-make doctor
-make bootstrap
-make check-fast
-```
-
-The bundle supplies the Node major required by the repository. `make bootstrap` still installs the exact **repository-pinned** Supabase CLI and Postgres language tooling from `package-lock.json`. Continue to use Magnet's Make targets rather than raw Supabase commands.
-
-Full database checks still require a host-provided working Docker/Podman-compatible runtime.
+`manifest/environment.json`, `manifest/versions.env`, and the machine-readable `manifest/sources.tsv` record the exact runtime/tool provenance, including the managed python-build-standalone build selected by pinned uv. Direct third-party license/notice material is under `licenses/third-party/`; ShellCheck's GPL license and exact corresponding source are under `licenses/shellcheck/` and `licenses/source/`. Node and CPython also retain their upstream license files inside their bundled runtime trees.
 
 ## Mutable state
 
-The verified payload is intended to stay stable. The shipped archive starts with pristine empty mutable state; runtime mutation belongs under `state/`:
-
-- UV cache and ad-hoc UV tools
-- ad-hoc UV-managed Python installations
-- npm cache and global installs
-- Python bytecode/cache state
-
-This keeps experimentation from silently modifying the bundled Python or Node runtimes. Project dependencies still belong to the project itself.
-
-`state/` is intentionally not part of the relocation guarantee once populated. Some third-party installers (notably ad-hoc `uv tool` environments) may create location-specific links inside mutable state. After physically moving an already-used bundle, recreate any affected ad-hoc state rather than treating it as authoritative. The distributed archive always starts with pristine empty state.
-
-Do not copy tokens, SSH keys, `.npmrc` credentials, cloud credentials or production database secrets into this directory.
-
-## Portability contract
-
-The bundle may be moved to a different pathname on a compatible **GNU/Linux x86-64 host with kernel >= 4.18 and glibc >= 2.28**. The bundled Node 24 official binary also requires libstdc++ exposing **GLIBCXX_3.4.25** (libstdc++ >= 6.0.25). It is not cross-OS, cross-architecture, or musl/Alpine portability.
-
-The environment uses `uv venv --relocatable` for standard activation/entrypoint portability. A tiny location-aware wrapper repairs only the `home` line in uv's `pyvenv.cfg` because the bundled base interpreter moves with the payload; all other uv-generated venv metadata is preserved. The immutable `runtime/python/current` relative link is validated and never reconstructed as "repair".
-
-The builder also normalizes uv-managed Python sysconfig install-prefix metadata into a location-neutral form, so `sysconfig` continues to resolve the relocated bundled runtime correctly without making that file mutable. Build-time tests reject absolute symlinks and stale references to prior build locations, directly execute uv-generated `pip` and `pytest` entrypoints, import compiled Python extensions, then move, self-test, destroy/rebuild the Python venv offline, archive, extract and test again.
-
-Prefer the supplied `.tar.gz` artifact. Tar reliably preserves executable permissions and symlinks; ZIP extraction behavior varies across hosts.
-
-## Integrity and recovery
-
-`agent-env verify` checks the immutable payload against `manifest/SHA256SUMS` and verifies symlink topology against `manifest/SYMLINKS`.
-
-`state/` is intentionally mutable. `env/pyvenv.cfg` is also mutable because relocation repair rewrites its absolute base-Python path.
-
-If the Python environment is damaged:
-
-```bash
-agent-env rebuild-python
-```
-
-That rebuild is designed to work without PyPI/network access using the source-frozen hashed `manifest/requirements.lock` and `wheelhouse/`. Recovery uv commands ignore ambient project/user uv configuration and artifact-selection overrides.
-
-## Boundary
-
-This package expands the commands available **within permissions already granted by the host sandbox**. It cannot manufacture network access, credentials, a Docker daemon/socket, filesystem execution permission, kernel capabilities or unsupported CPU/OS compatibility.
+Caches, ad-hoc uv/npm installs, Python bytecode, ownership markers for hydrated Node packages, and disposable PostgreSQL clusters live under `state/` or the target repository's ignored `node_modules/`. The verified payload is otherwise immutable except relocation repair of `env/pyvenv.cfg`.

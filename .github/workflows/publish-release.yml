@@ -74,6 +74,10 @@ jobs:
           set -euo pipefail
           source ./versions.env
           target_sha="$(git rev-parse HEAD)"
+          [[ "$BUNDLE_VERSION" != *-* ]] || {
+            echo "Publish release accepts stable versions only; release candidates are validation artifacts." >&2
+            exit 1
+          }
           release_tag="v${BUNDLE_VERSION}"
           published=false
 

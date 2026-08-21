@@ -12,6 +12,7 @@ on:
       - scripts/**
       - templates/**
       - tests/**
+      - vendor/**
       - .github/workflows/accept-runtime.yml
   workflow_dispatch:
 
@@ -19,26 +20,36 @@ permissions:
   contents: read
 
 concurrency:
-  group: accept-runtime-main
+  group: accept-runtime-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   acceptance:
     name: Full Linux x86-64 acceptance
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
-      - name: Check out repository
+      - name: Check out exact source under acceptance
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Record exact source SHA
+        id: source
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Compute builder download cache key
+        id: download-cache
+        run: echo "key=$(./scripts/download-cache-key.sh)" >> "$GITHUB_OUTPUT"
 
       - name: Restore builder download cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .download-cache
-          key: magnet-agent-env-linux-x64-${{ hashFiles('versions.env', 'requirements.lock') }}
+          key: magnet-agent-env-linux-x64-${{ steps.download-cache.outputs.key }}
           restore-keys: |
             magnet-agent-env-linux-x64-
 
@@ -50,13 +61,15 @@ jobs:
 
       - name: Write acceptance metadata
         shell: bash
+        env:
+          ACCEPTED_SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
           sidecar="$(printf '%s\n' dist/*.tar.gz.sha256)"
           python3 scripts/write-acceptance-metadata.py \
             --sidecar "$sidecar" \
             --output dist/acceptance.json \
-            --source-sha "$GITHUB_SHA" \
+            --source-sha "$ACCEPTED_SOURCE_SHA" \
             --repository "$GITHUB_REPOSITORY" \
             --workflow "$GITHUB_WORKFLOW" \
             --run-id "$GITHUB_RUN_ID" \
@@ -72,7 +85,7 @@ jobs:
       - name: Upload acceptance evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: acceptance-${{ github.sha }}
+          name: acceptance-${{ steps.source.outputs.sha }}
           path: |
             dist/acceptance.json
             dist/*.tar.gz.sha256
