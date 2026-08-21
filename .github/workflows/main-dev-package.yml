@@ -1,0 +1,84 @@
+name: Temporary main development package
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Exact main development package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact development main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 898169080f1ae3e285a471181d3d48c9e010878e
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact source
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          test "$source_sha" = '898169080f1ae3e285a471181d3d48c9e010878e'
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Compute builder download cache key
+        id: download-cache
+        run: echo "key=$(./scripts/download-cache-key.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore builder download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .download-cache
+          key: magnet-agent-env-linux-x64-${{ steps.download-cache.outputs.key }}
+          restore-keys: |
+            magnet-agent-env-linux-x64-
+
+      - name: Run source validation
+        run: ./tests/static-check.sh
+
+      - name: Build exact main development runtime
+        env:
+          MAGNET_AGENT_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}
+        run: ./build.sh --out /tmp/main-dev-dist
+
+      - name: Write acceptance metadata
+        id: artifact
+        shell: bash
+        env:
+          ACCEPTED_SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          sidecar="$(printf '%s\n' /tmp/main-dev-dist/*.tar.gz.sha256)"
+          python3 scripts/write-acceptance-metadata.py \
+            --sidecar "$sidecar" \
+            --output /tmp/main-dev-dist/acceptance.json \
+            --source-sha "$ACCEPTED_SOURCE_SHA" \
+            --repository "$GITHUB_REPOSITORY" \
+            --workflow "$GITHUB_WORKFLOW" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --event "$GITHUB_EVENT_NAME"
+          archive_name="$(jq -er '.artifact.filename' /tmp/main-dev-dist/acceptance.json)"
+          echo "stem=${archive_name%.tar.gz}" >> "$GITHUB_OUTPUT"
+          cat "$sidecar"
+          cat /tmp/main-dev-dist/acceptance.json
+
+      - name: Upload exact main development package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.artifact.outputs.stem }}
+          path: |
+            /tmp/main-dev-dist/*.tar.gz
+            /tmp/main-dev-dist/*.tar.gz.sha256
+            /tmp/main-dev-dist/acceptance.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
