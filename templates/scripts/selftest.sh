@@ -309,6 +309,22 @@ PG_PORT="$(free_port)"
   "$MAGNET_AGENT_ENV/bin/agent-env" pg pgbench -c 2 -j 1 -t 2 postgres >/dev/null
 '
 
+# An alternate bootstrap identity allows faithful non-superuser role emulation.
+BOOTSTRAP_PORT="$(free_port)"
+"$ROOT/bin/agent-env" postgres run --bootstrap-user agent_env_bootstrap --port "$BOOTSTRAP_PORT" -- bash -ceu '
+  test "$PGUSER" = agent_env_bootstrap
+  test "$DATABASE_URL" = "postgresql://agent_env_bootstrap:postgres@127.0.0.1:${PGPORT}/postgres"
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -At -F: -c "select current_user, rolsuper::int from pg_roles where rolname=current_user" | grep -Fx "agent_env_bootstrap:1" >/dev/null
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create role postgres login nosuperuser createrole" >/dev/null
+  PGUSER=postgres "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -At -F: -c "select rolsuper::int, rolcreaterole::int from pg_roles where rolname=current_user" | grep -Fx "0:1" >/dev/null
+  PGUSER=postgres "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "alter default privileges for role postgres revoke execute on functions from public" >/dev/null
+  PGUSER=postgres "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create role agent_env_child_role" >/dev/null
+  if PGUSER=postgres "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create role agent_env_forbidden_superuser superuser" >/dev/null 2>&1; then
+    echo "non-superuser postgres unexpectedly created a superuser" >&2
+    exit 1
+  fi
+'
+
 # Nonzero child status must survive teardown and leave no cluster state.
 NONZERO_PORT="$(free_port)"
 set +e
@@ -338,7 +354,7 @@ set -e
 if find "$ROOT/state/postgres" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
   echo 'PostgreSQL self-test left mutable cluster state.' >&2; exit 1
 fi
-python - <<'PY' "$PG_PORT" "$NONZERO_PORT" "$SIGNAL_PORT"
+python - <<'PY' "$PG_PORT" "$BOOTSTRAP_PORT" "$NONZERO_PORT" "$SIGNAL_PORT"
 import socket,sys
 for raw in sys.argv[1:]:
     port=int(raw)

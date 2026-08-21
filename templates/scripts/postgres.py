@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 import uuid
+from urllib.parse import quote
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SERVER = ROOT / "runtime/postgres/server"
@@ -56,7 +57,7 @@ def client_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-def command_env(port: int) -> dict[str, str]:
+def command_env(port: int, bootstrap_user: str) -> dict[str, str]:
     env = dict(os.environ)
     for key in DB_ENV_KEYS:
         env.pop(key, None)
@@ -64,8 +65,8 @@ def command_env(port: int) -> dict[str, str]:
         "PGHOST": "127.0.0.1",
         "PGPORT": str(port),
         "PGDATABASE": "postgres",
-        "PGUSER": "postgres",
-        "DATABASE_URL": f"postgresql://postgres:postgres@127.0.0.1:{port}/postgres",
+        "PGUSER": bootstrap_user,
+        "DATABASE_URL": f"postgresql://{quote(bootstrap_user, safe='')}:postgres@127.0.0.1:{port}/postgres",
         "MAGNET_AGENT_POSTGRES": "1",
     })
     return client_env(env)
@@ -89,6 +90,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run one command against a disposable bundled PostgreSQL cluster.")
     parser.add_argument("--port", type=int, default=54322)
     parser.add_argument("--keep", action="store_true", help="Preserve the disposable cluster for debugging.")
+    parser.add_argument("--bootstrap-user", default="postgres", help="Bootstrap superuser role name (default: postgres).")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.command and args.command[0] == "--":
@@ -97,6 +99,8 @@ def main() -> int:
         parser.error("a command is required after --")
     if not (1 <= args.port <= 65535):
         parser.error("--port must be 1..65535")
+    if not args.bootstrap_user:
+        parser.error("--bootstrap-user must not be empty")
     if not free_on_loopback(args.port):
         raise SystemExit(f"127.0.0.1:{args.port} is already in use; refusing to target an unknown PostgreSQL server.")
 
@@ -113,7 +117,7 @@ def main() -> int:
         os.chown(cluster, uid, gid)
 
     preexec = run_as(uid, gid)
-    init = [str(pg_bin("initdb")), "-D", str(data), "--encoding=UTF8", "--locale=C.utf8", "--data-checksums", "--username=postgres", "--auth-local=trust", "--auth-host=trust"]
+    init = [str(pg_bin("initdb")), "-D", str(data), "--encoding=UTF8", "--locale=C.utf8", "--data-checksums", f"--username={args.bootstrap_user}", "--auth-local=trust", "--auth-host=trust"]
     subprocess.run(init, check=True, env=client_env(), preexec_fn=preexec, stdout=subprocess.DEVNULL)
 
     config = data / "postgresql.conf"
@@ -154,14 +158,14 @@ def main() -> int:
                 sys.stderr.write("--- end PostgreSQL startup log ---\n")
             raise SystemExit(f"Bundled PostgreSQL failed to start (pg_ctl exit {start.returncode}).")
         server_started = True
-        ready_env = command_env(args.port)
+        ready_env = command_env(args.port, args.bootstrap_user)
         subprocess.run([str(client_bin("pg_isready")), "-q"], check=True, env=ready_env)
 
         for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             old_handlers[sig] = signal.getsignal(sig)
             signal.signal(sig, forward)
 
-        child = subprocess.Popen(args.command, env=command_env(args.port))
+        child = subprocess.Popen(args.command, env=command_env(args.port, args.bootstrap_user))
         rc = child.wait()
         child = None
         return rc

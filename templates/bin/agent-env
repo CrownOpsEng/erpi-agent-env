@@ -64,7 +64,7 @@ case "$cmd" in
   postgres)
     shift
     sub="${1:-}"
-    [[ "$sub" == run ]] || { echo "Usage: agent-env postgres run [--port N] [--keep] -- COMMAND" >&2; exit 2; }
+    [[ "$sub" == run ]] || { echo "Usage: agent-env postgres run [--port N] [--keep] [--bootstrap-user NAME] -- COMMAND" >&2; exit 2; }
     shift
     exec "$ROOT/env/bin/python" "$ROOT/scripts/postgres.py" "$@"
     ;;

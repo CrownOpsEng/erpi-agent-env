@@ -19,12 +19,15 @@ PostgreSQL is intentionally not added to ordinary PATH.
 ```bash
 agent-env postgres run -- make check-pg
 agent-env postgres run --port 54322 -- bash
+agent-env postgres run --bootstrap-user agent_bootstrap -- bash
 agent-env pg psql -Atc 'select version()'
 agent-env pg pg_dump -Fc mydb -f dump.pg
 agent-env pgtap tests/database/*.test.sql
 ```
 
 `postgres run` creates a new UTF-8, checksummed, loopback-only disposable PostgreSQL 17.10 cluster under `state/postgres/`, scrubs inherited remote database targeting, uses local-only trust authentication, executes one command, shuts the cluster down, verifies page checksums, and deletes it unless `--keep` is explicitly requested. If the outer process starts as root, the database server is executed as `nobody`; the requested command remains under the invoking identity.
+
+By default the bootstrap superuser is named `postgres`. Use `--bootstrap-user NAME` when privilege emulation requires a different bootstrap identity—for example so the role named `postgres` can instead be created as a non-superuser migration principal. The selected bootstrap identity is also exported to the child command as `PGUSER` and in `DATABASE_URL`; all other isolation, cleanup, and loopback-only behavior is unchanged.
 
 Unix-domain sockets are deliberately disabled for this disposable runtime. All bundled database clients target `127.0.0.1`, so disabling unused sockets keeps database startup independent of the relocated bundle pathname and avoids Linux Unix-socket pathname limits under deep hostile relocation.
 
