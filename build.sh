@@ -68,8 +68,9 @@ DL="$CACHE_DIR"
 BUILDER_UV_CACHE="$CACHE_DIR/uv-cache"
 BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"
 BUILDER_PIP_CACHE="$CACHE_DIR/pip-cache"
-mkdir -p "$BUILDER_UV_CACHE" "$BUILDER_UV_PYTHON_CACHE" "$BUILDER_PIP_CACHE"
-mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" "$BUILD/licenses/third-party" "$BUILD/licenses/postgresql" \
+BUILDER_NPM_CACHE="$CACHE_DIR/npm-cache"
+mkdir -p "$BUILDER_UV_CACHE" "$BUILDER_UV_PYTHON_CACHE" "$BUILDER_PIP_CACHE" "$BUILDER_NPM_CACHE"
+mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/runtime/pg-delta" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" "$BUILD/licenses/third-party" "$BUILD/licenses/postgresql" "$BUILD/licenses/pg-delta" \
   "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" \
   "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
 ORIGINAL_BUILD_ROOT="$BUILD"
@@ -220,6 +221,72 @@ cp "$SELF_DIR/templates/bin/npm-wrapper" "$BUILD/bin/npm"
 cp "$SELF_DIR/templates/bin/npx-wrapper" "$BUILD/bin/npx"
 chmod 0755 "$BUILD/bin/node" "$BUILD/bin/npm" "$BUILD/bin/npx"
 "$BUILD/bin/node" -e 'if (process.versions.node !== process.argv[1]) process.exit(1)' "$NODE_VERSION"
+
+log "pg-delta $PG_DELTA_VERSION plan-only runtime"
+PG_DELTA_LOCK="$SELF_DIR/vendor/pg-delta/package-lock.json"
+verify_one "$PG_DELTA_LOCK" "$PG_DELTA_LOCK_SHA256"
+install -m 0644 "$SELF_DIR/vendor/pg-delta/package.json" "$BUILD/runtime/pg-delta/package.json"
+install -m 0644 "$PG_DELTA_LOCK" "$BUILD/runtime/pg-delta/package-lock.json"
+install -m 0644 "$PG_DELTA_LOCK" "$BUILD/manifest/pg-delta-package-lock.json"
+install -m 0644 "$SELF_DIR/templates/scripts/pg-delta.mjs" "$BUILD/runtime/pg-delta/plan.mjs"
+install -m 0644 "$SELF_DIR/vendor/pg-delta/LICENSE" "$BUILD/licenses/pg-delta/LICENSE"
+"$BUILD/env/bin/python" - "$BUILD/runtime/pg-delta/package.json" "$PG_DELTA_LOCK" "$PG_DELTA_VERSION" <<'PY_PG_DELTA_LOCK'
+import json, pathlib, re, sys
+package_path, lock_path = map(pathlib.Path, sys.argv[1:3])
+expected = sys.argv[3]
+package = json.loads(package_path.read_text(encoding='utf-8'))
+lock = json.loads(lock_path.read_text(encoding='utf-8'))
+assert package.get('private') is True
+assert package.get('dependencies') == {'@supabase/pg-delta': expected}
+assert lock.get('lockfileVersion') == 3
+packages = lock.get('packages')
+assert isinstance(packages, dict) and packages
+assert packages[''].get('dependencies') == {'@supabase/pg-delta': expected}
+direct = packages.get('node_modules/@supabase/pg-delta', {})
+assert direct.get('version') == expected
+assert direct.get('license') == 'MIT'
+assert direct.get('engines', {}).get('node') == '>=20.0.0'
+assert direct.get('bin') == {'pgdelta': 'dist/cli/bin/cli.js'}
+for path, record in packages.items():
+    if not path.startswith('node_modules/'):
+        continue
+    assert record.get('version'), (path, 'version')
+    assert re.fullmatch(r'sha512-[A-Za-z0-9+/]+={0,2}', record.get('integrity','')), (path, 'integrity')
+    assert str(record.get('resolved','')).startswith('https://registry.npmjs.org/'), (path, 'resolved')
+    assert record.get('license'), (path, 'license')
+PY_PG_DELTA_LOCK
+NPM_CONFIG_CACHE="$BUILDER_NPM_CACHE" "$BUILD/bin/npm" ci --prefix "$BUILD/runtime/pg-delta" --ignore-scripts --no-audit --no-fund
+"$BUILD/env/bin/python" - "$SELF_DIR/vendor/pg-delta/LICENSE" "$BUILD/runtime/pg-delta/node_modules/@supabase/pg-delta/LICENSE" <<'PY_PG_DELTA_LICENSE'
+import pathlib, sys
+source, installed = map(pathlib.Path, sys.argv[1:])
+assert installed.is_file(), installed
+assert source.read_bytes() == installed.read_bytes(), 'source-controlled pg-delta license differs from exact installed package'
+PY_PG_DELTA_LICENSE
+# The upstream package has apply/sync CLI commands; this environment deliberately
+# exposes only the narrow plan wrapper, so npm-generated command shims are removed.
+rm -rf "$BUILD/runtime/pg-delta/node_modules/.bin"
+"$BUILD/runtime/node/bin/node" --check "$BUILD/runtime/pg-delta/plan.mjs"
+(
+  cd "$BUILD/runtime/pg-delta"
+  "$BUILD/runtime/node/bin/node" --input-type=module -e 'import { createPlan, renderPlanFiles } from "@supabase/pg-delta"; import { supabase } from "@supabase/pg-delta/integrations/supabase"; if(typeof createPlan!=="function"||typeof renderPlanFiles!=="function"||typeof supabase!=="object") process.exit(1)'
+)
+"$BUILD/env/bin/python" - "$PG_DELTA_LOCK" "$BUILD/runtime/pg-delta/node_modules" "$BUILD/manifest/pg-delta-packages.tsv" <<'PY_PG_DELTA_PROVENANCE'
+import csv, json, pathlib, sys
+lock_path=pathlib.Path(sys.argv[1]); modules=pathlib.Path(sys.argv[2]); out=pathlib.Path(sys.argv[3])
+packages=json.loads(lock_path.read_text(encoding='utf-8'))['packages']
+rows=[]
+for rel, record in sorted(packages.items()):
+    if not rel.startswith('node_modules/'):
+        continue
+    installed=pathlib.Path(sys.argv[2]).parent/rel
+    assert installed.is_dir(), (rel, 'missing after npm ci')
+    rows.append((rel, record['version'], record['license'], record['resolved'], record['integrity']))
+with out.open('w', encoding='utf-8', newline='') as handle:
+    writer=csv.writer(handle, delimiter='\t', lineterminator='\n')
+    writer.writerow(('path','version','license','resolved','integrity'))
+    writer.writerows(rows)
+assert rows
+PY_PG_DELTA_PROVENANCE
 
 log "Offline Node capability capsules"
 mkdir -p "$BUILD/runtime/node-capsules"
@@ -468,6 +535,7 @@ cat > "$BUILD/manifest/environment.json" <<JSON
   },
   "capabilities": {
     "postgresql": {"server": "$POSTGRES_VERSION", "server_source": "$POSTGRES_SOURCE_URL", "server_source_sha256": "$POSTGRES_SOURCE_SHA256", "server_build_image": "${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}", "pgtap": "$PGTAP_VERSION", "plpgsql_check": "$PLPGSQL_CHECK_VERSION", "client_tools": true, "disposable_clusters": true, "pgbench": true, "dump_restore": true, "amcheck": true, "checksums": true},
+    "pg_delta": {"version": "$PG_DELTA_VERSION", "supabase_cli_baseline": "$PG_DELTA_SUPABASE_CLI_BASELINE", "surface": "plan-only", "live_connections": "numeric-loopback-only"},
     "node_capsules": {"postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION"},
     "utilities": {"shellcheck": "$SHELLCHECK_VERSION", "miller": "$MILLER_VERSION", "httpx_cli": true}
   },
@@ -507,6 +575,7 @@ source_row node-postgres "$POSTGRES_JS_VERSION" "vendor/node-capsules/postgres-$
 source_row pgls-wasm "$PGLS_WASM_VERSION" "vendor/node-capsules/postgres-language-server-wasm-$PGLS_WASM_VERSION.tgz" "$PGLS_WASM_SHA256"
 source_row fast-check "$FAST_CHECK_VERSION" "vendor/node-capsules/fast-check-$FAST_CHECK_VERSION.tgz" "$FAST_CHECK_SHA256"
 source_row pure-rand "$PURE_RAND_VERSION" "vendor/node-capsules/pure-rand-$PURE_RAND_VERSION.tgz" "$PURE_RAND_SHA256"
+source_row pg-delta-lock "$PG_DELTA_VERSION" "vendor/pg-delta/package-lock.json" "$PG_DELTA_LOCK_SHA256"
 "$BUILD/env/bin/python" - "$SOURCES_TSV" <<'PY_SOURCES'
 import csv, pathlib, sys
 path = pathlib.Path(sys.argv[1])

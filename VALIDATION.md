@@ -21,6 +21,7 @@ A payload-affecting source commit is releasable only after **Accept runtime** bu
 - PostgreSQL server/client version and extension integration checks
 - disposable PostgreSQL start/query, pgTAP positive/negative accounting, plpgsql_check, dump/restore, `pg_amcheck`, pgbench, and stopped-cluster checksum verification when the acceptance host is unprivileged
 - PostgreSQL child-exit propagation and signal-interrupted teardown with no orphaned cluster state or occupied loopback port
+- exact pg-delta lock/API installation, plan-only routing, numeric-loopback refusal boundary, representative source→target→clone convergence, managed-schema filtering, and empty convergence re-plan
 - hostile relocation with spaces/unicode/deep paths
 - PostgreSQL lifecycle under that hostile relocation path over explicit `127.0.0.1` TCP with Unix-domain sockets disabled, preventing relocation depth from becoming a socket-path failure mode
 - rejection of original build-root residue and absolute symlinks
@@ -66,6 +67,12 @@ database lock/statement timeouts < repository watchdog < outer execution supervi
 ```
 
 A wrapper timeout is environmental evidence, not a test failure or success.
+
+## pg-delta compatibility boundary
+
+The shipped pg-delta capability is intentionally narrower than the upstream CLI. `@supabase/pg-delta` is pinned exactly to `1.0.0-alpha.33`, with its complete npm lock and package integrity/license provenance, because that is the qualified default for Supabase CLI 2.114.0. Promotion requires useful and safe schema planning for the motivating Magnet Photos workflows; it does not require perfect behavioral parity with every Supabase CLI wrapper option.
+
+Only `agent-env pg-delta plan` is exposed. Live source and target URLs must be numeric loopback, inherited PostgreSQL targeting variables are scrubbed, and upstream mutation commands such as `apply` or `sync` are not routed. Acceptance proves a representative plan can be generated without mutating source/target, applied by the test harness to a clone, and then converges to an empty re-plan. Any pg-delta version or compatibility-baseline change requires fresh qualification before promotion.
 
 ## Project promotion proof
 

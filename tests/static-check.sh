@@ -52,10 +52,29 @@ for name,(version,file,sha256) in expected.items():
     assert record.get('file')==file,(name,'file')
     assert record.get('sha256')==sha256,(name,'sha256')
     assert re.fullmatch(r'sha512-[A-Za-z0-9+/]+={0,2}',record.get('integrity','')),(name,'integrity')
+pg_package=json.loads((root/'vendor/pg-delta/package.json').read_text(encoding='utf-8'))
+pg_lock_path=root/'vendor/pg-delta/package-lock.json'
+pg_lock=json.loads(pg_lock_path.read_text(encoding='utf-8'))
+assert hashlib.sha256(pg_lock_path.read_bytes()).hexdigest()==vals['PG_DELTA_LOCK_SHA256']
+assert pg_package.get('private') is True
+assert pg_package.get('dependencies')=={'@supabase/pg-delta':vals['PG_DELTA_VERSION']}
+assert pg_lock.get('lockfileVersion')==3
+pg_packages=pg_lock.get('packages'); assert isinstance(pg_packages,dict) and pg_packages
+assert pg_packages[''].get('dependencies')=={'@supabase/pg-delta':vals['PG_DELTA_VERSION']}
+direct=pg_packages.get('node_modules/@supabase/pg-delta',{})
+assert direct.get('version')==vals['PG_DELTA_VERSION']
+assert direct.get('license')=='MIT'
+assert direct.get('bin')=={'pgdelta':'dist/cli/bin/cli.js'}
+for path,record in pg_packages.items():
+    if not path.startswith('node_modules/'): continue
+    assert record.get('version'),(path,'version')
+    assert re.fullmatch(r'sha512-[A-Za-z0-9+/]+={0,2}',record.get('integrity','')),(path,'integrity')
+    assert str(record.get('resolved','')).startswith('https://registry.npmjs.org/'),(path,'resolved')
+    assert record.get('license'),(path,'license')
 print('hash-lock-and-vendor-shapes-ok')
 PY
 rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
-for file in requirements.lock templates/AGENTS.md templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json tests/node-deps-safety-check.sh; do
+for file in requirements.lock templates/AGENTS.md templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE templates/scripts/pg-delta.mjs tests/node-deps-safety-check.sh; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime/build source missing: $file" >&2; exit 1; }
 done
 # The router is intentionally compact; large operational detail belongs in README/commands.
@@ -237,6 +256,26 @@ grep -F -- '--- PostgreSQL startup log ---' "$ROOT/templates/scripts/postgres.py
 ! grep -F 'cluster / "socket"' "$ROOT/templates/scripts/postgres.py" >/dev/null
 grep -F 'package-lock.json is required' "$ROOT/templates/scripts/node-deps.py" >/dev/null
 ! grep -R -nE 'anon|authenticated|service_role|magnet\.' "$ROOT/templates/scripts/postgres.py" "$ROOT/templates/scripts/pgtap.py" "$ROOT/templates/scripts/node-deps.py"
+# pg-delta is runtime-owned, exactly locked, plan-only, and restricted to numeric loopback.
+grep -F 'PG_DELTA_VERSION="1.0.0-alpha.33"' "$ROOT/versions.env" >/dev/null
+grep -F 'PG_DELTA_LOCK_SHA256="b61b7ff9631db90b051a52e87d6d317a303b5a7584db06cc4b351baa1e82f282"' "$ROOT/versions.env" >/dev/null
+grep -F 'PG_DELTA_SUPABASE_CLI_BASELINE="2.114.0"' "$ROOT/versions.env" >/dev/null
+grep -F 'verify_one "$PG_DELTA_LOCK" "$PG_DELTA_LOCK_SHA256"' "$ROOT/build.sh" >/dev/null
+grep -F 'npm" ci --prefix "$BUILD/runtime/pg-delta" --ignore-scripts --no-audit --no-fund' "$ROOT/build.sh" >/dev/null
+grep -F 'rm -rf "$BUILD/runtime/pg-delta/node_modules/.bin"' "$ROOT/build.sh" >/dev/null
+grep -F 'source_row pg-delta-lock' "$ROOT/build.sh" >/dev/null
+grep -F 'pg-delta-package-lock.json' "$ROOT/scripts/download-cache-key.sh" >/dev/null
+grep -F 'pg-delta plan [...]' "$ROOT/templates/bin/agent-env" >/dev/null
+grep -F 'numeric loopback only' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
+grep -F 'skipDefaultPrivilegeSubtraction: true' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
+grep -F 'includeTransactions: false' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
+grep -F 'remote database URLs are refused' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
+grep -F 'pgdelta-convergence/envelope.json' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F '198.51.100.10' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F 'auth.managed_noise' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+! grep -E '^[[:space:]]*(apply|sync)\)' "$ROOT/templates/bin/agent-env"
+[[ ! -e "$ROOT/.github/workflows/tmp-pg-delta-qualification.yml" ]] || { echo 'Temporary pg-delta qualification workflow must not remain after promotion.' >&2; exit 1; }
+[[ ! -e "$ROOT/.github/workflows/tmp-export-source.yml" ]] || { echo 'Temporary source-export workflow must not remain after promotion.' >&2; exit 1; }
 # Candidate boundaries are enforced both structurally and by executable regression tests.
 require_contains() {
   local needle="$1" file="$2" label="$3"
@@ -252,6 +291,8 @@ require_contains 'owned package contents changed; refusing to continue' "$ROOT/t
 require_contains 'unsupported ownership marker schema; refusing unsafe legacy/stale marker' "$ROOT/templates/scripts/node-deps.py" 'legacy marker refusal'
 require_contains 'node-deps --repo "$NODE_FIXTURE" hydrate' "$ROOT/templates/scripts/selftest.sh" 'real offline Node hydration'
 require_contains "marker['schema']==2" "$ROOT/templates/scripts/selftest.sh" 'runtime ownership marker validation'
+require_contains 'pg-delta accepted a remote database URL.' "$ROOT/templates/scripts/selftest.sh" 'pg-delta remote-target refusal'
+require_contains 'pgdelta-convergence/envelope.json' "$ROOT/templates/scripts/selftest.sh" 'pg-delta convergence proof'
 require_contains 'pgTAP negative probe unexpectedly passed' "$ROOT/templates/scripts/selftest.sh" 'pgTAP negative proof'
 require_contains 'pg_amcheck --install-missing --database=postgres' "$ROOT/templates/scripts/selftest.sh" 'pg_amcheck proof'
 require_contains 'pgbench -c 2 -j 1 -t 2 postgres' "$ROOT/templates/scripts/selftest.sh" 'pgbench concurrency proof'

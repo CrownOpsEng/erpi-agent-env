@@ -43,7 +43,7 @@ real_python="$(readlink -f "$ROOT/env/bin/.python-real")"
 case "$real_python" in "$ROOT/runtime/python/"*) ;; *) echo "Venv interpreter escapes bundled runtime: $real_python" >&2; exit 1;; esac
 
 python - <<'PY_META'
-import csv, json, os, pathlib, re
+import csv, hashlib, json, os, pathlib, re
 root=pathlib.Path(os.environ['MAGNET_AGENT_ENV'])
 env=json.loads((root/'manifest/environment.json').read_text(encoding='utf-8'))
 python_meta=env['python_provenance']
@@ -56,10 +56,17 @@ with (root/'manifest/sources.tsv').open('r',encoding='utf-8',newline='') as hand
 assert rows and rows[0]==['component','version','url','sha256'], rows[:1]
 assert all(len(row)==4 and all(cell for cell in row) for row in rows[1:]), rows
 components={row[0] for row in rows[1:]}
-assert {'python-build-standalone','postgres-server-source','postgres-server-build-image','postgres-server-build-flex','node-postgres','pgls-wasm'} <= components
+assert {'python-build-standalone','postgres-server-source','postgres-server-build-image','postgres-server-build-flex','node-postgres','pgls-wasm','pg-delta-lock'} <= components
 licenses=root/'licenses/third-party'
 notice=licenses/'THIRD-PARTY-LICENSES.md'
 assert notice.is_file() and notice.stat().st_size>10000,notice
+pg_delta=env['capabilities']['pg_delta']
+assert pg_delta=={'version':'1.0.0-alpha.33','supabase_cli_baseline':'2.114.0','surface':'plan-only','live_connections':'numeric-loopback-only'},pg_delta
+versions=(root/'manifest/versions.env').read_text(encoding='utf-8')
+lock_hash=re.search(r'^PG_DELTA_LOCK_SHA256="([0-9a-f]{64})"$',versions,re.M).group(1)
+assert hashlib.sha256((root/'manifest/pg-delta-package-lock.json').read_bytes()).hexdigest()==lock_hash
+assert not (root/'runtime/pg-delta/node_modules/.bin').exists(), 'upstream pgdelta CLI shim must not be exposed'
+assert (root/'licenses/pg-delta/LICENSE').is_file()
 PY_META
 
 uv --version
@@ -144,6 +151,91 @@ PY
 "$ROOT/bin/agent-env" node-deps --repo "$NODE_FIXTURE" clean >/dev/null
 [[ ! -e "$NODE_FIXTURE/node_modules/.agent-env-node-deps.json" ]]
 
+# pg-delta is deliberately plan-only and refuses any non-loopback live target
+# before attempting a database connection or creating output.
+if "$ROOT/bin/agent-env" pg-delta apply >/dev/null 2>&1; then
+  echo 'pg-delta apply unexpectedly exposed an upstream mutation command.' >&2
+  exit 1
+fi
+if "$ROOT/bin/agent-env" pg-delta plan \
+  --source 'postgresql://postgres@127.0.0.1:1/source_db' \
+  --target 'postgresql://postgres@198.51.100.10/remote_db' \
+  --out "$TMP/pgdelta-remote-rejected" >/dev/null 2>&1; then
+  echo 'pg-delta accepted a remote database URL.' >&2
+  exit 1
+fi
+[[ ! -e "$TMP/pgdelta-remote-rejected" ]] || { echo 'Rejected pg-delta target created output.' >&2; exit 1; }
+
+cat > "$TMP/pgdelta-source.sql" <<'SQL'
+create schema delta_probe;
+revoke all on schema delta_probe from public;
+
+create table delta_probe.entities (
+  id bigint generated always as identity primary key,
+  canonical_name text,
+  state text not null default 'candidate',
+  created_at timestamptz not null default now(),
+  constraint entities_state_check check (state in ('candidate','active'))
+);
+
+create table delta_probe.notes (
+  id bigint generated always as identity primary key,
+  entity_id bigint not null references delta_probe.entities(id) on delete cascade,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+
+create index notes_entity_idx on delta_probe.notes(entity_id);
+SQL
+
+cat > "$TMP/pgdelta-target.sql" <<'SQL'
+create schema delta_probe;
+revoke all on schema delta_probe from public;
+
+create domain delta_probe.nonempty_text as text
+  check (value is null or btrim(value) <> '');
+
+create table delta_probe.entities (
+  id bigint generated always as identity primary key,
+  canonical_name text,
+  external_ref delta_probe.nonempty_text,
+  state text not null default 'candidate',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint entities_state_check check (state in ('candidate','active','archived'))
+);
+
+create table delta_probe.notes (
+  id bigint generated always as identity primary key,
+  entity_id bigint not null references delta_probe.entities(id) on delete cascade,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+
+create index notes_entity_idx on delta_probe.notes(entity_id);
+create index notes_recent_idx on delta_probe.notes(created_at) where body <> '';
+
+create or replace function delta_probe.notes_guard()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.body = '' then
+    raise exception 'empty note';
+  end if;
+  return new;
+end
+$$;
+
+create trigger "notes-guard"
+before insert or update on delta_probe.notes
+for each row execute function delta_probe.notes_guard();
+
+create schema auth;
+create table auth.managed_noise(id bigint primary key);
+SQL
+
 cat > "$TMP/pgtap.sql" <<'SQL'
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
@@ -177,6 +269,36 @@ PG_PORT="$(free_port)"
   "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -Atc "select count(*) from plpgsql_check_function_tb('"'"'selftest_good()'"'"')" | grep -Fx 0 >/dev/null
   "$MAGNET_AGENT_ENV/bin/agent-env" pgtap '"$TMP"'/pgtap.sql >/dev/null
   if "$MAGNET_AGENT_ENV/bin/agent-env" pgtap '"$TMP"'/pgtap-bad.sql >/dev/null 2>&1; then echo "pgTAP negative probe unexpectedly passed" >&2; exit 1; fi
+
+  for db in pgdelta_source pgdelta_target pgdelta_clone; do
+    "$MAGNET_AGENT_ENV/bin/agent-env" pg createdb "$db"
+  done
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_source -f '"$TMP"'/pgdelta-source.sql >/dev/null
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_target -f '"$TMP"'/pgdelta-target.sql >/dev/null
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner pgdelta_source \
+    | "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_clone >/dev/null
+  source_url="postgresql://postgres@127.0.0.1:${PGPORT}/pgdelta_source"
+  target_url="postgresql://postgres@127.0.0.1:${PGPORT}/pgdelta_target"
+  clone_url="postgresql://postgres@127.0.0.1:${PGPORT}/pgdelta_clone"
+  before_source="$("$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=MagnetAgentEnvSelftest pgdelta_source | sha256sum | cut -d" " -f1)"
+  before_target="$("$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=MagnetAgentEnvSelftest pgdelta_target | sha256sum | cut -d" " -f1)"
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg-delta plan --source "$source_url" --target "$target_url" --out '"$TMP"'/pgdelta-plan >/dev/null
+  test -s '"$TMP"'/pgdelta-plan/envelope.json
+  cat '"$TMP"'/pgdelta-plan/*.sql > '"$TMP"'/pgdelta-plan.sql
+  grep -F "nonempty_text" '"$TMP"'/pgdelta-plan.sql >/dev/null
+  grep -F "updated_at" '"$TMP"'/pgdelta-plan.sql >/dev/null
+  grep -F "notes_recent_idx" '"$TMP"'/pgdelta-plan.sql >/dev/null
+  grep -F "notes-guard" '"$TMP"'/pgdelta-plan.sql >/dev/null
+  ! grep -F "auth.managed_noise" '"$TMP"'/pgdelta-plan.sql >/dev/null
+  for file in '"$TMP"'/pgdelta-plan/*.sql; do
+    "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_clone -f "$file" >/dev/null
+  done
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg-delta plan --source "$clone_url" --target "$target_url" --out '"$TMP"'/pgdelta-convergence >/dev/null
+  "$MAGNET_AGENT_ENV/runtime/node/bin/node" -e "const fs=require(\"node:fs\"); const e=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\")); if(e.files.length) { console.error(e); process.exit(1) }" '"$TMP"'/pgdelta-convergence/envelope.json
+  after_source="$("$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=MagnetAgentEnvSelftest pgdelta_source | sha256sum | cut -d" " -f1)"
+  after_target="$("$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=MagnetAgentEnvSelftest pgdelta_target | sha256sum | cut -d" " -f1)"
+  [[ "$before_source" == "$after_source" && "$before_target" == "$after_target" ]] || { echo "pg-delta plan mutated source or target" >&2; exit 1; }
+
   "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create table selftest_data(id integer primary key, note text); insert into selftest_data values (1, '"'"'ok'"'"');" >/dev/null
   "$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump -Fc -f '"$TMP"'/selftest.dump postgres
   "$MAGNET_AGENT_ENV/bin/agent-env" pg createdb selftest_restore

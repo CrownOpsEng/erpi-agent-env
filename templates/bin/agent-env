@@ -25,6 +25,7 @@ Commands:
   postgres run [...] -- C  Run one command against a disposable local PostgreSQL
   pg TOOL [ARGS...]        Run an explicitly selected bundled PostgreSQL client tool
   pgtap FILE...            Run pgTAP SQL files with strict TAP accounting
+  pg-delta plan [...]      Generate a local-only PostgreSQL schema migration plan
   node-deps CMD            status|hydrate|clean exact repository-locked offline capsules
   github                   Probe shell GitHub reachability, auth/API, and repo access
   github-auth              Run browser/device GitHub OAuth when reachable, then verify it
@@ -69,6 +70,13 @@ case "$cmd" in
     ;;
   pg) shift; pg_exec "$@" ;;
   pgtap) shift; exec "$ROOT/env/bin/python" "$ROOT/scripts/pgtap.py" "$@" ;;
+  pg-delta)
+    shift
+    sub="${1:-}"
+    [[ "$sub" == plan ]] || { echo "Usage: agent-env pg-delta plan --source postgresql://... --target postgresql://... --out DIR" >&2; exit 2; }
+    shift
+    exec "$ROOT/runtime/node/bin/node" "$ROOT/runtime/pg-delta/plan.mjs" "$@"
+    ;;
   node-deps) shift; exec "$ROOT/env/bin/python" "$ROOT/scripts/node-deps.py" "$@" ;;
   github) shift; exec "$ROOT/scripts/github.sh" status "$@" ;;
   github-auth) shift; exec "$ROOT/scripts/github.sh" auth "$@" ;;
