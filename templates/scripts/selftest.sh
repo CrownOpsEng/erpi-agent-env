@@ -56,7 +56,7 @@ with (root/'manifest/sources.tsv').open('r',encoding='utf-8',newline='') as hand
 assert rows and rows[0]==['component','version','url','sha256'], rows[:1]
 assert all(len(row)==4 and all(cell for cell in row) for row in rows[1:]), rows
 components={row[0] for row in rows[1:]}
-assert {'python-build-standalone','postgres-server-source','postgres-server-build-image','postgres-server-build-flex','node-postgres','pgls-wasm','pg-delta-lock'} <= components
+assert {'python-build-standalone','postgres-server-source','postgres-server-build-image','postgres-server-build-flex','postgrest','node-postgres','pgls-wasm','pg-delta-lock'} <= components
 licenses=root/'licenses/third-party'
 notice=licenses/'THIRD-PARTY-LICENSES.md'
 assert notice.is_file() and notice.stat().st_size>10000,notice
@@ -67,6 +67,9 @@ lock_hash=re.search(r'^PG_DELTA_LOCK_SHA256="([0-9a-f]{64})"$',versions,re.M).gr
 assert hashlib.sha256((root/'manifest/pg-delta-package-lock.json').read_bytes()).hexdigest()==lock_hash
 assert not (root/'runtime/pg-delta/node_modules/.bin').exists(), 'upstream pgdelta CLI shim must not be exposed'
 assert (root/'licenses/pg-delta/LICENSE').is_file()
+postgrest=env['capabilities']['postgrest']
+assert postgrest=={'version':'14.16','supabase_cli_baseline':'2.114.0','database_targets':'numeric-loopback-only','http_listener':'loopback-only'},postgrest
+assert (root/'licenses/postgrest/LICENSE').is_file()
 PY_META
 
 uv --version
@@ -80,6 +83,7 @@ actionlint --version
 gitleaks version
 shellcheck --version | grep -F 'version: 0.11.0' >/dev/null
 mlr --version | grep -F '6.20.2' >/dev/null
+"$ROOT/runtime/postgrest/postgrest" --version | grep -Fx 'PostgREST 14.16' >/dev/null
 httpx --help >/dev/null
 pip --version >/dev/null
 printf '{"a":1}\n' | jq -e '.a == 1' >/dev/null
@@ -261,6 +265,178 @@ with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as s:
     s.bind(('127.0.0.1',0)); print(s.getsockname()[1])
 PY
 }
+# PostgREST refuses remote database targeting before starting a service.
+POSTGREST_REJECT_PORT="$(free_port)"
+if "$ROOT/bin/agent-env" postgrest run \
+  --db-uri 'postgresql://authenticator@198.51.100.10/postgres' \
+  --db-schemas api --db-anon-role anon --port "$POSTGREST_REJECT_PORT" -- true >/dev/null 2>&1; then
+  echo 'PostgREST accepted a remote database URL.' >&2
+  exit 1
+fi
+
+cat > "$TMP/postgrest-fixture.sql" <<'SQL'
+create role authenticator login nosuperuser noinherit;
+create role anon nologin nosuperuser;
+create role executor_ok nologin nosuperuser;
+create role executor_bad nologin nosuperuser;
+grant anon to authenticator;
+grant set on parameter "agent.pre_ran" to anon;
+
+create schema api;
+create schema core;
+revoke all on schema api, core from public;
+
+create table core.events(label text primary key);
+revoke all on table core.events from public;
+
+create function core.invoker_write(p_label text)
+returns text
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  insert into core.events(label) values (p_label);
+  return p_label;
+end
+$$;
+
+create function api.pre_request()
+returns void
+language plpgsql
+security invoker
+as $$
+begin
+  perform pg_catalog.set_config('agent.pre_ran', 'yes', true);
+end
+$$;
+
+create function api.context_probe()
+returns jsonb
+language sql
+stable
+security invoker
+as $$
+  select pg_catalog.jsonb_build_object(
+    'current_user', current_user,
+    'session_user', session_user,
+    'search_path', pg_catalog.current_setting('search_path'),
+    'pre', pg_catalog.current_setting('agent.pre_ran', true)
+  )
+$$;
+
+create function api.write_ok()
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  return core.invoker_write('ok');
+end
+$$;
+
+create function api.write_denied()
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  return core.invoker_write('denied');
+end
+$$;
+
+alter function api.write_ok() owner to executor_ok;
+alter function api.write_denied() owner to executor_bad;
+revoke all on all functions in schema api, core from public;
+
+grant usage on schema api to anon, executor_ok, executor_bad;
+grant execute on function api.pre_request() to anon;
+grant execute on function api.context_probe() to anon;
+grant execute on function api.write_ok() to anon;
+grant execute on function api.write_denied() to anon;
+
+grant usage on schema core to executor_ok;
+grant execute on function core.invoker_write(text) to executor_ok, executor_bad;
+grant insert, select on table core.events to executor_ok, executor_bad;
+SQL
+
+cat > "$TMP/postgrest-probe.py" <<'PY'
+import http.client, json, os
+from urllib.parse import urlsplit
+url=urlsplit(os.environ['POSTGREST_URL'])
+
+def rpc(name):
+    conn=http.client.HTTPConnection(url.hostname,url.port,timeout=5)
+    conn.request('POST',f'/rpc/{name}',body=b'{}',headers={'Content-Type':'application/json'})
+    response=conn.getresponse(); body=response.read(); conn.close()
+    return response.status,body
+
+status,body=rpc('context_probe')
+assert status==200,(status,body)
+context=json.loads(body)
+assert context['current_user']=='anon',context
+assert context['session_user']=='authenticator',context
+assert 'api' in context['search_path'],context
+assert context['pre']=='yes',context
+status,body=rpc('write_ok')
+assert status==200,(status,body)
+status,body=rpc('write_denied')
+assert status>=400,(status,body)
+error=json.loads(body)
+assert error.get('code')=='42501',error
+PY
+
+cat > "$TMP/postgrest-sleeper.py" <<'PY'
+import os,pathlib,time
+pathlib.Path(os.environ['POSTGREST_SIGNAL_READY']).write_text('ready',encoding='utf-8')
+time.sleep(30)
+PY
+
+POSTGREST_PG_PORT="$(free_port)"
+POSTGREST_HTTP_PORT="$(free_port)"
+POSTGREST_SIGNAL_PORT="$(free_port)"
+POSTGREST_FIXTURE="$TMP/postgrest-fixture.sql" \
+POSTGREST_PROBE="$TMP/postgrest-probe.py" \
+POSTGREST_SLEEPER="$TMP/postgrest-sleeper.py" \
+POSTGREST_HTTP_PORT="$POSTGREST_HTTP_PORT" \
+POSTGREST_SIGNAL_PORT="$POSTGREST_SIGNAL_PORT" \
+POSTGREST_SIGNAL_READY="$TMP/postgrest-signal-ready" \
+"$ROOT/bin/agent-env" postgres run --bootstrap-user agent_env_postgrest_bootstrap --port "$POSTGREST_PG_PORT" -- bash -ceu '
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -f "$POSTGREST_FIXTURE" >/dev/null
+  db_uri="postgresql://authenticator@127.0.0.1:${PGPORT}/postgres"
+  "$MAGNET_AGENT_ENV/bin/agent-env" postgrest run \
+    --db-uri "$db_uri" --db-schemas api --db-anon-role anon \
+    --db-pre-request api.pre_request --port "$POSTGREST_HTTP_PORT" -- \
+    python "$POSTGREST_PROBE"
+  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -Atc "select label from core.events order by label" | grep -Fx ok >/dev/null
+
+  POSTGREST_SIGNAL_READY="$POSTGREST_SIGNAL_READY" \
+  "$MAGNET_AGENT_ENV/bin/agent-env" postgrest run \
+    --db-uri "$db_uri" --db-schemas api --db-anon-role anon \
+    --db-pre-request api.pre_request --port "$POSTGREST_SIGNAL_PORT" -- \
+    python "$POSTGREST_SLEEPER" >/dev/null 2>&1 &
+  postgrest_runner=$!
+  ready=0
+  for (( attempt=0; attempt<100; attempt++ )); do
+    if [[ -f "$POSTGREST_SIGNAL_READY" ]]; then ready=1; break; fi
+    sleep 0.05
+  done
+  (( ready == 1 )) || { kill -TERM "$postgrest_runner" 2>/dev/null || true; wait "$postgrest_runner" 2>/dev/null || true; echo "PostgREST signal probe never reached child execution." >&2; exit 1; }
+  kill -TERM "$postgrest_runner"
+  set +e
+  wait "$postgrest_runner"
+  signal_rc=$?
+  set -e
+  [[ "$signal_rc" != 0 ]] || { echo "PostgREST signal probe unexpectedly returned success." >&2; exit 1; }
+'
+
+if find "$ROOT/state/postgrest" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+  echo 'PostgREST self-test left mutable service state.' >&2
+  exit 1
+fi
+
 PG_PORT="$(free_port)"
 "$ROOT/bin/agent-env" postgres run --port "$PG_PORT" -- bash -ceu '
   "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -Atc "select version()" | grep -F "PostgreSQL 17.10" >/dev/null
@@ -354,7 +530,7 @@ set -e
 if find "$ROOT/state/postgres" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
   echo 'PostgreSQL self-test left mutable cluster state.' >&2; exit 1
 fi
-python - <<'PY' "$PG_PORT" "$BOOTSTRAP_PORT" "$NONZERO_PORT" "$SIGNAL_PORT"
+python - <<'PY' "$POSTGREST_REJECT_PORT" "$POSTGREST_PG_PORT" "$POSTGREST_HTTP_PORT" "$POSTGREST_SIGNAL_PORT" "$PG_PORT" "$BOOTSTRAP_PORT" "$NONZERO_PORT" "$SIGNAL_PORT"
 import socket,sys
 for raw in sys.argv[1:]:
     port=int(raw)

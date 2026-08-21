@@ -70,9 +70,9 @@ BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"
 BUILDER_PIP_CACHE="$CACHE_DIR/pip-cache"
 BUILDER_NPM_CACHE="$CACHE_DIR/npm-cache"
 mkdir -p "$BUILDER_UV_CACHE" "$BUILDER_UV_PYTHON_CACHE" "$BUILDER_PIP_CACHE" "$BUILDER_NPM_CACHE"
-mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/runtime/pg-delta" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" "$BUILD/licenses/third-party" "$BUILD/licenses/postgresql" "$BUILD/licenses/pg-delta" \
+mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/runtime/pg-delta" "$BUILD/runtime/postgrest" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" "$BUILD/licenses/third-party" "$BUILD/licenses/postgresql" "$BUILD/licenses/pg-delta" "$BUILD/licenses/postgrest" \
   "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" \
-  "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
+  "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/state/postgrest" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
 ORIGINAL_BUILD_ROOT="$BUILD"
 cleanup() { if (( KEEP_WORK )); then echo "Work tree retained: $WORK_PARENT"; else rm -rf "$WORK_PARENT"; fi; }
 trap cleanup EXIT
@@ -92,7 +92,8 @@ reset_runtime_state() {
     "$BUILD/state/npm-cache" \
     "$BUILD/state/npm-global" \
     "$BUILD/state/pycache" \
-    "$BUILD/state/postgres"
+    "$BUILD/state/postgres" \
+    "$BUILD/state/postgrest"
 }
 fetch() {
   local url="$1" dest="$2"
@@ -391,6 +392,15 @@ fetch "https://github.com/johnkerl/miller/releases/download/v${MILLER_VERSION}/m
 verify_one "$MILLER_AR" "$MILLER_SHA256"
 extract_single "$MILLER_AR" mlr "$BUILD/bin/mlr"
 
+log "PostgREST $POSTGREST_VERSION"
+POSTGREST_AR="$DL/postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz"
+fetch "https://github.com/PostgREST/postgrest/releases/download/v${POSTGREST_VERSION}/postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz" "$POSTGREST_AR"
+verify_one "$POSTGREST_AR" "$POSTGREST_SHA256"
+extract_single "$POSTGREST_AR" postgrest "$BUILD/runtime/postgrest/postgrest"
+"$BUILD/runtime/postgrest/postgrest" --version | grep -Fx "PostgREST $POSTGREST_VERSION" >/dev/null
+file "$BUILD/runtime/postgrest/postgrest" | grep -F "statically linked" >/dev/null
+install -m 0644 "$SELF_DIR/vendor/postgrest/LICENSE" "$BUILD/licenses/postgrest/LICENSE"
+
 log "PostgreSQL $POSTGRES_VERSION from pinned official source"
 PG_SOURCE_AR="$DL/postgresql-${POSTGRES_VERSION}.tar.bz2"
 PG_FLEX_RPM="$DL/${POSTGRES_FLEX_RPM_NEVRA}.rpm"
@@ -502,6 +512,7 @@ cp "$SELF_DIR/templates/bin/agent-env" "$BUILD/bin/agent-env"
 cp "$SELF_DIR/templates/scripts/doctor.py" "$BUILD/scripts/doctor.py"
 cp "$SELF_DIR/templates/scripts/capabilities.py" "$BUILD/scripts/capabilities.py"
 cp "$SELF_DIR/templates/scripts/postgres.py" "$BUILD/scripts/postgres.py"
+cp "$SELF_DIR/templates/scripts/postgrest.py" "$BUILD/scripts/postgrest.py"
 cp "$SELF_DIR/templates/scripts/pgtap.py" "$BUILD/scripts/pgtap.py"
 cp "$SELF_DIR/templates/scripts/node-deps.py" "$BUILD/scripts/node-deps.py"
 cp "$SELF_DIR/templates/scripts/github.sh" "$BUILD/scripts/github.sh"
@@ -510,8 +521,8 @@ cp "$SELF_DIR/templates/scripts/verify.sh" "$BUILD/scripts/verify.sh"
 cp "$SELF_DIR/templates/scripts/rebuild-python.sh" "$BUILD/scripts/rebuild-python.sh"
 cp "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/scripts/uv-isolated-exec.sh"
 cp "$SELF_DIR/templates/bin/python-wrapper" "$BUILD/scripts/python-wrapper.template"
-chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/capabilities.py" "$BUILD/scripts/postgres.py" "$BUILD/scripts/pgtap.py" "$BUILD/scripts/node-deps.py" "$BUILD/scripts/github.sh" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh" "$BUILD/scripts/uv-isolated-exec.sh"
-mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres"
+chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/capabilities.py" "$BUILD/scripts/postgres.py" "$BUILD/scripts/postgrest.py" "$BUILD/scripts/pgtap.py" "$BUILD/scripts/node-deps.py" "$BUILD/scripts/github.sh" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh" "$BUILD/scripts/uv-isolated-exec.sh"
+mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/state/postgrest"
 
 cat > "$BUILD/manifest/environment.json" <<JSON
 {
@@ -536,6 +547,7 @@ cat > "$BUILD/manifest/environment.json" <<JSON
   "capabilities": {
     "postgresql": {"server": "$POSTGRES_VERSION", "server_source": "$POSTGRES_SOURCE_URL", "server_source_sha256": "$POSTGRES_SOURCE_SHA256", "server_build_image": "${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}", "pgtap": "$PGTAP_VERSION", "plpgsql_check": "$PLPGSQL_CHECK_VERSION", "client_tools": true, "disposable_clusters": true, "pgbench": true, "dump_restore": true, "amcheck": true, "checksums": true},
     "pg_delta": {"version": "$PG_DELTA_VERSION", "supabase_cli_baseline": "$PG_DELTA_SUPABASE_CLI_BASELINE", "surface": "plan-only", "live_connections": "numeric-loopback-only"},
+    "postgrest": {"version": "$POSTGREST_VERSION", "supabase_cli_baseline": "$POSTGREST_SUPABASE_CLI_BASELINE", "database_targets": "numeric-loopback-only", "http_listener": "loopback-only"},
     "node_capsules": {"postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION"},
     "utilities": {"shellcheck": "$SHELLCHECK_VERSION", "miller": "$MILLER_VERSION", "httpx_cli": true}
   },
@@ -565,6 +577,7 @@ source_row gitleaks "$GITLEAKS_VERSION" "https://github.com/gitleaks/gitleaks/re
 source_row shellcheck "$SHELLCHECK_VERSION" "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/shellcheck-v$SHELLCHECK_VERSION.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256"
 source_row shellcheck-source "$SHELLCHECK_VERSION" "https://github.com/koalaman/shellcheck/archive/refs/tags/v$SHELLCHECK_VERSION.tar.gz" "$SHELLCHECK_SOURCE_SHA256"
 source_row miller "$MILLER_VERSION" "https://github.com/johnkerl/miller/releases/download/v$MILLER_VERSION/miller-$MILLER_VERSION-linux-amd64.tar.gz" "$MILLER_SHA256"
+source_row postgrest "$POSTGREST_VERSION" "https://github.com/PostgREST/postgrest/releases/download/v$POSTGREST_VERSION/postgrest-v$POSTGREST_VERSION-linux-static-x86-64.tar.xz" "$POSTGREST_SHA256"
 source_row postgres-server-source "$POSTGRES_VERSION" "$POSTGRES_SOURCE_URL" "$POSTGRES_SOURCE_SHA256"
 source_row postgres-server-build-image manylinux_2_28_x86_64 "$POSTGRES_BUILD_IMAGE" "$POSTGRES_BUILD_IMAGE_SHA256"
 source_row postgres-server-build-flex "$POSTGRES_FLEX_RPM_NEVRA" "$POSTGRES_FLEX_RPM_URL" "$POSTGRES_FLEX_RPM_SHA256"

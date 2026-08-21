@@ -2,7 +2,7 @@
 
 This runtime redistributes pinned third-party software. Exact versions, source URLs and SHA-256 values are recorded in `manifest/versions.env` and the machine-readable `manifest/sources.tsv`.
 
-Direct third-party license and attribution texts for the redistributed command/database/capsule components are included under `licenses/third-party/`. ShellCheck 0.11.0 is GPL-3.0-only; its GPL license and exact pinned corresponding source archive are additionally included under `licenses/shellcheck/` and `licenses/source/`. The bundled Node and CPython distributions retain their upstream license files in their own runtime trees, and installed Python packages retain their package-provided license metadata.
+Direct third-party license and attribution texts for the redistributed command/database/capsule components are included under `licenses/third-party/`, with the directly pinned PostgREST license under `licenses/postgrest/`. ShellCheck 0.11.0 is GPL-3.0-only; its GPL license and exact pinned corresponding source archive are additionally included under `licenses/shellcheck/` and `licenses/source/`. The bundled Node and CPython distributions retain their upstream license files in their own runtime trees, and installed Python packages retain their package-provided license metadata.
 
 The PostgreSQL server is built from the exact pinned official PostgreSQL source artifact in a digest-pinned manylinux 2.28 image rather than redistributed from an opaque prebuilt server bundle. Readline, zlib, and ICU integrations are disabled in that server build to avoid unnecessary external runtime-library dependencies, and the official PostgreSQL copyright notice is retained under `licenses/postgresql/`.
 
@@ -20,6 +20,7 @@ The direct inventory includes:
 - PostgreSQL 17.10 — PostgreSQL License.
 - pgTAP 1.3.3 — PostgreSQL-style license.
 - plpgsql_check 2.8.11 — MIT-style license.
+- PostgREST 14.16 — MIT.
 - `@supabase/pg-delta` 1.0.0-alpha.33 — MIT; its exact npm lock and transitive package license/integrity provenance are retained in `manifest/`.
 - postgres 3.4.7 npm package — Unlicense.
 - `@postgres-language-server/wasm` 0.25.7 — MIT.

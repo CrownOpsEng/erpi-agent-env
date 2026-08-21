@@ -12,7 +12,7 @@ export PIP_CACHE_DIR="$ROOT/state/pip-cache"
 export NPM_CONFIG_CACHE="$ROOT/state/npm-cache"
 export NPM_CONFIG_PREFIX="$ROOT/state/npm-global"
 export PYTHONPYCACHEPREFIX="$ROOT/state/pycache"
-mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$PIP_CACHE_DIR" "$NPM_CONFIG_CACHE" "$NPM_CONFIG_PREFIX" "$PYTHONPYCACHEPREFIX" "$ROOT/state/postgres" 2>/dev/null || true
+mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$PIP_CACHE_DIR" "$NPM_CONFIG_CACHE" "$NPM_CONFIG_PREFIX" "$PYTHONPYCACHEPREFIX" "$ROOT/state/postgres" "$ROOT/state/postgrest" 2>/dev/null || true
 export PATH="$ROOT/env/bin:$ROOT/bin:$UV_TOOL_BIN_DIR:$NPM_CONFIG_PREFIX/bin:$PATH"
 
 usage() {
@@ -25,6 +25,7 @@ Commands:
   postgres run [...] -- C  Run one command against a disposable local PostgreSQL
   pg TOOL [ARGS...]        Run an explicitly selected bundled PostgreSQL client tool
   pgtap FILE...            Run pgTAP SQL files with strict TAP accounting
+  postgrest run [...] -- C Run one command against bounded local PostgREST
   pg-delta plan [...]      Generate a local-only PostgreSQL schema migration plan
   node-deps CMD            status|hydrate|clean exact repository-locked offline capsules
   github                   Probe shell GitHub reachability, auth/API, and repo access
@@ -70,6 +71,13 @@ case "$cmd" in
     ;;
   pg) shift; pg_exec "$@" ;;
   pgtap) shift; exec "$ROOT/env/bin/python" "$ROOT/scripts/pgtap.py" "$@" ;;
+  postgrest)
+    shift
+    sub="${1:-}"
+    [[ "$sub" == run ]] || { echo "Usage: agent-env postgrest run --db-uri postgresql://... --db-schemas SCHEMAS --db-anon-role ROLE [--db-extra-search-path PATH] [--db-pre-request FUNCTION] [--port N] -- COMMAND" >&2; exit 2; }
+    shift
+    exec "$ROOT/env/bin/python" "$ROOT/scripts/postgrest.py" "$@"
+    ;;
   pg-delta)
     shift
     sub="${1:-}"

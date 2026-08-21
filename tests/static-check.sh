@@ -74,7 +74,7 @@ for path,record in pg_packages.items():
 print('hash-lock-and-vendor-shapes-ok')
 PY
 rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
-for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE templates/scripts/pg-delta.mjs tests/node-deps-safety-check.sh; do
+for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/postgrest.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE vendor/postgrest/LICENSE templates/scripts/pg-delta.mjs tests/node-deps-safety-check.sh; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime/build source missing: $file" >&2; exit 1; }
 done
 # The shipped router is intentionally compact; large operational detail belongs in README/commands.
@@ -111,6 +111,15 @@ grep -F 'MIN_GLIBCXX_SYMBOL="GLIBCXX_3.4.25"' "$ROOT/versions.env" >/dev/null
 grep -F 'YQ_SHA256="fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4"' "$ROOT/versions.env" >/dev/null
 ! grep -R -nE 'YQ_CHECKSUMS_SHA256|YQ_HASH|yq-checksums|awk.*yq_linux_amd64' "$ROOT/build.sh" "$ROOT/versions.env"
 grep -F "find . -xtype l ! -path './state/*'" "$ROOT/templates/scripts/verify.sh" >/dev/null
+# Standalone PostgREST is an exact upstream static asset with bounded local routing.
+grep -F 'POSTGREST_VERSION="14.16"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGREST_SHA256="36b8ae140f188cfcd6003494805bf35a41e895f88c12be9183d60f91782145c6"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGREST_SUPABASE_CLI_BASELINE="2.114.0"' "$ROOT/versions.env" >/dev/null
+grep -F 'postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz' "$ROOT/build.sh" >/dev/null
+grep -F 'verify_one "$POSTGREST_AR" "$POSTGREST_SHA256"' "$ROOT/build.sh" >/dev/null
+grep -F 'PGRST_SERVER_HOST' "$ROOT/templates/scripts/postgrest.py" >/dev/null
+grep -F 'RETARGET_QUERY_KEYS' "$ROOT/templates/scripts/postgrest.py" >/dev/null
+grep -F 'postgrest run' "$ROOT/templates/bin/agent-env" >/dev/null
 # The v1 Python lock is source-controlled input, not resolved during hydration.
 grep -F 'verify_one "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"' "$ROOT/build.sh" >/dev/null
 ! grep -F 'pip compile' "$ROOT/build.sh"

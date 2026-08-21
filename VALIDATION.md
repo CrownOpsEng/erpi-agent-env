@@ -22,6 +22,7 @@ A payload-affecting source commit is releasable only after **Accept runtime** bu
 - disposable PostgreSQL start/query, pgTAP positive/negative accounting, plpgsql_check, dump/restore, `pg_amcheck`, pgbench, and stopped-cluster checksum verification when the acceptance host is unprivileged
 - PostgreSQL child-exit propagation and signal-interrupted teardown with no orphaned cluster state or occupied loopback port
 - exact pg-delta lock/API installation, plan-only routing, numeric-loopback refusal boundary, representative source→target→clone convergence, managed-schema filtering, and empty convergence re-plan
+- exact PostgREST upstream asset/version/static-binary provenance, numeric-loopback database refusal, loopback-only HTTP binding, real request-role impersonation/search-path/pre-request semantics, SECURITY DEFINER→SECURITY INVOKER success and SQLSTATE `42501` negative behavior over HTTP, plus interrupted-process cleanup
 - hostile relocation with spaces/unicode/deep paths
 - PostgreSQL lifecycle under that hostile relocation path over explicit `127.0.0.1` TCP with Unix-domain sockets disabled, preventing relocation depth from becoming a socket-path failure mode
 - rejection of original build-root residue and absolute symlinks
@@ -73,6 +74,14 @@ A wrapper timeout is environmental evidence, not a test failure or success.
 The shipped pg-delta capability is intentionally narrower than the upstream CLI. `@supabase/pg-delta` is pinned exactly to `1.0.0-alpha.33`, with its complete npm lock and package integrity/license provenance, because that is the qualified default for Supabase CLI 2.114.0. Promotion requires useful and safe schema planning for the motivating Magnet Photos workflows; it does not require perfect behavioral parity with every Supabase CLI wrapper option.
 
 Only `agent-env pg-delta plan` is exposed. Live source and target URLs must be numeric loopback, inherited PostgreSQL targeting variables are scrubbed, and upstream mutation commands such as `apply` or `sync` are not routed. Acceptance proves a representative plan can be generated without mutating source/target, applied by the test harness to a clone, and then converges to an empty re-plan. Any pg-delta version or compatibility-baseline change requires fresh qualification before promotion.
+
+## PostgREST compatibility boundary
+
+PostgREST 14.16 is pinned because it is the exact upstream native default selected for Linux x64 by the qualified Supabase CLI 2.114.0 baseline. The environment exposes only a bounded local execution surface: database URLs must remain numeric loopback, the HTTP listener is fixed to loopback, inherited `PGRST_*` configuration is scrubbed, and project-supplied schemas, roles, pre-request functions and RPCs remain target-repository state.
+
+Acceptance must exercise the real PostgREST process rather than replacing it with `SET ROLE` or direct SQL. It proves request-role/session-role context, request search path, a configured generic pre-request function, and a SECURITY DEFINER wrapper calling a SECURITY INVOKER dependency in both a correctly granted path and a deliberately missing-schema-privilege path that surfaces SQLSTATE `42501` over HTTP. It also proves remote database refusal and signal cleanup.
+
+This capability is a discriminator for ordinary PostgREST semantics, not a claim of managed Supabase parity. Kong routing, Supabase Auth/API keys, Storage, Realtime and other provider topology remain outside the bundle. A PostgREST version or compatibility-baseline change requires fresh upstream-asset and runtime qualification before promotion.
 
 ## Project promotion proof
 

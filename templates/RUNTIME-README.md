@@ -35,6 +35,12 @@ Unix-domain sockets are deliberately disabled for this disposable runtime. All b
 
 The runtime includes pgTAP 1.3.3, plpgsql_check 2.8.11, pgbench, pg_dump/pg_restore, pg_amcheck, pg_checksums and normal client helpers. Project-specific compatibility roles, migrations, fixture data, test expectations, and production credentials do not belong in this bundle.
 
+### PostgREST request execution
+
+`agent-env postgrest run --db-uri postgresql://authenticator@127.0.0.1:54322/postgres --db-schemas api --db-anon-role anon --port 3000 -- COMMAND` starts the pinned standalone PostgREST 14.16 process, waits for its schema cache to become ready, exports `POSTGREST_URL` to `COMMAND`, and tears the service down when that command exits. The version is the exact upstream native default selected by the qualified Supabase CLI 2.114.0 baseline.
+
+Database URLs are restricted to numeric loopback and query parameters capable of retargeting libpq are refused. HTTP is always bound to `127.0.0.1`; inherited `PGRST_*` variables are scrubbed before the service starts. Optional `--db-extra-search-path` and `--db-pre-request` values are repository-owned PostgREST configuration, not provider policy. This surface is for real PostgREST request-role, transaction, search-path, pre-request and RPC semantics. It deliberately does not emulate Kong, Supabase Auth/API-key routing, Storage, or managed-platform behavior.
+
 ### pg-delta planning
 
 `agent-env pg-delta plan --source postgresql://... --target postgresql://... --out DIR` generates numbered SQL plan files plus `envelope.json`. Both live URLs must use numeric loopback (`127.0.0.1` or `::1`); inherited PostgreSQL targeting variables are scrubbed, and remote URLs are refused before connection. The output directory must be new or empty.
