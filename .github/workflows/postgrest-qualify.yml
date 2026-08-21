@@ -1,0 +1,68 @@
+name: Qualify PostgREST promotion
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    if: github.head_ref == 'agent/postgrest-promotion-v2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out qualification branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/postgrest-promotion-v2
+          fetch-depth: 0
+
+      - name: Apply permanent source transformation
+        run: python3 .github/postgrest-promote.py
+
+      - name: Run repository source gate
+        run: ./tests/static-check.sh
+
+      - name: Build and exercise complete runtime
+        run: ./build.sh --out /tmp/postgrest-dist
+
+      - name: Commit verified permanent tree to qualification branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            README.md VALIDATION.md build.sh versions.env tests/static-check.sh \
+            templates/RUNTIME-README.md templates/THIRD-PARTY.md templates/bin/agent-env \
+            templates/scripts/postgrest.py templates/scripts/selftest.sh vendor/postgrest/LICENSE
+          git add -u -- .github/workflows/postgrest-qualify.yml .github/postgrest-promote.py
+          git diff --cached --check
+          cat > /tmp/commit-message <<'MSG'
+          feat(postgrest): add local HTTP execution harness
+
+          Why:
+          Direct PostgreSQL proof can diverge from a real PostgREST request because PostgREST impersonates the request role and establishes transaction-scoped request/search-path state. Magnet Photos exposed a real 42501 HTTP boundary that the existing database-only harness could not discriminate locally.
+
+          What:
+          Pin the exact upstream PostgREST 14.16 static Linux x64 asset selected by Supabase CLI 2.114.0; add a loopback-only runner with remote database refusal, controlled configuration and process cleanup; record provenance/license data; and add HTTP acceptance covering request-role/session-role context, search path, pre-request execution, SECURITY DEFINER to SECURITY INVOKER success, intentional 42501 failure, and signal teardown.
+
+          Validation:
+          The temporary qualification workflow verified the official release SHA-256, version, archive shape and static linking. Before this commit it ran the repository static gate and a complete ./build.sh runtime acceptance against the transformed tree, including fresh relocation/extraction self-tests. Official post-push Validate and Accept runtime remain required after the verified tree is promoted to main.
+          MSG
+          sed -i 's/^          //' /tmp/commit-message
+          git commit -F /tmp/commit-message
+          git push origin HEAD:agent/postgrest-promotion-v2
+          git status --short
+
+      - name: Upload qualified development runtime
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: postgrest-dev-runtime
+          path: |
+            /tmp/postgrest-dist/*.tar.gz
+            /tmp/postgrest-dist/*.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
