@@ -15,7 +15,7 @@ A payload-affecting source commit is releasable only after **Accept runtime** bu
 - verified upstream/custom payload hashes before execution or inclusion
 - supported Linux x86-64/glibc host contract
 - exact managed-Python build provenance plus Python relocation repair, native-import checks, and offline venv destruction/rebuild
-- bundled command functional probes, including ShellCheck positive/negative behavior, Miller transformation, and HTTPX CLI localhost execution
+- bundled command functional probes, including ShellCheck positive/negative behavior, Miller transformation, HTTPX CLI localhost execution, and host-Git-backed connector handoff restoration when Git is available
 - exact-lock offline Node capsule hydration using the real bundled packages, content-bound ownership, import execution, and safe cleanup
 - source-level Node-capsule negative tests for lock mismatch, all-or-nothing late conflicts, symlinked `node_modules`/scope escape attempts, stale ownership, pre-existing repository packages, and legacy-marker refusal
 - PostgreSQL server/client version and extension integration checks
@@ -82,6 +82,14 @@ PostgREST 14.16 is pinned because it is the exact upstream native default select
 Acceptance must exercise the real PostgREST process rather than replacing it with `SET ROLE` or direct SQL. It proves request-role/session-role context, request search path, a configured generic pre-request function, and a SECURITY DEFINER wrapper calling a SECURITY INVOKER dependency in both a correctly granted path and a deliberately missing-schema-privilege path that surfaces SQLSTATE `42501` over HTTP. It also proves remote database refusal and signal cleanup.
 
 This capability is a discriminator for ordinary PostgREST semantics, not a claim of managed Supabase parity. Kong routing, Supabase Auth/API keys, Storage, Realtime and other provider topology remain outside the bundle. A PostgREST version or compatibility-baseline change requires fresh upstream-asset and runtime qualification before promotion.
+
+## Git handoff boundary
+
+The environment owns only the local restore side of repository handoff. A standard artifact is a ZIP containing exactly `repository.bundle`, `SOURCE_SHA`, `SOURCE_BRANCH`, and `REPOSITORY`; producer workflows and connector download behavior remain target-repository/platform concerns.
+
+Restore must require host Git but no shell network or credential; reject malformed, duplicate, traversal/unexpected, encrypted, or symlink-like ZIP entries; validate canonical metadata and branch syntax before repository creation; verify the bundle in an empty repository so prerequisite/incremental bundles fail; require the declared branch tip to equal the declared source SHA; isolate all Git operations from inherited/global/system configuration; reconstruct refs from local bundle bytes only; establish only a canonical GitHub HTTPS origin and matching upstream; run repository integrity and clean-worktree checks; refuse an existing destination; and remove staged state after any failed restore.
+
+Source validation covers positive multi-commit/multi-branch/tag restoration plus malformed metadata, branch/SHA mismatch, prerequisite bundles, unsafe ZIP members, hostile Git configuration, and destination refusal. Runtime acceptance exercises the shipped `agent-env git-handoff restore` command using a real locally generated full bundle. The capability is transport plumbing, not GitHub authentication and not a substitute for target-repository authority.
 
 ## Project promotion proof
 

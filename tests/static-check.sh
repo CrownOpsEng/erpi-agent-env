@@ -75,7 +75,7 @@ for path,record in pg_packages.items():
 print('hash-lock-and-vendor-shapes-ok')
 PY
 rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
-for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/postgrest.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/build-identity.sh scripts/check-version-transition.py scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE vendor/postgrest/LICENSE templates/scripts/pg-delta.mjs tests/build-identity-check.sh tests/version-transition-check.sh tests/node-deps-safety-check.sh; do
+for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/git-handoff.py templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/postgrest.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/build-identity.sh scripts/check-version-transition.py scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE vendor/postgrest/LICENSE templates/scripts/pg-delta.mjs tests/build-identity-check.sh tests/version-transition-check.sh tests/node-deps-safety-check.sh tests/git-handoff-check.sh; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime/build source missing: $file" >&2; exit 1; }
 done
 # The shipped router is a routing surface; do not enforce an arbitrary byte budget in place of semantic review.
@@ -162,6 +162,14 @@ grep -F "git config --local --add credential.https://github.com.helper '!gh auth
 grep -F 'git push --dry-run --no-verify' "$ROOT/templates/scripts/github.sh" >/dev/null
 grep -F 'github-git' "$ROOT/templates/bin/agent-env" >/dev/null
 grep -F 'github-git' "$ROOT/payload/AGENTS.md.in" >/dev/null
+grep -F 'git-handoff restore' "$ROOT/templates/bin/agent-env" >/dev/null
+grep -F 'git-handoff restore' "$ROOT/payload/AGENTS.md.in" >/dev/null
+grep -F 'git-bundle-zip-v1' "$ROOT/build.sh" >/dev/null
+grep -F 'GIT_CONFIG_NOSYSTEM' "$ROOT/templates/scripts/git-handoff.py" >/dev/null
+grep -F 'GIT_CONFIG_GLOBAL' "$ROOT/templates/scripts/git-handoff.py" >/dev/null
+grep -F 'bundle", "verify"' "$ROOT/templates/scripts/git-handoff.py" >/dev/null
+grep -F 'https://github.com/{repository}.git' "$ROOT/templates/scripts/git-handoff.py" >/dev/null
+grep -F 'cp "$SELF_DIR/templates/scripts/git-handoff.py" "$BUILD/scripts/git-handoff.py"' "$ROOT/build.sh" >/dev/null
 if grep -R -nF 'gh auth setup-git' "$ROOT/templates/scripts" "$ROOT/templates/bin"; then
   echo "Do not persist the portable gh path with gh auth setup-git." >&2
   exit 1
@@ -332,6 +340,7 @@ require_contains 'for (( attempt=0; attempt<100; attempt++ )); do' "$ROOT/templa
 "$ROOT/tests/python-link-relocation-check.sh"
 "$ROOT/tests/sysconfig-relocation-check.sh"
 "$ROOT/tests/node-deps-safety-check.sh"
+"$ROOT/tests/git-handoff-check.sh"
 node_fetch_count="$(grep -Fc 'fetch "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" "$NODE_AR"' "$ROOT/build.sh")"
 [[ "$node_fetch_count" == 1 ]] || { echo "Expected exactly one Node fetch call, found $node_fetch_count" >&2; exit 1; }
 echo "Builder static checks passed."

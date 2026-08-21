@@ -136,6 +136,79 @@ with socketserver.TCPServer(('127.0.0.1',0),H) as s:
     t.join(5); assert p.returncode==0,p.stdout; assert 'agent-env-httpx-ok' in p.stdout,p.stdout
 PY
 
+# When host Git is available, prove a connector-style full Git bundle can be
+# restored entirely offline by the shipped command while hostile Git state is ignored.
+if command -v git >/dev/null 2>&1; then
+  (
+    set -euo pipefail
+    GIT_HANDOFF_SRC="$TMP/git-handoff-source"
+    GIT_HANDOFF_HOME="$TMP/git-handoff-home"
+    GIT_HANDOFF_ARTIFACT="$TMP/git-handoff.zip"
+    GIT_HANDOFF_DEST="$TMP/git-handoff-restored"
+    mkdir -p "$GIT_HANDOFF_HOME"
+    export HOME="$GIT_HANDOFF_HOME"
+    export GIT_CONFIG_NOSYSTEM=1
+    export GIT_CONFIG_GLOBAL=/dev/null
+    unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG_COUNT || true
+
+    git init --quiet "$GIT_HANDOFF_SRC"
+    git -C "$GIT_HANDOFF_SRC" branch -m main
+    git -C "$GIT_HANDOFF_SRC" config user.name 'Agent Env Runtime Fixture'
+    git -C "$GIT_HANDOFF_SRC" config user.email 'runtime-fixture@example.invalid'
+    printf 'base\n' > "$GIT_HANDOFF_SRC/base.txt"
+    git -C "$GIT_HANDOFF_SRC" add base.txt
+    git -C "$GIT_HANDOFF_SRC" commit --quiet -m base
+    git -C "$GIT_HANDOFF_SRC" tag runtime-fixture-base
+    git -C "$GIT_HANDOFF_SRC" switch --quiet -c feature/runtime-handoff
+    printf 'feature\n' > "$GIT_HANDOFF_SRC/feature.txt"
+    git -C "$GIT_HANDOFF_SRC" add feature.txt
+    git -C "$GIT_HANDOFF_SRC" commit --quiet -m feature
+    handoff_sha="$(git -C "$GIT_HANDOFF_SRC" rev-parse HEAD)"
+    git -C "$GIT_HANDOFF_SRC" bundle create "$TMP/git-handoff.bundle" --all
+
+    python - "$TMP/git-handoff.bundle" "$GIT_HANDOFF_ARTIFACT" "$handoff_sha" <<'PY_GIT_HANDOFF'
+import sys,zipfile
+bundle,out,sha=sys.argv[1:]
+with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_DEFLATED) as z:
+    z.write(bundle,'repository.bundle')
+    z.writestr('SOURCE_SHA',sha+'\n')
+    z.writestr('SOURCE_BRANCH','feature/runtime-handoff\n')
+    z.writestr('REPOSITORY','CrownOpsEng/runtime-selftest\n')
+PY_GIT_HANDOFF
+    cat > "$TMP/git-handoff-poison" <<'EOF_GIT_HANDOFF'
+[credential "https://github.com"]
+	helper = !echo SHOULD_NOT_LEAK
+[http "https://github.com/"]
+	extraheader = AUTHORIZATION: poison
+[url "https://attacker.invalid/"]
+	insteadOf = https://github.com/
+EOF_GIT_HANDOFF
+    GIT_DIR=/not/a/repository GIT_CONFIG_GLOBAL="$TMP/git-handoff-poison" \
+      "$ROOT/bin/agent-env" git-handoff restore "$GIT_HANDOFF_ARTIFACT" "$GIT_HANDOFF_DEST" >/dev/null
+    [[ "$(git -C "$GIT_HANDOFF_DEST" rev-parse HEAD)" == "$handoff_sha" ]]
+    [[ "$(git -C "$GIT_HANDOFF_DEST" rev-parse '@{upstream}')" == "$handoff_sha" ]]
+    [[ "$(git -C "$GIT_HANDOFF_DEST" branch --show-current)" == 'feature/runtime-handoff' ]]
+    [[ "$(git -C "$GIT_HANDOFF_DEST" remote get-url origin)" == 'https://github.com/CrownOpsEng/runtime-selftest.git' ]]
+    [[ "$(git -C "$GIT_HANDOFF_DEST" rev-parse runtime-fixture-base)" != '' ]]
+    [[ -z "$(git -C "$GIT_HANDOFF_DEST" status --porcelain=v1 --untracked-files=all)" ]]
+
+    python - "$GIT_HANDOFF_ARTIFACT" "$TMP/git-handoff-bad.zip" <<'PY_GIT_HANDOFF_BAD'
+import sys,zipfile
+src,out=sys.argv[1:]
+with zipfile.ZipFile(src) as zin, zipfile.ZipFile(out,'w',compression=zipfile.ZIP_DEFLATED) as zout:
+    for info in zin.infolist():
+        data=zin.read(info)
+        if info.filename=='SOURCE_SHA': data=b'0000000000000000000000000000000000000000\n'
+        zout.writestr(info.filename,data)
+PY_GIT_HANDOFF_BAD
+    if "$ROOT/bin/agent-env" git-handoff restore "$TMP/git-handoff-bad.zip" "$TMP/git-handoff-bad-dest" >/dev/null 2>&1; then
+      echo 'Git handoff runtime negative probe unexpectedly passed.' >&2
+      exit 1
+    fi
+    [[ ! -e "$TMP/git-handoff-bad-dest" ]]
+  )
+fi
+
 # Prove the actual immutable Node capsules hydrate from the repository lock
 # contract, execute, record content-bound ownership, and clean without network.
 NODE_FIXTURE="$TMP/node-fixture"

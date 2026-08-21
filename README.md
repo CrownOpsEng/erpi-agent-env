@@ -10,7 +10,7 @@ The design target is high-leverage asymmetry: solve recurring execution-environm
 
 The shipped runtime has a short root `AGENTS.md`. Agents should read that router first; they do not need build archaeology or this manual for ordinary work. The router preserves target-project authority, diagnoses uncertain host capability with `agent-env doctor`, and routes GitHub-dependent work through `agent-env github` before substantial remote work.
 
-A working bundled `gh` binary does **not** imply the shell can reach GitHub. `agent-env github` probes shell reachability first. If the host/sandbox blocks GitHub, it returns exit `3`, tells the agent not to keep retrying shell `gh`/GitHub Git, preserves local Git as usable, and points to a platform GitHub connector/app when available.
+A working bundled `gh` binary does **not** imply the shell can reach GitHub. `agent-env github` probes shell reachability first. If the host/sandbox blocks GitHub, it returns exit `3`, tells the agent not to keep retrying shell `gh`/GitHub Git, preserves local Git as usable, and points to a platform GitHub connector/app when available. If that connector can download a repository-owned Git handoff artifact, `agent-env git-handoff restore` validates and reconstructs it locally so subsequent editing, diffs, tests, and Git semantics stay in the execution environment.
 
 ## Payload
 
@@ -19,6 +19,7 @@ The finished bundle pins and verifies a deliberately small generic capability la
 - uv 0.12.5 and uv-managed CPython 3.13.14 from an explicitly pinned python-build-standalone build
 - Node.js 24.19.0 LTS with npm/npx
 - GitHub CLI, jq, yq, ripgrep, actionlint, gitleaks, ShellCheck, and Miller
+- a bounded Git-bundle handoff restorer that turns connector-downloaded repository artifacts into verified local worktrees without shell GitHub networking or credentials
 - a locked Python analysis layer with the HTTPX CLI completed, without project-specific pytest/setuptools/wheel requirements
 - PostgreSQL 17.10 server plus explicitly routed client/test/recovery tools, pgTAP 1.3.3, and plpgsql_check 2.8.11
 - PostgREST 14.16 as the exact official static Linux x64 native default selected by Supabase CLI 2.114.0, exposed only through a loopback-only local execution wrapper
@@ -91,9 +92,12 @@ Credentials are demand-driven host/session state and are never bundled.
 agent-env github
 agent-env github-auth   # only when network is reachable and no usable credential exists
 agent-env github-git    # for an HTTPS GitHub worktree that will push
+agent-env git-handoff restore ARTIFACT.zip DEST
 ```
 
 `github-git` installs only a repo-local, location-neutral `!gh auth git-credential` helper and verifies the push path with `git push --dry-run --no-verify`. The bundle does not use `gh auth setup-git`, which would persist the relocatable `gh` executable's current absolute path globally.
+
+`git-handoff restore` is intentionally credentialless and networkless. It accepts only the generic four-file Git-bundle ZIP contract, requires host Git, verifies the bundle is self-contained and that the declared branch resolves to the declared source SHA, isolates Git from inherited/global/system configuration, restores ordinary history/tags/remote-tracking refs, writes only the canonical GitHub origin/upstream configuration, and fails cleanly. Artifact generation remains a target-repository/GitHub concern rather than becoming a hidden second clone mechanism inside this environment.
 
 ## Mutable state and security boundary
 

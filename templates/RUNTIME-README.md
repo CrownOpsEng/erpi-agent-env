@@ -77,9 +77,12 @@ Credentials are host/session state and are never bundled.
 agent-env github
 agent-env github-auth
 agent-env github-git
+agent-env git-handoff restore /mnt/data/repository-handoff.zip ./repository
 ```
 
 Probe shell GitHub only when it is actually needed. If shell networking is known blocked, do not retry it repeatedly; use an available platform connector/app.
+
+`git-handoff restore` is the local side of a connector-backed repository transfer. It accepts a ZIP containing exactly `repository.bundle`, `SOURCE_SHA`, `SOURCE_BRANCH`, and `REPOSITORY`; requires a self-contained Git bundle; verifies the declared branch tip and complete history in an empty repository; ignores inherited/global/system Git configuration; reconstructs branch, tags, remote-tracking refs, canonical `https://github.com/owner/repo.git` origin and upstream without contacting GitHub; and refuses an existing destination or unsafe/malformed artifact without leaving a partial worktree. The producing repository/CI remains responsible for creating the bundle from the exact intended source ref. The environment never receives or reuses connector credentials.
 
 ## Provenance and licenses
 
