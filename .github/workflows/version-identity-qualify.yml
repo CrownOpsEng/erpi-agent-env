@@ -19,7 +19,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply permanent source transformation
-        run: python3 .github/version-identity-promote.py
+        run: |
+          python3 .github/version-identity-promoter-fix.py
+          python3 .github/version-identity-promote.py
 
       - name: Run complete source policy gate
         run: |
@@ -43,7 +45,10 @@ jobs:
             tests/acceptance-metadata-check.sh tests/commit-range-check.sh \
             tests/static-check.sh tests/release-workflow-check.sh \
             .github/workflows/accept-runtime.yml .github/workflows/build-dist.yml
-          git add -u -- .github/version-identity-promote.py .github/workflows/version-identity-qualify.yml
+          git add -u -- \
+            .github/version-identity-promote.py \
+            .github/version-identity-promoter-fix.py \
+            .github/workflows/version-identity-qualify.yml
           git diff --cached --check
           cat > /tmp/commit-message <<'MSG'
           fix(release): separate build identity from lifecycle version
