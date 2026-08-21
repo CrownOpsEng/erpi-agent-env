@@ -547,12 +547,13 @@ cp "$SELF_DIR/templates/scripts/postgrest.py" "$BUILD/scripts/postgrest.py"
 cp "$SELF_DIR/templates/scripts/pgtap.py" "$BUILD/scripts/pgtap.py"
 cp "$SELF_DIR/templates/scripts/node-deps.py" "$BUILD/scripts/node-deps.py"
 cp "$SELF_DIR/templates/scripts/github.sh" "$BUILD/scripts/github.sh"
+cp "$SELF_DIR/templates/scripts/git-handoff.py" "$BUILD/scripts/git-handoff.py"
 cp "$SELF_DIR/templates/scripts/selftest.sh" "$BUILD/scripts/selftest.sh"
 cp "$SELF_DIR/templates/scripts/verify.sh" "$BUILD/scripts/verify.sh"
 cp "$SELF_DIR/templates/scripts/rebuild-python.sh" "$BUILD/scripts/rebuild-python.sh"
 cp "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/scripts/uv-isolated-exec.sh"
 cp "$SELF_DIR/templates/bin/python-wrapper" "$BUILD/scripts/python-wrapper.template"
-chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/capabilities.py" "$BUILD/scripts/postgres.py" "$BUILD/scripts/postgrest.py" "$BUILD/scripts/pgtap.py" "$BUILD/scripts/node-deps.py" "$BUILD/scripts/github.sh" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh" "$BUILD/scripts/uv-isolated-exec.sh"
+chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/capabilities.py" "$BUILD/scripts/postgres.py" "$BUILD/scripts/postgrest.py" "$BUILD/scripts/pgtap.py" "$BUILD/scripts/node-deps.py" "$BUILD/scripts/github.sh" "$BUILD/scripts/git-handoff.py" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh" "$BUILD/scripts/uv-isolated-exec.sh"
 mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/state/postgrest"
 
 cat > "$BUILD/manifest/environment.json" <<JSON
@@ -581,6 +582,7 @@ cat > "$BUILD/manifest/environment.json" <<JSON
     "postgresql": {"server": "$POSTGRES_VERSION", "server_source": "$POSTGRES_SOURCE_URL", "server_source_sha256": "$POSTGRES_SOURCE_SHA256", "server_build_image": "${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}", "pgtap": "$PGTAP_VERSION", "plpgsql_check": "$PLPGSQL_CHECK_VERSION", "client_tools": true, "disposable_clusters": true, "pgbench": true, "dump_restore": true, "amcheck": true, "checksums": true},
     "pg_delta": {"version": "$PG_DELTA_VERSION", "supabase_cli_baseline": "$PG_DELTA_SUPABASE_CLI_BASELINE", "surface": "plan-only", "live_connections": "numeric-loopback-only"},
     "postgrest": {"version": "$POSTGREST_VERSION", "supabase_cli_baseline": "$POSTGREST_SUPABASE_CLI_BASELINE", "database_targets": "numeric-loopback-only", "http_listener": "loopback-only"},
+    "git_handoff": {"artifact_format": "git-bundle-zip-v1", "requires_host_git": true, "network": "not-required"},
     "node_capsules": {"postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION"},
     "utilities": {"shellcheck": "$SHELLCHECK_VERSION", "miller": "$MILLER_VERSION", "httpx_cli": true}
   },
