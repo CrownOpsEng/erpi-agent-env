@@ -56,7 +56,7 @@ with (root/'manifest/sources.tsv').open('r',encoding='utf-8',newline='') as hand
 assert rows and rows[0]==['component','version','url','sha256'], rows[:1]
 assert all(len(row)==4 and all(cell for cell in row) for row in rows[1:]), rows
 components={row[0] for row in rows[1:]}
-assert {'python-build-standalone','postgres-server-source','postgres-server-build-image','node-postgres','pgls-wasm'} <= components
+assert {'python-build-standalone','postgres-server-source','postgres-server-build-image','postgres-server-build-flex','node-postgres','pgls-wasm'} <= components
 licenses=root/'licenses/third-party'
 notice=licenses/'THIRD-PARTY-LICENSES.md'
 assert notice.is_file() and notice.stat().st_size>10000,notice

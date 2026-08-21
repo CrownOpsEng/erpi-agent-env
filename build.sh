@@ -326,10 +326,13 @@ extract_single "$MILLER_AR" mlr "$BUILD/bin/mlr"
 
 log "PostgreSQL $POSTGRES_VERSION from pinned official source"
 PG_SOURCE_AR="$DL/postgresql-${POSTGRES_VERSION}.tar.bz2"
+PG_FLEX_RPM="$DL/${POSTGRES_FLEX_RPM_NEVRA}.rpm"
 PG_CLIENT_AR="$SELF_DIR/vendor/database/postgresql-client-${POSTGRES_VERSION}-linux-x64-gnu.tar.gz"
 PLCHECK_AR="$SELF_DIR/vendor/database/plpgsql-check-${PLPGSQL_CHECK_VERSION}-pg17-linux-x64-gnu.tar.gz"
 fetch "$POSTGRES_SOURCE_URL" "$PG_SOURCE_AR"
 verify_one "$PG_SOURCE_AR" "$POSTGRES_SOURCE_SHA256"
+fetch "$POSTGRES_FLEX_RPM_URL" "$PG_FLEX_RPM"
+verify_one "$PG_FLEX_RPM" "$POSTGRES_FLEX_RPM_SHA256"
 verify_one "$PG_CLIENT_AR" "$POSTGRES_CLIENT_SHA256"
 verify_one "$PLCHECK_AR" "$PLPGSQL_CHECK_SHA256"
 
@@ -341,10 +344,15 @@ PG_BUILD_WORK="$WORK/postgres-source-build"
 rm -rf "$PG_BUILD_WORK" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client"
 mkdir -p "$PG_BUILD_WORK" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$WORK/postgres-client" "$WORK/plcheck"
 tar -xjf "$PG_SOURCE_AR" -C "$PG_BUILD_WORK"
+install -m 0644 "$PG_FLEX_RPM" "$PG_BUILD_WORK/postgres-flex.rpm"
 POSTGRES_BUILD_IMAGE_REF="${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}"
-docker pull "$POSTGRES_BUILD_IMAGE_REF" >/dev/null
-docker run --rm \
+if ! docker image inspect "$POSTGRES_BUILD_IMAGE_REF" >/dev/null 2>&1; then
+  docker pull "$POSTGRES_BUILD_IMAGE_REF" >/dev/null
+fi
+docker run --rm --network none \
   -e POSTGRES_VERSION="$POSTGRES_VERSION" \
+  -e POSTGRES_FLEX_VERSION="$POSTGRES_FLEX_VERSION" \
+  -e POSTGRES_FLEX_RPM_NEVRA="$POSTGRES_FLEX_RPM_NEVRA" \
   -e HOST_UID="$(id -u)" \
   -e HOST_GID="$(id -g)" \
   -v "$PG_BUILD_WORK:/work" \
@@ -352,8 +360,26 @@ docker run --rm \
     set -euo pipefail
     restore_owner() { chown -R "$HOST_UID:$HOST_GID" /work >/dev/null 2>&1 || true; }
     trap restore_owner EXIT
-    # PostgreSQL release tarballs include generated parser/scanner sources;
-    # do not add a live package-manager input to this pinned source build.
+
+    flex_nevra="$(rpm -qp --qf "%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n" /work/postgres-flex.rpm)"
+    [[ "$flex_nevra" == "$POSTGRES_FLEX_RPM_NEVRA" ]] || {
+      echo "Pinned PostgreSQL Flex RPM identity mismatch: $flex_nevra" >&2
+      exit 1
+    }
+    rpm -K /work/postgres-flex.rpm | grep -F "digests signatures OK" >/dev/null || {
+      echo "Pinned PostgreSQL Flex RPM signature/digest verification failed." >&2
+      exit 1
+    }
+    rpm -Uvh --nodeps --noscripts /work/postgres-flex.rpm >/dev/null
+    [[ "$(flex --version)" == "flex $POSTGRES_FLEX_VERSION" ]] || {
+      echo "Pinned PostgreSQL Flex executable version mismatch." >&2
+      exit 1
+    }
+    command -v m4 >/dev/null || {
+      echo "Pinned PostgreSQL build image no longer supplies m4 required by Flex." >&2
+      exit 1
+    }
+
     cd "/work/postgresql-${POSTGRES_VERSION}"
     ./configure --prefix=/usr/local/pg-build --without-readline --without-zlib --without-icu >/dev/null
     make AROPT=crsD -j2 >/dev/null
@@ -473,6 +499,7 @@ source_row shellcheck-source "$SHELLCHECK_VERSION" "https://github.com/koalaman/
 source_row miller "$MILLER_VERSION" "https://github.com/johnkerl/miller/releases/download/v$MILLER_VERSION/miller-$MILLER_VERSION-linux-amd64.tar.gz" "$MILLER_SHA256"
 source_row postgres-server-source "$POSTGRES_VERSION" "$POSTGRES_SOURCE_URL" "$POSTGRES_SOURCE_SHA256"
 source_row postgres-server-build-image manylinux_2_28_x86_64 "$POSTGRES_BUILD_IMAGE" "$POSTGRES_BUILD_IMAGE_SHA256"
+source_row postgres-server-build-flex "$POSTGRES_FLEX_RPM_NEVRA" "$POSTGRES_FLEX_RPM_URL" "$POSTGRES_FLEX_RPM_SHA256"
 source_row postgres-client "$POSTGRES_VERSION" "vendor/database/postgresql-client-$POSTGRES_VERSION-linux-x64-gnu.tar.gz" "$POSTGRES_CLIENT_SHA256"
 source_row pgtap "$PGTAP_VERSION" "vendor/pgtap/pgtap--$PGTAP_VERSION.sql" "generated-from-$PGTAP_SOURCE_SHA256"
 source_row plpgsql-check "$PLPGSQL_CHECK_VERSION" "vendor/database/plpgsql-check-$PLPGSQL_CHECK_VERSION-pg17-linux-x64-gnu.tar.gz" "$PLPGSQL_CHECK_SHA256"

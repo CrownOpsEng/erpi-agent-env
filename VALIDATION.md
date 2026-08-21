@@ -34,11 +34,11 @@ The accepted archive hash and exact source SHA belong in machine-generated `acce
 
 ## PostgreSQL source/native qualification
 
-The PostgreSQL server is not accepted from a prebuilt third-party binary bundle. Every full runtime build fetches the exact pinned official PostgreSQL source tarball, verifies its SHA-256, and builds the normal install prefix inside a digest-pinned manylinux 2.28 image. Optional readline, zlib, and ICU integrations are disabled to avoid unnecessary external runtime-library dependencies; the resulting ELF symbol floor and dynamic dependencies are checked before runtime acceptance.
+The PostgreSQL server is not accepted from a prebuilt third-party binary bundle. Every full runtime build fetches the exact pinned official PostgreSQL source tarball, verifies its SHA-256, and builds the normal install prefix inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10's normal build regenerates scanner sources, so its Flex prerequisite is also immutable: the builder verifies the exact pinned AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM SHA-256 and package identity/signature, installs that local RPM without dependency resolution or package scripts, and disables container networking for the PostgreSQL compilation. Flex is a build input recorded in provenance, not redistributed runtime payload. Deterministic GNU `ar` mode (`AROPT=crsD`) is required for PostgreSQL static archives. Optional readline, zlib, and ICU integrations are disabled to avoid unnecessary external runtime-library dependencies; the resulting ELF symbol floor and dynamic dependencies are checked before runtime acceptance.
 
 The source-controlled PostgreSQL client and plpgsql_check payloads remain qualified build inputs. Their pinned hashes are validated by source checks and by `build.sh` before extraction. Their existing promotion baseline is a controlled GLIBC 2.28 build from pinned PostgreSQL 17.10/plpgsql_check sources; qualified maximum GLIBC requirements were 2.25 for the client payload and 2.17 for plpgsql_check. `scripts/rebuild-qualified-database-assets.sh` retains their pinned maintainer reproduction path.
 
-Any future server source, configure, build-image, client, or extension-native change requires full source validation and runtime acceptance. A harness defect is fixed and the complete relevant qualification is rerun; partial progress is not promoted as success.
+Any future server source, configure, build-image, Flex build-input, client, or extension-native change requires full source validation and runtime acceptance. A harness defect is fixed and the complete relevant qualification is rerun; partial progress is not promoted as success.
 
 ## Node capsule boundary
 

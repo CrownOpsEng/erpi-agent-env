@@ -188,10 +188,27 @@ grep -F 'POSTGRES_SOURCE_URL="https://ftp.postgresql.org/pub/source/v17.10/postg
 grep -F 'POSTGRES_SOURCE_SHA256="078a03516dcdbdb705fecaf415ea3d13a956c589e46f09fed68a06fb00598c90"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGRES_BUILD_IMAGE="quay.io/pypa/manylinux_2_28_x86_64"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGRES_BUILD_IMAGE_SHA256="0c87ccb5996dab6c3b7612ee4fda7b80c4ab3c44a86c2541e4a872afdf4f131b"' "$ROOT/versions.env" >/dev/null
-if grep -R -nE 'dnf[[:space:]].*install[[:space:]].*flex|yum[[:space:]].*install[[:space:]].*flex' "$ROOT/build.sh" "$ROOT/scripts/rebuild-qualified-database-assets.sh"; then
-  echo "PostgreSQL release-tarball builds must not depend on a live Flex package-manager install." >&2
+grep -F 'POSTGRES_FLEX_VERSION="2.6.1"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGRES_FLEX_RPM_NEVRA="flex-2.6.1-9.el8.x86_64"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGRES_FLEX_RPM_URL="https://repo.almalinux.org/almalinux/8.10/AppStream/x86_64/os/Packages/flex-2.6.1-9.el8.x86_64.rpm"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGRES_FLEX_RPM_SHA256="5da3a77e64e6692695e93f67774faec62c782bb5ad9595ede924110c3fc44a21"' "$ROOT/versions.env" >/dev/null
+if grep -R -nE 'dnf[[:space:]].*install|yum[[:space:]].*install' "$ROOT/build.sh" "$ROOT/scripts/rebuild-qualified-database-assets.sh"; then
+  echo "Pinned PostgreSQL builds must not resolve build packages from live package repositories." >&2
   exit 1
 fi
+grep -F -- 'docker run --rm --network none' "$ROOT/build.sh" >/dev/null
+grep -F -- 'docker run --rm --network none' "$ROOT/scripts/rebuild-qualified-database-assets.sh" >/dev/null
+grep -F 'rpm -Uvh --nodeps --noscripts /work/postgres-flex.rpm' "$ROOT/build.sh" >/dev/null
+grep -F 'rpm -Uvh --nodeps --noscripts /work/postgres-flex.rpm' "$ROOT/scripts/rebuild-qualified-database-assets.sh" >/dev/null
+grep -F 'make AROPT=crsD -j2' "$ROOT/build.sh" >/dev/null
+grep -F 'make AROPT=crsD -j2' "$ROOT/scripts/rebuild-qualified-database-assets.sh" >/dev/null
+grep -F 'source_row postgres-server-build-flex' "$ROOT/build.sh" >/dev/null
+grep -F "'postgres-server-build-flex'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
+for workflow in "$ROOT/.github/workflows/accept-runtime.yml" "$ROOT/.github/workflows/build-dist.yml"; do
+  grep -F 'name: Compute builder download cache key' "$workflow" >/dev/null
+  grep -F 'key: magnet-agent-env-linux-x64-${{ steps.download-cache.outputs.key }}' "$workflow" >/dev/null
+  ! grep -F "hashFiles('versions.env'" "$workflow" >/dev/null
+done
 [[ ! -e "$ROOT/vendor/database/postgres-server-17.10-linux-x64.txz" ]] || { echo 'Opaque prebuilt PostgreSQL server must not return.' >&2; exit 1; }
 [[ ! -e "$ROOT/scripts/qualify-postgres-server.sh" ]] || { echo 'Temporary PostgreSQL qualification script must not remain in the live tree.' >&2; exit 1; }
 ! grep -F 'qualify-postgres-server' "$ROOT/.github/workflows/build-dist.yml"
