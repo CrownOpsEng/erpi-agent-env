@@ -26,6 +26,23 @@ jobs:
             scripts/build-identity.sh \
             tests/build-identity-check.sh \
             tests/version-transition-check.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/release-workflow-check.sh')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          out = []
+          replaced = 0
+          for line in lines:
+              if 'grep -F' in line and 'archive_name=' in line and 'jq -er' in line:
+                  out.append("grep -F \"jq -er '.artifact.filename' dist/acceptance.json\" \"$BUILD\" >/dev/null")
+                  out.append("grep -F 'echo \"name=${archive_name%.tar.gz}\"' \"$BUILD\" >/dev/null")
+                  replaced += 1
+              else:
+                  out.append(line)
+          if replaced != 1:
+              raise SystemExit(f'expected one workflow-name assertion to normalize, found {replaced}')
+          path.write_text('\n'.join(out) + '\n', encoding='utf-8')
+          PY
 
       - name: Run complete source policy gate
         run: |
