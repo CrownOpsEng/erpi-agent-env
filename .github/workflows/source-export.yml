@@ -1,0 +1,42 @@
+name: Temporary source bundle export
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact topic branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/git-handoff-restore
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Create complete Git bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git bundle create /tmp/repository.bundle --all
+          git bundle verify /tmp/repository.bundle
+          git rev-parse HEAD > /tmp/SOURCE_SHA
+          printf '%s\n' 'agent/git-handoff-restore' > /tmp/SOURCE_BRANCH
+          printf '%s\n' 'CrownOpsEng/magnet-photos-env' > /tmp/REPOSITORY
+      - name: Upload source handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: temporary-source-handoff
+          path: |
+            /tmp/repository.bundle
+            /tmp/SOURCE_SHA
+            /tmp/SOURCE_BRANCH
+            /tmp/REPOSITORY
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
