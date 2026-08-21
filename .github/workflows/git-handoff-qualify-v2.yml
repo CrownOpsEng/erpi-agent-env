@@ -1,0 +1,130 @@
+name: Qualify Git handoff restore v2
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out qualification branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/git-handoff-restore-v2
+          fetch-depth: 0
+
+      - name: Verify and apply permanent patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd .github/git-handoff-patches
+            sha256sum -c SHA256SUMS
+          )
+          for patch in .github/git-handoff-patches/*.patch; do
+            git apply --check "$patch"
+            git apply "$patch"
+          done
+          test -x templates/scripts/git-handoff.py
+          test -x tests/git-handoff-check.sh
+          rm -rf .github/git-handoff-patches
+          rm -f .github/workflows/git-handoff-qualify-v2.yml
+          git diff --check
+
+      - name: Run complete source policy gate
+        run: |
+          ./tests/static-check.sh
+          ./tests/commit-message-check.sh
+          ./tests/commit-range-check.sh
+          ./tests/release-workflow-check.sh
+
+      - name: Commit exact permanent tree locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            README.md VALIDATION.md build.sh payload/AGENTS.md.in \
+            templates/RUNTIME-README.md templates/bin/agent-env \
+            templates/scripts/git-handoff.py templates/scripts/selftest.sh \
+            tests/git-handoff-check.sh tests/static-check.sh
+          git add -u -- .github/git-handoff-patches .github/workflows/git-handoff-qualify-v2.yml
+          git diff --cached --check
+          cat > /tmp/commit-message <<'MSG'
+          feat(git): add connector handoff restore
+
+          Why:
+          ChatGPT sandboxes can have usable local Git while shell GitHub networking is blocked. The environment already detects that boundary, but agents lacked a deterministic way to turn a connector-downloaded repository artifact into a normal local Git worktree for coherent editing, diffs, tests, and Git semantics.
+
+          What:
+          Add a credentialless and networkless git-handoff restore command for a strict four-file Git-bundle ZIP contract. Validate ZIP shape and metadata, reject prerequisite bundles and unsafe entries, isolate Git from inherited/global/system configuration and host templates, reconstruct history/tags/remote refs from local bytes, establish only the canonical GitHub origin/upstream, verify integrity and clean status, and fail without partial destination state. Document the boundary and add source/runtime positive and negative coverage.
+
+          Validation:
+          The permanent tree passed the repository static, commit-policy, commit-range, and release-workflow checks before this commit. The qualification workflow next performs the complete committed-source runtime build and relocation/self-test acceptance. BUNDLE_VERSION remains 0.2.0-dev; this is development testing, not an RC cut.
+          MSG
+          sed -i 's/^          //' /tmp/commit-message
+          git commit -F /tmp/commit-message
+          test -z "$(git status --porcelain --untracked-files=all)"
+
+      - name: Build and exercise complete runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          MAGNET_AGENT_SOURCE_COMMIT="$source_sha" ./build.sh --out /tmp/git-handoff-dist
+          printf '%s\n' "$source_sha" > /tmp/qualified-source-sha
+          git rev-parse HEAD^{tree} > /tmp/qualified-tree-sha
+          ls -l /tmp/git-handoff-dist
+
+      - name: Publish qualified branch handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git reset --soft origin/agent/git-handoff-restore-v2
+          git restore --source=origin/agent/git-handoff-restore-v2 --staged --worktree -- \
+            .github/git-handoff-patches \
+            .github/workflows/git-handoff-qualify-v2.yml
+          git diff --cached --check
+          cat > /tmp/handoff-message <<'MSG'
+          test(git): stage qualified handoff restore
+
+          Why:
+          The workflow-free permanent tree passed source validation and full runtime acceptance, but the Actions token intentionally must not rewrite or delete workflow files on the topic branch.
+
+          What:
+          Publish only the qualified non-workflow product changes while retaining the unchanged temporary patch inputs and qualification workflow. The connected GitHub capability can remove those temporary paths and compare the resulting tree SHA with the qualified permanent tree before promotion.
+
+          Validation:
+          Immediately before this checkpoint, the exact permanent tree passed all source gates and the complete committed-source build, including relocation, archive extraction, runtime self-test, Git handoff positive/negative behavior, and source-bound development artifact naming.
+          MSG
+          sed -i 's/^          //' /tmp/handoff-message
+          git commit -F /tmp/handoff-message
+          git push origin HEAD:agent/git-handoff-restore-v2
+
+      - name: Upload qualified identity
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: git-handoff-v2-qualified-identity
+          path: |
+            /tmp/qualified-source-sha
+            /tmp/qualified-tree-sha
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
+
+      - name: Upload qualified development runtime
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: git-handoff-v2-qualified-runtime
+          path: |
+            /tmp/git-handoff-dist/*.tar.gz
+            /tmp/git-handoff-dist/*.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2

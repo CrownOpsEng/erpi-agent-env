@@ -1,0 +1,309 @@
+diff --git a/templates/scripts/git-handoff.py b/templates/scripts/git-handoff.py
+new file mode 100755
+index 0000000..fa24caf
+--- /dev/null
++++ b/templates/scripts/git-handoff.py
+@@ -0,0 +1,303 @@
++#!/usr/bin/env python3
++"""Restore a connector-downloaded Git bundle handoff into a clean local worktree."""
++
++from __future__ import annotations
++
++import argparse
++import os
++import pathlib
++import re
++import shutil
++import stat
++import subprocess
++import sys
++import tempfile
++import zipfile
++
++EXPECTED_MEMBERS = {"repository.bundle", "SOURCE_SHA", "SOURCE_BRANCH", "REPOSITORY"}
++SHA_RE = re.compile(r"[0-9a-f]{40}")
++REPOSITORY_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
++MAX_METADATA_BYTES = 4096
++GIT_TIMEOUT_SECONDS = 120
++
++
++class HandoffError(RuntimeError):
++    pass
++
++
++def fail(message: str) -> "NoReturn":
++    raise HandoffError(message)
++
++
++def isolated_git_env(home: pathlib.Path) -> dict[str, str]:
++    env = {
++        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
++        "HOME": str(home),
++        "XDG_CONFIG_HOME": str(home / ".config"),
++        "GIT_CONFIG_NOSYSTEM": "1",
++        "GIT_CONFIG_GLOBAL": os.devnull,
++        "GIT_TERMINAL_PROMPT": "0",
++        "GIT_ASKPASS": "/bin/false",
++    }
++    for key in ("LANG", "LC_ALL", "LC_CTYPE", "TMPDIR"):
++        if key in os.environ:
++            env[key] = os.environ[key]
++    return env
++
++
++def git_run(
++    git: str,
++    env: dict[str, str],
++    *args: str,
++    check: bool = True,
++) -> subprocess.CompletedProcess[str]:
++    try:
++        proc = subprocess.run(
++            [git, *args],
++            env=env,
++            text=True,
++            stdout=subprocess.PIPE,
++            stderr=subprocess.STDOUT,
++            check=False,
++            timeout=GIT_TIMEOUT_SECONDS,
++        )
++    except (OSError, subprocess.TimeoutExpired) as exc:
++        fail(f"Git command could not complete: {exc}")
++    if check and proc.returncode != 0:
++        output = proc.stdout.strip()
++        suffix = f"\n{output}" if output else ""
++        fail(f"Git command failed ({' '.join(args)}).{suffix}")
++    return proc
++
++
++def read_metadata(zf: zipfile.ZipFile, name: str) -> str:
++    info = zf.getinfo(name)
++    if info.file_size > MAX_METADATA_BYTES:
++        fail(f"{name} exceeds the metadata size limit")
++    raw = zf.read(info)
++    try:
++        text = raw.decode("utf-8")
++    except UnicodeDecodeError as exc:
++        fail(f"{name} is not valid UTF-8: {exc}")
++    if "\x00" in text:
++        fail(f"{name} contains a NUL byte")
++    if text.endswith("\n"):
++        text = text[:-1]
++    if "\n" in text or "\r" in text or text != text.strip() or not text:
++        fail(f"{name} must contain exactly one non-empty canonical line")
++    return text
++
++
++def validate_zip(zf: zipfile.ZipFile) -> None:
++    infos = zf.infolist()
++    names = [info.filename for info in infos]
++    if len(names) != len(set(names)):
++        fail("Handoff ZIP contains duplicate member names")
++    if set(names) != EXPECTED_MEMBERS:
++        missing = sorted(EXPECTED_MEMBERS - set(names))
++        unexpected = sorted(set(names) - EXPECTED_MEMBERS)
++        fail(f"Handoff ZIP member set mismatch; missing={missing}, unexpected={unexpected}")
++    for info in infos:
++        if info.is_dir():
++            fail(f"Handoff ZIP contains a directory entry: {info.filename}")
++        if info.flag_bits & 0x1:
++            fail(f"Encrypted ZIP members are not supported: {info.filename}")
++        mode = info.external_attr >> 16
++        if mode and stat.S_ISLNK(mode):
++            fail(f"Handoff ZIP contains a symlink-like member: {info.filename}")
++
++
++def validate_metadata(
++    git: str,
++    env: dict[str, str],
++    source_sha: str,
++    source_branch: str,
++    repository: str,
++) -> None:
++    if not SHA_RE.fullmatch(source_sha):
++        fail("SOURCE_SHA must be an exact 40-character lowercase Git SHA")
++    if not REPOSITORY_RE.fullmatch(repository):
++        fail("REPOSITORY must be a canonical GitHub owner/name")
++    owner, repo = repository.split("/", 1)
++    if owner in {".", ".."} or repo in {".", ".."}:
++        fail("REPOSITORY contains an invalid owner or repository name")
++    branch_check = git_run(git, env, "check-ref-format", "--branch", source_branch, check=False)
++    if branch_check.returncode != 0:
++        fail(f"SOURCE_BRANCH is not a valid Git branch name: {source_branch}")
++
++
++def copy_bundle(zf: zipfile.ZipFile, target: pathlib.Path) -> None:
++    info = zf.getinfo("repository.bundle")
++    if info.file_size <= 0:
++        fail("repository.bundle is empty")
++    try:
++        with zf.open(info, "r") as source, target.open("xb") as output:
++            shutil.copyfileobj(source, output, length=1024 * 1024)
++    except (OSError, zipfile.BadZipFile) as exc:
++        fail(f"Could not extract repository.bundle safely: {exc}")
++    if target.stat().st_size != info.file_size:
++        fail("Extracted repository.bundle size does not match ZIP metadata")
++
++
++def bundle_branch_tip(git: str, env: dict[str, str], bundle: pathlib.Path, branch: str) -> str:
++    ref = f"refs/heads/{branch}"
++    proc = git_run(git, env, "bundle", "list-heads", str(bundle), ref)
++    lines = [line for line in proc.stdout.splitlines() if line.strip()]
++    if len(lines) != 1:
++        fail(f"repository.bundle must contain exactly one {ref} tip")
++    parts = lines[0].split(None, 1)
++    if len(parts) != 2 or parts[1] != ref or not SHA_RE.fullmatch(parts[0]):
++        fail(f"repository.bundle returned an invalid {ref} record")
++    return parts[0]
++
++
++def restore(artifact: pathlib.Path, destination: pathlib.Path) -> None:
++    git = shutil.which("git")
++    if not git:
++        fail("Host Git is unavailable; git-handoff restore requires local Git")
++    if artifact.is_symlink() or not artifact.is_file():
++        fail(f"Handoff artifact must be a regular file, not a symlink: {artifact}")
++    if os.path.lexists(destination):
++        fail(f"Destination already exists: {destination}")
++
++    parent = destination.parent
++    if not parent.is_dir():
++        fail(f"Destination parent directory does not exist: {parent}")
++
++    with tempfile.TemporaryDirectory(prefix=f".{destination.name}.git-handoff-", dir=parent) as raw_tmp:
++        tmp = pathlib.Path(raw_tmp)
++        home = tmp / "home"
++        home.mkdir()
++        env = isolated_git_env(home)
++        bundle = tmp / "repository.bundle"
++        staged = tmp / "worktree"
++        verify_repo = tmp / "verify.git"
++        git_template = tmp / "git-template"
++        git_template.mkdir()
++
++        try:
++            with zipfile.ZipFile(artifact, "r") as zf:
++                validate_zip(zf)
++                source_sha = read_metadata(zf, "SOURCE_SHA")
++                source_branch = read_metadata(zf, "SOURCE_BRANCH")
++                repository = read_metadata(zf, "REPOSITORY")
++                validate_metadata(git, env, source_sha, source_branch, repository)
++                copy_bundle(zf, bundle)
++        except (OSError, zipfile.BadZipFile, KeyError) as exc:
++            fail(f"Invalid handoff ZIP: {exc}")
++
++        # Verification in an empty repository deliberately rejects incremental
++        # bundles whose prerequisites are not included in the artifact.
++        git_run(git, env, "init", "--bare", "--quiet", f"--template={git_template}", str(verify_repo))
++        git_run(git, env, "-C", str(verify_repo), "bundle", "verify", str(bundle))
++        tip = bundle_branch_tip(git, env, bundle, source_branch)
++        if tip != source_sha:
++            fail(
++                f"Bundle branch tip does not match SOURCE_SHA: refs/heads/{source_branch}={tip}, metadata={source_sha}"
++            )
++
++        git_run(git, env, "init", "--quiet", f"--template={git_template}", str(staged))
++        git_run(
++            git,
++            env,
++            "-C",
++            str(staged),
++            "fetch",
++            "--quiet",
++            "--no-write-fetch-head",
++            str(bundle),
++            "+refs/heads/*:refs/remotes/origin/*",
++            "+refs/tags/*:refs/tags/*",
++        )
++        remote_ref = f"refs/remotes/origin/{source_branch}"
++        fetched_tip = git_run(git, env, "-C", str(staged), "rev-parse", "--verify", remote_ref).stdout.strip()
++        if fetched_tip != source_sha:
++            fail(f"Fetched {remote_ref} does not match SOURCE_SHA")
++
++        origin = f"https://github.com/{repository}.git"
++        git_run(git, env, "-C", str(staged), "remote", "add", "origin", origin)
++        git_run(
++            git,
++            env,
++            "-C",
++            str(staged),
++            "checkout",
++            "--quiet",
++            "-b",
++            source_branch,
++            "--track",
++            f"origin/{source_branch}",
++        )
++        git_run(git, env, "-C", str(staged), "fsck", "--full")
++
++        head = git_run(git, env, "-C", str(staged), "rev-parse", "HEAD").stdout.strip()
++        upstream = git_run(git, env, "-C", str(staged), "rev-parse", "@{upstream}").stdout.strip()
++        current_branch = git_run(git, env, "-C", str(staged), "branch", "--show-current").stdout.strip()
++        remote_url = git_run(git, env, "-C", str(staged), "remote", "get-url", "origin").stdout.strip()
++        status_text = git_run(
++            git,
++            env,
++            "-C",
++            str(staged),
++            "status",
++            "--porcelain=v1",
++            "--untracked-files=all",
++        ).stdout.strip()
++        sensitive = git_run(
++            git,
++            env,
++            "-C",
++            str(staged),
++            "config",
++            "--local",
++            "--get-regexp",
++            r"^(credential\.|http\..*\.extraheader|include\.|includeif\.)",
++            check=False,
++        )
++        if sensitive.returncode not in (0, 1):
++            fail("Could not inspect restored repository for sensitive Git configuration")
++        if head != source_sha or upstream != source_sha:
++            fail("Restored HEAD/upstream does not match SOURCE_SHA")
++        if current_branch != source_branch:
++            fail("Restored local branch does not match SOURCE_BRANCH")
++        if remote_url != origin:
++            fail("Restored origin URL is not the canonical GitHub repository URL")
++        if status_text:
++            fail("Restored worktree is not clean")
++        if sensitive.stdout.strip():
++            fail("Restored repository contains credential/header/include Git configuration")
++
++        try:
++            os.replace(staged, destination)
++        except OSError as exc:
++            fail(f"Could not move verified worktree into destination: {exc}")
++
++    print(f"repository={repository}")
++    print(f"branch={source_branch}")
++    print(f"source_sha={source_sha}")
++    print(f"destination={destination}")
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(
++        description="Restore a validated connector-downloaded Git bundle handoff into a fresh local worktree."
++    )
++    subparsers = parser.add_subparsers(dest="command", required=True)
++    restore_parser = subparsers.add_parser("restore")
++    restore_parser.add_argument("artifact", type=pathlib.Path)
++    restore_parser.add_argument("destination", type=pathlib.Path)
++    args = parser.parse_args()
++
++    try:
++        if args.command == "restore":
++            restore(args.artifact, args.destination)
++        else:  # pragma: no cover - argparse prevents this
++            parser.error(f"unsupported command: {args.command}")
++    except HandoffError as exc:
++        print(f"git-handoff: {exc}", file=sys.stderr)
++        return 1
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())

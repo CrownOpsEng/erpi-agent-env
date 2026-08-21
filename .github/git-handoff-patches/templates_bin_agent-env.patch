@@ -1,0 +1,26 @@
+diff --git a/templates/bin/agent-env b/templates/bin/agent-env
+index 6d0e0f3..b9969d5 100755
+--- a/templates/bin/agent-env
++++ b/templates/bin/agent-env
+@@ -31,6 +31,7 @@ Commands:
+   github                   Probe shell GitHub reachability, auth/API, and repo access
+   github-auth              Run browser/device GitHub OAuth when reachable, then verify it
+   github-git               Configure current-repo Git auth safely and verify push dry-run
++  git-handoff restore Z D  Restore a validated Git bundle handoff into a fresh worktree
+   git [ARGS...]            Run host Git with this environment active
+   selftest                 Exercise bundled capabilities and portability invariants
+   verify                   Verify immutable payload checksums and symlink topology
+@@ -89,6 +90,13 @@ case "$cmd" in
+   github) shift; exec "$ROOT/scripts/github.sh" status "$@" ;;
+   github-auth) shift; exec "$ROOT/scripts/github.sh" auth "$@" ;;
+   github-git) shift; exec "$ROOT/scripts/github.sh" git "$@" ;;
++  git-handoff)
++    shift
++    sub="${1:-}"
++    [[ "$sub" == restore ]] || { echo "Usage: agent-env git-handoff restore ARTIFACT.zip DEST" >&2; exit 2; }
++    shift
++    exec "$ROOT/env/bin/python" "$ROOT/scripts/git-handoff.py" restore "$@"
++    ;;
+   git)
+     shift
+     command -v git >/dev/null 2>&1 || { echo "Host Git is unavailable." >&2; exit 1; }

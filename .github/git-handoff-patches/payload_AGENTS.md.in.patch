@@ -1,0 +1,13 @@
+diff --git a/payload/AGENTS.md.in b/payload/AGENTS.md.in
+index 1770cdb..da23d54 100644
+--- a/payload/AGENTS.md.in
++++ b/payload/AGENTS.md.in
+@@ -9,7 +9,7 @@ This bundle is a verified local execution harness. It supplies capability; the c
+ 5. PostgreSQL is explicit capability, not ambient PATH. Use repository-owned database commands when defined; otherwise `agent-env postgres run ...` creates an isolated disposable local server and `agent-env pg TOOL ...` invokes a bundled client utility.
+ 6. `agent-env pg-delta plan` is plan-only and accepts only numeric-loopback live database targets. Upstream `apply`/`sync` are not exposed.
+ 7. Offline Node capsules never create project dependencies. `agent-env node-deps hydrate` acts only when the repository lock exactly matches a bundled package/version/integrity.
+-8. If shell GitHub is genuinely useful, run `agent-env github` once; use `agent-env github-git` only when the current HTTPS worktree actually needs Git credential wiring. Do not repeatedly retry known-blocked shell networking; use an available platform connector instead.
++8. If shell GitHub is genuinely useful, run `agent-env github` once; use `agent-env github-git` only when the current HTTPS worktree actually needs Git credential wiring. Do not repeatedly retry known-blocked shell networking. When a platform connector supplies a standard Git handoff ZIP, use `agent-env git-handoff restore ARTIFACT.zip DEST` to reconstruct a verified local worktree; otherwise keep remote operations in the connector.
+ 9. Credentials remain host/session state. The verified payload is immutable; caches, ad-hoc tools, disposable databases, and other mutable data belong under `state/`.
+ 10. Preserve one logical long-running validation. Give it an adequate outer timeout, or keep/supervise and poll that same process. Do not fragment a suite merely to satisfy an agent wrapper timeout.
+ 11. If target work needs a reusable capability this bundle does not provide and the shared execution layer is the correct owner, make the gap explicit and request/raise a bounded issue against `CrownOpsEng/magnet-photos-env` rather than normalizing a persistent workaround. Do not hide project dependencies in the toolbox.
