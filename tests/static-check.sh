@@ -188,6 +188,10 @@ grep -F 'POSTGRES_SOURCE_URL="https://ftp.postgresql.org/pub/source/v17.10/postg
 grep -F 'POSTGRES_SOURCE_SHA256="078a03516dcdbdb705fecaf415ea3d13a956c589e46f09fed68a06fb00598c90"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGRES_BUILD_IMAGE="quay.io/pypa/manylinux_2_28_x86_64"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGRES_BUILD_IMAGE_SHA256="0c87ccb5996dab6c3b7612ee4fda7b80c4ab3c44a86c2541e4a872afdf4f131b"' "$ROOT/versions.env" >/dev/null
+if grep -R -nE 'dnf[[:space:]].*install[[:space:]].*flex|yum[[:space:]].*install[[:space:]].*flex' "$ROOT/build.sh" "$ROOT/scripts/rebuild-qualified-database-assets.sh"; then
+  echo "PostgreSQL release-tarball builds must not depend on a live Flex package-manager install." >&2
+  exit 1
+fi
 [[ ! -e "$ROOT/vendor/database/postgres-server-17.10-linux-x64.txz" ]] || { echo 'Opaque prebuilt PostgreSQL server must not return.' >&2; exit 1; }
 [[ ! -e "$ROOT/scripts/qualify-postgres-server.sh" ]] || { echo 'Temporary PostgreSQL qualification script must not remain in the live tree.' >&2; exit 1; }
 ! grep -F 'qualify-postgres-server' "$ROOT/.github/workflows/build-dist.yml"

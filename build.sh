@@ -352,9 +352,8 @@ docker run --rm \
     set -euo pipefail
     restore_owner() { chown -R "$HOST_UID:$HOST_GID" /work >/dev/null 2>&1 || true; }
     trap restore_owner EXIT
-    # The pinned manylinux image lacks flex; PostgreSQL 17 configure checks for
-    # it even though the release tarball already contains generated sources.
-    dnf -y install flex >/dev/null
+    # PostgreSQL release tarballs include generated parser/scanner sources;
+    # do not add a live package-manager input to this pinned source build.
     cd "/work/postgresql-${POSTGRES_VERSION}"
     ./configure --prefix=/usr/local/pg-build --without-readline --without-zlib --without-icu >/dev/null
     make AROPT=crsD -j2 >/dev/null

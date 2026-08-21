@@ -28,7 +28,6 @@ IMAGE='quay.io/pypa/manylinux_2_28_x86_64@sha256:0c87ccb5996dab6c3b7612ee4fda7b8
 docker pull "$IMAGE" >/dev/null
 docker run --rm -v "$WORK:/work" "$IMAGE" bash -lc '
 set -euo pipefail
-dnf -y install flex >/dev/null
 cd /work/postgresql-17.10
 ./configure --prefix=/opt/pgbuild --without-readline --without-zlib --without-icu >/dev/null
 make -j2 >/dev/null
