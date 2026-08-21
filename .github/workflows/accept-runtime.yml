@@ -9,6 +9,7 @@ on:
       - versions.env
       - requirements.in
       - requirements.lock
+      - payload/**
       - scripts/**
       - templates/**
       - tests/**

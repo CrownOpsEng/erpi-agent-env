@@ -118,7 +118,7 @@ extract_single() {
   case "$archive" in
     *.tar.gz) tar -xzf "$archive" -C "$scratch" ;;
     *.tar.xz) tar -xJf "$archive" -C "$scratch" ;;
-    *) echo "Unsupported archive: $archive" >&2; exit 1 ;;
+    *) echo "Unsupported archive: $archive" >&2; exit 2 ;;
   esac
   local found
   found="$(find "$scratch" -type f -name "$pattern" -print -quit)"
@@ -137,7 +137,7 @@ if grep -Fq '@BUNDLE_VERSION@' "$BUILD/README.md"; then
   echo "Runtime README version placeholder was not rendered." >&2
   exit 1
 fi
-cp "$SELF_DIR/templates/AGENTS.md" "$BUILD/AGENTS.md"
+cp "$SELF_DIR/payload/AGENTS.md.in" "$BUILD/AGENTS.md"
 cp "$SELF_DIR/templates/THIRD-PARTY.md" "$BUILD/THIRD-PARTY.md"
 install -m 0644 "$SELF_DIR/vendor/licenses/THIRD-PARTY-LICENSES.md" "$BUILD/licenses/third-party/THIRD-PARTY-LICENSES.md"
 printf '%s\n' "$BUNDLE_VERSION" > "$BUILD/VERSION"

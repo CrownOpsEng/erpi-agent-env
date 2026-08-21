@@ -1,0 +1,16 @@
+# Agent routing
+
+This bundle is a verified local execution harness. It supplies capability; the current user and target repository remain authoritative for intent, dependencies, commands, safety, and architecture.
+
+1. Read the target repository's applicable `AGENTS.md` and supported command surface first. They define **what** work is permitted and how the project expects it to be invoked.
+2. For local execution that this bundle supports, prefer its verified capability over ad-hoc host installs, unpinned global substitutes, or remote/connector workarounds. A target repository's own pinned tool or command remains authoritative when it deliberately owns that capability.
+3. Use `agent-env capabilities` to discover the bundled surface, `agent-env help` for syntax, and `agent-env doctor` when host compatibility or an external capability is uncertain. Do not preload the full README just to discover tools.
+4. Use the local harness for design, analysis, build, configuration, and testing when it can perform the work. Use platform connectors/apps for external capabilities the bundle cannot supply or the host blocks—for example remote GitHub when shell networking is unavailable—not as a substitute for supported local verification.
+5. PostgreSQL is explicit capability, not ambient PATH. Use repository-owned database commands when defined; otherwise `agent-env postgres run ...` creates an isolated disposable local server and `agent-env pg TOOL ...` invokes a bundled client utility.
+6. `agent-env pg-delta plan` is plan-only and accepts only numeric-loopback live database targets. Upstream `apply`/`sync` are not exposed.
+7. Offline Node capsules never create project dependencies. `agent-env node-deps hydrate` acts only when the repository lock exactly matches a bundled package/version/integrity.
+8. If shell GitHub is genuinely useful, run `agent-env github` once; use `agent-env github-git` only when the current HTTPS worktree actually needs Git credential wiring. Do not repeatedly retry known-blocked shell networking; use an available platform connector instead.
+9. Credentials remain host/session state. The verified payload is immutable; caches, ad-hoc tools, disposable databases, and other mutable data belong under `state/`.
+10. Preserve one logical long-running validation. Give it an adequate outer timeout, or keep/supervise and poll that same process. Do not fragment a suite merely to satisfy an agent wrapper timeout.
+11. If target work needs a reusable capability this bundle does not provide and the shared execution layer is the correct owner, make the gap explicit and request/raise a bounded issue against `CrownOpsEng/magnet-photos-env` rather than normalizing a persistent workaround. Do not hide project dependencies in the toolbox.
+12. Read the runtime README only for deeper operating, recovery, provenance, or capability detail.

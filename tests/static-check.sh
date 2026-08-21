@@ -74,12 +74,16 @@ for path,record in pg_packages.items():
 print('hash-lock-and-vendor-shapes-ok')
 PY
 rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
-for file in requirements.lock templates/AGENTS.md templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE templates/scripts/pg-delta.mjs tests/node-deps-safety-check.sh; do
+for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE templates/scripts/pg-delta.mjs tests/node-deps-safety-check.sh; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime/build source missing: $file" >&2; exit 1; }
 done
-# The router is intentionally compact; large operational detail belongs in README/commands.
-router_bytes="$(wc -c < "$ROOT/templates/AGENTS.md")"
-(( router_bytes <= 3000 )) || { echo "templates/AGENTS.md is too large for a routing surface: ${router_bytes} bytes" >&2; exit 1; }
+# The shipped router is intentionally compact; large operational detail belongs in README/commands.
+router_bytes="$(wc -c < "$ROOT/payload/AGENTS.md.in")"
+(( router_bytes <= 3000 )) || { echo "payload/AGENTS.md.in is too large for a routing surface: ${router_bytes} bytes" >&2; exit 1; }
+[[ ! -e "$ROOT/payload/AGENTS.md" && ! -e "$ROOT/templates/AGENTS.md" ]] || {
+  echo "Shipped agent instructions must use the non-discoverable payload/AGENTS.md.in source name inside the builder repository." >&2
+  exit 1
+}
 # Authentication must remain host/session state, not redirected into the portable payload.
 if grep -R -nE 'export[[:space:]]+GH_CONFIG_DIR=|GH_CONFIG_DIR=' "$ROOT/templates"; then
   echo "Do not redirect GitHub credential storage into the portable bundle." >&2
@@ -149,7 +153,7 @@ grep -F 'GH_PROMPT_DISABLED=1 gh auth login --hostname "$HOST" --git-protocol ht
 grep -F "git config --local --add credential.https://github.com.helper '!gh auth git-credential'" "$ROOT/templates/scripts/github.sh" >/dev/null
 grep -F 'git push --dry-run --no-verify' "$ROOT/templates/scripts/github.sh" >/dev/null
 grep -F 'github-git' "$ROOT/templates/bin/agent-env" >/dev/null
-grep -F 'github-git' "$ROOT/templates/AGENTS.md" >/dev/null
+grep -F 'github-git' "$ROOT/payload/AGENTS.md.in" >/dev/null
 if grep -R -nF 'gh auth setup-git' "$ROOT/templates/scripts" "$ROOT/templates/bin"; then
   echo "Do not persist the portable gh path with gh auth setup-git." >&2
   exit 1
@@ -246,7 +250,7 @@ grep -F "probe_env['NO_PROXY']='127.0.0.1,localhost'" "$ROOT/templates/scripts/s
 grep -F "dead_proxy='http://127.0.0.1:9'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
 grep -F 'agent-env postgres run' "$ROOT/templates/RUNTIME-README.md" >/dev/null
 grep -F 'agent-env node-deps hydrate' "$ROOT/templates/RUNTIME-README.md" >/dev/null
-grep -F 'Do not fragment a suite merely to satisfy an agent wrapper timeout.' "$ROOT/templates/AGENTS.md" >/dev/null
+grep -F 'Do not fragment a suite merely to satisfy an agent wrapper timeout.' "$ROOT/payload/AGENTS.md.in" >/dev/null
 grep -F 'Unsupported bundled PostgreSQL client tool' "$ROOT/templates/bin/agent-env" >/dev/null
 grep -F 'DATABASE_URL' "$ROOT/templates/scripts/postgres.py" >/dev/null
 grep -F '127.0.0.1' "$ROOT/templates/scripts/postgres.py" >/dev/null
