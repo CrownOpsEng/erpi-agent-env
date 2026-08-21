@@ -1,0 +1,31 @@
+name: Qualify PostgREST asset
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fetch and inspect pinned upstream asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/PostgREST/postgrest/releases/download/v14.16/postgrest-v14.16-linux-static-x86-64.tar.xz'
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 4 --retry-all-errors --connect-timeout 20 -o postgrest.tar.xz "$url"
+          echo 'POSTGREST_ASSET_SHA256:'
+          sha256sum postgrest.tar.xz
+          mkdir extracted
+          tar -xJf postgrest.tar.xz -C extracted
+          echo 'POSTGREST_ARCHIVE_CONTENTS:'
+          find extracted -maxdepth 2 -type f -printf '%P\n' | LC_ALL=C sort
+          test -x extracted/postgrest
+          echo 'POSTGREST_VERSION:'
+          extracted/postgrest --version
+          echo 'POSTGREST_FILE:'
+          file extracted/postgrest
+          echo 'POSTGREST_LDD:'
+          ldd extracted/postgrest || true
