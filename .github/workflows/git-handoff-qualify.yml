@@ -1,0 +1,113 @@
+name: Qualify Git handoff restore
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out qualification branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/git-handoff-restore
+          fetch-depth: 0
+
+      - name: Apply permanent source transformation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/git-handoff-promote.py
+          chmod 0755 templates/scripts/git-handoff.py tests/git-handoff-check.sh
+          rm -f .github/git-handoff-promote.py .github/workflows/git-handoff-qualify.yml
+
+      - name: Run complete source policy gate
+        run: |
+          ./tests/static-check.sh
+          ./tests/commit-message-check.sh
+          ./tests/commit-range-check.sh
+          ./tests/release-workflow-check.sh
+
+      - name: Commit exact permanent tree locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          cat > /tmp/commit-message <<'MSG'
+          feat(git): add connector handoff restore
+
+          Why:
+          ChatGPT execution sandboxes can have usable local Git while shell GitHub networking is blocked. The environment already detects that boundary, but agents still lacked a deterministic local bridge from a connector-downloaded repository artifact to a normal Git worktree.
+
+          What:
+          Add a bounded git-handoff restore command for self-contained Git bundle ZIPs. Validate the exact repository/branch/SHA artifact contract, reject unsafe ZIPs and prerequisite bundles, isolate host Git from inherited/global/system configuration, reconstruct only from local bundle bytes, establish a canonical GitHub origin/upstream, verify integrity and a clean worktree, and remove partial state on failure. Document the consumer routing boundary and add source/runtime positive and negative coverage.
+
+          Validation:
+          The permanent tree passed the repository source policy gates before this commit. The qualification workflow next builds and exercises the complete committed runtime, including relocation and the real shipped git-handoff command. BUNDLE_VERSION remains 0.2.0-dev; this is development testing, not an RC cut.
+          MSG
+          sed -i 's/^          //' /tmp/commit-message
+          git commit -F /tmp/commit-message
+          test -z "$(git status --porcelain --untracked-files=all)"
+
+      - name: Build and exercise complete runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          MAGNET_AGENT_SOURCE_COMMIT="$source_sha" ./build.sh --out /tmp/git-handoff-dist
+          printf '%s\n' "$source_sha" > /tmp/qualified-source-sha
+          git rev-parse HEAD^{tree} > /tmp/qualified-tree-sha
+          ls -l /tmp/git-handoff-dist
+
+      - name: Publish qualified branch handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git reset --soft origin/agent/git-handoff-restore
+          git restore --source=origin/agent/git-handoff-restore --staged --worktree -- .github/workflows/git-handoff-qualify.yml
+          git diff --cached --check
+          cat > /tmp/handoff-message <<'MSG'
+          test(git): stage qualified handoff restore
+
+          Why:
+          The permanent workflow-free tree passed source validation and full runtime acceptance. The temporary qualifier itself must remain on the topic branch because the Actions token must not modify workflow files.
+
+          What:
+          Publish the qualified permanent non-workflow changes while retaining the unchanged temporary qualification workflow. The connected GitHub capability can remove that one temporary file and verify the resulting tree identity before promotion.
+
+          Validation:
+          Immediately before this checkpoint, the exact permanent tree passed all source gates and the complete committed-source build, including relocation, archive extraction, runtime self-test, Git handoff positive/negative behavior, and source-bound development artifact naming.
+          MSG
+          sed -i 's/^          //' /tmp/handoff-message
+          git commit -F /tmp/handoff-message
+          git push origin HEAD:agent/git-handoff-restore
+
+      - name: Upload qualified identity
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: git-handoff-qualified-identity
+          path: |
+            /tmp/qualified-source-sha
+            /tmp/qualified-tree-sha
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
+
+      - name: Upload qualified development runtime
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: git-handoff-qualified-runtime
+          path: |
+            /tmp/git-handoff-dist/*.tar.gz
+            /tmp/git-handoff-dist/*.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
