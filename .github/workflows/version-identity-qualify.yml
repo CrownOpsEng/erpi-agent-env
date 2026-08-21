@@ -22,6 +22,10 @@ jobs:
         run: |
           python3 .github/version-identity-promoter-fix.py
           python3 .github/version-identity-promote.py
+          chmod 0755 \
+            scripts/build-identity.sh \
+            tests/build-identity-check.sh \
+            tests/version-transition-check.sh
 
       - name: Run complete source policy gate
         run: |
