@@ -29,6 +29,8 @@ agent-env pgtap tests/database/*.test.sql
 
 By default the bootstrap superuser is named `postgres`. Use `--bootstrap-user NAME` when privilege emulation requires a different bootstrap identity—for example so the role named `postgres` can instead be created as a non-superuser migration principal. The selected bootstrap identity is also exported to the child command as `PGUSER` and in `DATABASE_URL`; all other isolation, cleanup, and loopback-only behavior is unchanged.
 
+Provider-specific role/configuration state remains target-repository bootstrap data, not environment policy. PostgreSQL accepts unknown two-part configuration names as custom placeholders, but those placeholders are superuser-settable by default; when a managed platform grants a non-superuser migration principal permission to persist one, model that explicitly from the alternate bootstrap superuser with `GRANT SET ON PARAMETER "provider.setting" TO migration_role` before replaying migrations. A `permission denied to set parameter` error therefore calls for checking the target platform's parameter ACLs rather than assuming plain PostgreSQL cannot represent the setting.
+
 Unix-domain sockets are deliberately disabled for this disposable runtime. All bundled database clients target `127.0.0.1`, so disabling unused sockets keeps database startup independent of the relocated bundle pathname and avoids Linux Unix-socket pathname limits under deep hostile relocation.
 
 The runtime includes pgTAP 1.3.3, plpgsql_check 2.8.11, pgbench, pg_dump/pg_restore, pg_amcheck, pg_checksums and normal client helpers. Project-specific compatibility roles, migrations, fixture data, test expectations, and production credentials do not belong in this bundle.
