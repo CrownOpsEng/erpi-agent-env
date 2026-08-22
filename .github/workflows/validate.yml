@@ -33,9 +33,18 @@ jobs:
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: ./scripts/check-commit-range.sh "$BASE_SHA" "$HEAD_SHA"
 
+      - name: Check pull request review record
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s\n' "$PR_BODY" | python3 scripts/check-pr-record.py --title "$PR_TITLE"
+
       - name: Run builder static checks
         run: |
           ./tests/static-check.sh
           ./tests/commit-message-check.sh
           ./tests/commit-range-check.sh
+          ./tests/pr-record-check.sh
           ./tests/release-workflow-check.sh

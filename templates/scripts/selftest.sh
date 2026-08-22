@@ -46,14 +46,21 @@ python - <<'PY_META'
 import csv, hashlib, json, os, pathlib, re
 root=pathlib.Path(os.environ['MAGNET_AGENT_ENV'])
 env=json.loads((root/'manifest/environment.json').read_text(encoding='utf-8'))
-bundle_version=env['bundle_version']
-build_id=env['build_id']
-source_commit=env['source_commit']
+product_version=env['product_version']
+source=env['source']
+source_commit=source['commit']
+source_description=source['description']
+source_base_tag=source['base_tag']
+source_distance=source['distance']
+assert re.fullmatch(r'\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?',product_version),product_version
 assert re.fullmatch(r'[0-9a-f]{40}',source_commit),source_commit
-if bundle_version.endswith('-dev'):
-    assert build_id==f'{bundle_version}+g{source_commit[:12]}',(bundle_version,build_id,source_commit)
+assert re.fullmatch(r'v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?',source_base_tag),source_base_tag
+assert isinstance(source_distance,int) and source_distance >= 0,source_distance
+if source_distance == 0:
+    assert source_description == source_base_tag,(source_description,source_base_tag)
+    assert product_version == source_base_tag[1:],(product_version,source_base_tag)
 else:
-    assert build_id==bundle_version,(bundle_version,build_id)
+    assert source_description == f'{source_base_tag}-{source_distance}-g{source_commit[:12]}',source_description
 python_meta=env['python_provenance']
 assert python_meta['version']=='3.13.14'
 assert python_meta['build']=='20260805'

@@ -14,8 +14,8 @@ usage() {
   cat <<USAGE
 Usage: ./build.sh [--out DIR] [--cache DIR] [--keep-work]
 
-Build Magnet Agent Environment ${BUNDLE_VERSION} for ${TARGET}.
-Development archive identity is derived from the exact committed source; exported source trees must set MAGNET_AGENT_SOURCE_COMMIT=<40-hex-sha>.
+Build Magnet Agent Environment product ${PRODUCT_VERSION} for ${TARGET}.
+Artifact identity is derived from Git release/prerelease ancestry. Exported source trees without .git must provide MAGNET_AGENT_SOURCE_COMMIT, MAGNET_AGENT_SOURCE_BASE_TAG, MAGNET_AGENT_SOURCE_DISTANCE, and MAGNET_AGENT_SOURCE_DESCRIPTION.
 Requires an internet-connected supported Linux x86-64 host (kernel >= ${MIN_KERNEL_VERSION}, glibc >= ${MIN_GLIBC_VERSION}) with a working Docker daemon. No sudo is used.
 USAGE
 }
@@ -31,30 +31,76 @@ while [[ $# -gt 0 ]]; do
 done
 
 SOURCE_COMMIT="${MAGNET_AGENT_SOURCE_COMMIT:-}"
+SOURCE_BASE_TAG="${MAGNET_AGENT_SOURCE_BASE_TAG:-}"
+SOURCE_DISTANCE="${MAGNET_AGENT_SOURCE_DISTANCE:-}"
+SOURCE_DESCRIPTION="${MAGNET_AGENT_SOURCE_DESCRIPTION:-}"
+
 if command -v git >/dev/null 2>&1 && git -C "$SELF_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   CHECKOUT_COMMIT="$(git -C "$SELF_DIR" rev-parse HEAD)"
-  if [[ -n "$SOURCE_COMMIT" && "$SOURCE_COMMIT" != "$CHECKOUT_COMMIT" ]]; then
-    echo "MAGNET_AGENT_SOURCE_COMMIT $SOURCE_COMMIT does not match checked-out source $CHECKOUT_COMMIT." >&2
-    exit 1
-  fi
-  SOURCE_COMMIT="$CHECKOUT_COMMIT"
   SOURCE_STATUS="$(git -C "$SELF_DIR" status --porcelain --untracked-files=all)"
   if [[ -n "$SOURCE_STATUS" ]]; then
     echo "Distributable builds require a clean committed source tree; commit or remove these changes first:" >&2
     printf '%s\n' "$SOURCE_STATUS" >&2
     exit 1
   fi
-elif [[ -z "$SOURCE_COMMIT" ]]; then
-  echo "Cannot determine exact source identity. Build from a clean Git checkout or set MAGNET_AGENT_SOURCE_COMMIT to the exact exported commit SHA." >&2
-  exit 1
+
+  RESOLVED_BASE_TAG="$(git -C "$SELF_DIR" describe --tags --match 'v[0-9]*' --abbrev=0 --first-parent "$CHECKOUT_COMMIT" 2>/dev/null || true)"
+  [[ -n "$RESOLVED_BASE_TAG" ]] || {
+    echo "Cannot derive source ancestry: no reachable v<SemVer> release/prerelease tag." >&2
+    exit 1
+  }
+  RESOLVED_DISTANCE="$(git -C "$SELF_DIR" rev-list --count --first-parent "${RESOLVED_BASE_TAG}..${CHECKOUT_COMMIT}")"
+  if [[ "$RESOLVED_DISTANCE" == 0 ]]; then
+    RESOLVED_DESCRIPTION="$RESOLVED_BASE_TAG"
+  else
+    RESOLVED_DESCRIPTION="${RESOLVED_BASE_TAG}-${RESOLVED_DISTANCE}-g${CHECKOUT_COMMIT:0:12}"
+  fi
+
+  for pair in \
+    "SOURCE_COMMIT:$SOURCE_COMMIT:$CHECKOUT_COMMIT" \
+    "SOURCE_BASE_TAG:$SOURCE_BASE_TAG:$RESOLVED_BASE_TAG" \
+    "SOURCE_DISTANCE:$SOURCE_DISTANCE:$RESOLVED_DISTANCE" \
+    "SOURCE_DESCRIPTION:$SOURCE_DESCRIPTION:$RESOLVED_DESCRIPTION"; do
+    IFS=: read -r label supplied resolved <<<"$pair"
+    if [[ -n "$supplied" && "$supplied" != "$resolved" ]]; then
+      echo "MAGNET_AGENT_${label} $supplied does not match checked-out source value $resolved." >&2
+      exit 1
+    fi
+  done
+
+  SOURCE_COMMIT="$CHECKOUT_COMMIT"
+  SOURCE_BASE_TAG="$RESOLVED_BASE_TAG"
+  SOURCE_DISTANCE="$RESOLVED_DISTANCE"
+  SOURCE_DESCRIPTION="$RESOLVED_DESCRIPTION"
+
+  BASE_PRODUCT_VERSION="${SOURCE_BASE_TAG#v}"
+  if [[ "$PRODUCT_VERSION" != "$BASE_PRODUCT_VERSION" ]]; then
+    PARENT_COMMIT="$(git -C "$SELF_DIR" rev-parse "${CHECKOUT_COMMIT}^1" 2>/dev/null || true)"
+    if [[ -n "$PARENT_COMMIT" ]]; then
+      PARENT_PRODUCT_VERSION="$(git -C "$SELF_DIR" show "$PARENT_COMMIT:versions.env" 2>/dev/null | sed -n 's/^PRODUCT_VERSION="\([^"]*\)"$/\1/p')"
+      if [[ -n "$PARENT_PRODUCT_VERSION" && "$PARENT_PRODUCT_VERSION" == "$PRODUCT_VERSION" ]]; then
+        echo "PRODUCT_VERSION $PRODUCT_VERSION is ahead of source tag $SOURCE_BASE_TAG on more than the release-cut commit; create the matching tag before further source work." >&2
+        exit 1
+      fi
+    fi
+  fi
+else
+  missing=()
+  [[ -n "$SOURCE_COMMIT" ]] || missing+=(MAGNET_AGENT_SOURCE_COMMIT)
+  [[ -n "$SOURCE_BASE_TAG" ]] || missing+=(MAGNET_AGENT_SOURCE_BASE_TAG)
+  [[ -n "$SOURCE_DISTANCE" ]] || missing+=(MAGNET_AGENT_SOURCE_DISTANCE)
+  [[ -n "$SOURCE_DESCRIPTION" ]] || missing+=(MAGNET_AGENT_SOURCE_DESCRIPTION)
+  if ((${#missing[@]})); then
+    printf 'Cannot determine source ancestry without Git. Missing exported-source identity:' >&2
+    printf ' %s' "${missing[@]}" >&2
+    printf '\n' >&2
+    exit 1
+  fi
 fi
-[[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
-  echo "Source identity must be an exact 40-character lowercase Git SHA; found: $SOURCE_COMMIT" >&2
-  exit 1
-}
+
 # shellcheck disable=SC1091
 source "$SELF_DIR/scripts/build-identity.sh"
-compute_build_identity "$BUNDLE_VERSION" "$SOURCE_COMMIT" "$TARGET"
+compute_build_identity "$PRODUCT_VERSION" "$SOURCE_COMMIT" "$SOURCE_BASE_TAG" "$SOURCE_DISTANCE" "$SOURCE_DESCRIPTION" "$TARGET"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Required build command missing: $1" >&2; exit 1; }; }
 for cmd in bash curl tar gzip bzip2 xz sha256sum find file readelf grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname env docker id; do need "$cmd"; done
@@ -161,18 +207,18 @@ verify_one "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"
 cp "$SELF_DIR/requirements.lock" "$BUILD/manifest/requirements.lock"
 cp "$SELF_DIR/templates/RUNTIME-README.md" "$BUILD/README.md"
 sed -i \
-  -e "s/@BUNDLE_VERSION@/$BUNDLE_VERSION/g" \
-  -e "s/@BUILD_ID@/$BUILD_ID/g" \
+  -e "s/@PRODUCT_VERSION@/$PRODUCT_VERSION/g" \
+  -e "s/@SOURCE_DESCRIPTION@/$SOURCE_DESCRIPTION/g" \
   -e "s/@SOURCE_COMMIT@/$SOURCE_COMMIT/g" \
   "$BUILD/README.md"
-if grep -Eq '@(BUNDLE_VERSION|BUILD_ID|SOURCE_COMMIT)@' "$BUILD/README.md"; then
-  echo "Runtime README build-identity placeholder was not rendered." >&2
+if grep -Eq '@(PRODUCT_VERSION|SOURCE_DESCRIPTION|SOURCE_COMMIT)@' "$BUILD/README.md"; then
+  echo "Runtime README source-identity placeholder was not rendered." >&2
   exit 1
 fi
 cp "$SELF_DIR/payload/AGENTS.md.in" "$BUILD/AGENTS.md"
 cp "$SELF_DIR/templates/THIRD-PARTY.md" "$BUILD/THIRD-PARTY.md"
 install -m 0644 "$SELF_DIR/vendor/licenses/THIRD-PARTY-LICENSES.md" "$BUILD/licenses/third-party/THIRD-PARTY-LICENSES.md"
-printf '%s\n' "$BUNDLE_VERSION" > "$BUILD/VERSION"
+printf '%s\n' "$PRODUCT_VERSION" > "$BUILD/VERSION"
 
 log "uv $UV_VERSION"
 UV_AR="$DL/uv-${UV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
@@ -559,9 +605,8 @@ mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools
 cat > "$BUILD/manifest/environment.json" <<JSON
 {
   "bundle": "Magnet Agent Environment",
-  "bundle_version": "$BUNDLE_VERSION",
-  "build_id": "$BUILD_ID",
-  "source_commit": "$SOURCE_COMMIT",
+  "product_version": "$PRODUCT_VERSION",
+  "source": {"commit": "$SOURCE_COMMIT", "description": "$SOURCE_DESCRIPTION", "base_tag": "$SOURCE_BASE_TAG", "distance": $SOURCE_DISTANCE},
   "target": "$TARGET",
   "python_lock_resolution_cutoff": "$BUILD_CUTOFF",
   "python_lock_sha256": "$PYTHON_LOCK_SHA256",
@@ -778,7 +823,8 @@ fi
 "$EXTRACTED/bin/agent-env" verify >/dev/null
 
 log "Build complete"
-echo "Build identity: $BUILD_ID"
+echo "Product version: $PRODUCT_VERSION"
+echo "Source: $SOURCE_DESCRIPTION"
 echo "Source commit: $SOURCE_COMMIT"
 echo "$ARTIFACT"
 echo "$ARTIFACT.sha256"

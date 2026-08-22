@@ -35,12 +35,26 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          ref: ${{ github.sha }}
 
-      - name: Record exact source SHA
+      - name: Record exact source identity
         id: source
         shell: bash
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          base_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 --first-parent "$sha")"
+          distance="$(git rev-list --count --first-parent "${base_tag}..${sha}")"
+          if [[ "$distance" == 0 ]]; then
+            description="$base_tag"
+          else
+            description="${base_tag}-${distance}-g${sha:0:12}"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "base_tag=$base_tag" >> "$GITHUB_OUTPUT"
+          echo "distance=$distance" >> "$GITHUB_OUTPUT"
+          echo "description=$description" >> "$GITHUB_OUTPUT"
 
       - name: Compute builder download cache key
         id: download-cache
@@ -60,6 +74,9 @@ jobs:
       - name: Build and accept runtime
         env:
           MAGNET_AGENT_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}
+          MAGNET_AGENT_SOURCE_BASE_TAG: ${{ steps.source.outputs.base_tag }}
+          MAGNET_AGENT_SOURCE_DISTANCE: ${{ steps.source.outputs.distance }}
+          MAGNET_AGENT_SOURCE_DESCRIPTION: ${{ steps.source.outputs.description }}
         run: ./build.sh
 
       - name: Write acceptance metadata
@@ -73,6 +90,9 @@ jobs:
             --sidecar "$sidecar" \
             --output dist/acceptance.json \
             --source-sha "$ACCEPTED_SOURCE_SHA" \
+            --source-base-tag "${{ steps.source.outputs.base_tag }}" \
+            --source-distance "${{ steps.source.outputs.distance }}" \
+            --source-description "${{ steps.source.outputs.description }}" \
             --repository "$GITHUB_REPOSITORY" \
             --workflow "$GITHUB_WORKFLOW" \
             --run-id "$GITHUB_RUN_ID" \

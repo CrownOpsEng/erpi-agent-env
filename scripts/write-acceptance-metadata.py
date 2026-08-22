@@ -16,6 +16,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sidecar", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--source-sha", required=True)
+    parser.add_argument("--source-base-tag", required=True)
+    parser.add_argument("--source-distance", required=True, type=int)
+    parser.add_argument("--source-description", required=True)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--workflow", required=True)
     parser.add_argument("--run-id", required=True, type=int)
@@ -32,21 +35,44 @@ def quoted_env_value(text: str, name: str) -> str:
     return match.group(1)
 
 
-def derive_identity(bundle_version: str, source_sha: str, target: str) -> tuple[str, str]:
+def derive_artifact_stem(
+    product_version: str,
+    source_sha: str,
+    source_base_tag: str,
+    source_distance: int,
+    source_description: str,
+    target: str,
+) -> str:
     tool = pathlib.Path(__file__).with_name("build-identity.sh")
     try:
         result = subprocess.run(
-            [str(tool), bundle_version, source_sha, target],
+            [
+                str(tool),
+                product_version,
+                source_sha,
+                source_base_tag,
+                str(source_distance),
+                source_description,
+                target,
+            ],
             check=True,
             capture_output=True,
             text=True,
         )
     except subprocess.CalledProcessError as exc:
-        raise SystemExit(exc.stderr.strip() or "Build identity derivation failed") from exc
+        raise SystemExit(exc.stderr.strip() or "Source identity derivation failed") from exc
     fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-    if set(fields) != {"build_id", "artifact_stem"}:
-        raise SystemExit(f"Malformed build identity output: {result.stdout!r}")
-    return fields["build_id"], fields["artifact_stem"]
+    expected = {
+        "product_version",
+        "source_commit",
+        "source_base_tag",
+        "source_distance",
+        "source_description",
+        "artifact_stem",
+    }
+    if set(fields) != expected:
+        raise SystemExit(f"Malformed source identity output: {result.stdout!r}")
+    return fields["artifact_stem"]
 
 
 def main() -> None:
@@ -56,9 +82,16 @@ def main() -> None:
     output_path = pathlib.Path(args.output)
 
     versions = versions_path.read_text(encoding="utf-8")
-    bundle_version = quoted_env_value(versions, "BUNDLE_VERSION")
+    product_version = quoted_env_value(versions, "PRODUCT_VERSION")
     target = quoted_env_value(versions, "TARGET")
-    build_id, artifact_stem = derive_identity(bundle_version, args.source_sha, target)
+    artifact_stem = derive_artifact_stem(
+        product_version,
+        args.source_sha,
+        args.source_base_tag,
+        args.source_distance,
+        args.source_description,
+        target,
+    )
 
     fields = sidecar_path.read_text(encoding="utf-8").strip().split()
     if len(fields) != 2 or not re.fullmatch(r"[0-9a-f]{64}", fields[0]):
@@ -67,20 +100,33 @@ def main() -> None:
     expected_filename = f"{artifact_stem}.tar.gz"
     if filename != expected_filename:
         raise SystemExit(
-            f"Artifact filename {filename!r} does not match build identity {build_id!r}; expected {expected_filename!r}"
+            f"Artifact filename {filename!r} does not match source identity {args.source_description!r}; expected {expected_filename!r}"
         )
 
     artifact_path = sidecar_path.parent / filename
     if not artifact_path.is_file():
         raise SystemExit(f"Artifact named by sidecar does not exist: {artifact_path}")
 
+    if args.release_tag:
+        expected_tag = f"v{product_version}"
+        if args.release_tag != expected_tag:
+            raise SystemExit(
+                f"Release tag {args.release_tag!r} does not match product version {expected_tag!r}"
+            )
+        if args.source_distance != 0 or args.source_description != args.release_tag:
+            raise SystemExit("Release acceptance must be built from the exact release/prerelease tag")
+
     metadata = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "accepted",
-        "bundle_version": bundle_version,
-        "build_id": build_id,
+        "product_version": product_version,
         "target": target,
-        "source_commit": args.source_sha,
+        "source": {
+            "commit": args.source_sha,
+            "description": args.source_description,
+            "base_tag": args.source_base_tag,
+            "distance": args.source_distance,
+        },
         "repository": args.repository,
         "workflow": {
             "name": args.workflow,

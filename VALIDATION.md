@@ -97,32 +97,38 @@ A generic environment capability is not proven useful to Magnet Photos merely be
 
 That project proof should use the repository's real pinned client dependency and existing suites unchanged wherever possible. The environment must not carry project schema, business logic, roles, migrations, or test expectations solely to manufacture a passing result.
 
-## Build identity and candidate boundary
+## Source identity and release boundary
 
-`BUNDLE_VERSION` carries compatibility/lifecycle state, not per-commit uniqueness. Source-controlled values are restricted to stable `X.Y.Z`, active-development `X.Y.Z-dev`, or candidate `X.Y.Z-rc.N`. Git owns exact source identity.
+`PRODUCT_VERSION` is released compatibility identity. It contains only stable SemVer or an intentional `alpha.N` / `beta.N` / `rc.N` prerelease. There is no pseudo-development version.
 
-A distributable development build derives `BUILD_ID=X.Y.Z-dev+g<12-char-source>` from the exact 40-character source commit and names the archive `magnet-agent-env-linux-x64-v<BUILD_ID>.tar.gz`. Runtime `manifest/environment.json` and generated `acceptance.json` both retain the full source commit plus `build_id`; the archive SHA-256 remains authority for exact bytes. The `+g...` identifier is generated metadata and never belongs in `versions.env`.
+Git owns development source identity. For a clean committed source, the builder resolves the nearest reachable `v<SemVer>` tag, counts commits from that tag, and combines that ancestry with the exact source SHA. Exact tags produce the tag itself; descendants produce the Git-describe shape `vX.Y.Z[-prerelease]-N-g<abbrev>`.
 
-The builder refuses a dirty Git worktree because uncommitted bytes cannot truthfully claim the checked-out commit identity. When building an exported source tree without `.git`, the caller must provide `MAGNET_AGENT_SOURCE_COMMIT=<40-hex-sha>` explicitly. When Git is available, any supplied source identity must exactly match `HEAD`.
+This boundary is mechanical and must prove both stable and prerelease ancestry. In particular, source after `v0.2.0-rc.1` must describe from that RC (`v0.2.0-rc.1-1-g0123456789ab`, `v0.2.0-rc.1-2-g123456789abc`) rather than from the prior stable release or an invented `-dev` identity.
 
-Release-candidate and stable artifact filenames use only their SemVer identities because those identities are immutable. Commit-range validation mechanically rejects a second source commit retaining the same RC/stable version, requires RC cuts to be version-only transitions from matching `X.Y.Z-dev`, requires stable finalization to be a version-only transition from matching `X.Y.Z-rc.N`, and requires a rejected candidate to return to matching development state before further source changes.
+Runtime `manifest/environment.json` and generated `acceptance.json` record product version, full source commit, source description, base tag, and numeric distance separately. The archive filename uses the source description directly; the SHA-256 sidecar remains authority for exact archive bytes.
 
-A release candidate is not a debugging label. Before changing `BUNDLE_VERSION` from `X.Y.Z-dev` to `X.Y.Z-rc.N`, all known release blockers must be closed and the strongest relevant inexpensive/targeted checks must already pass. Pull-request validation and candidate acceptance remain different layers: `Validate` is normal source feedback; `Accept runtime` proves an exact committed runtime artifact.
+The builder refuses dirty worktrees. Exported source without `.git` must provide the complete source tuple (`MAGNET_AGENT_SOURCE_COMMIT`, `MAGNET_AGENT_SOURCE_BASE_TAG`, `MAGNET_AGENT_SOURCE_DISTANCE`, and `MAGNET_AGENT_SOURCE_DESCRIPTION`) because a SHA alone cannot reconstruct tag ancestry.
+
+A `PRODUCT_VERSION` change is a dedicated release-metadata-only source change: `versions.env` and `.github/release-request.json` move together. It may be the single untagged release-cut commit ahead of the nearest existing tag; no later source commit may retain that ahead-of-tag product version. Once the matching tag is created, ordinary development may continue with the same product version and source descriptions anchored to that tag.
+
+Source validation must reject backward product-version transitions, pseudo-development versions, version changes mixed with runtime/source changes, exact-tag/product-version disagreement, continuation after an untagged release-cut commit, and artifact/metadata names inconsistent with source ancestry.
 
 ## Release authority
 
-A stable release requires a separately identified candidate first. Candidate builds use SemVer prerelease versions (`x.y.z-rc.N`) and are validation artifacts only; they must not create the stable tag or masquerade as `x.y.z`. After direct artifact verification, promote the source version to the stable `x.y.z` and accept that exact final commit again.
+Stable and prerelease tags are real immutable compatibility states. Optional prerelease stages mean `alpha.N` (materially incomplete target), `beta.N` (scope substantially complete while compatibility/qualification settles), and `rc.N` (intended release scope/contract frozen except release-blocking corrections). Stages are used only when they provide qualification value.
 
-A release requires:
+A release/prerelease requires:
 
-1. source commit passes source validation;
-2. the exact payload-affecting source commit passes **Accept runtime**;
-3. direct candidate artifact inspection finds no unresolved release blocker;
-4. when Magnet Photos is the motivating consumer, current project promotion proof passes using the repository-owned interfaces;
-5. release version is updated intentionally and is not a prerelease identifier;
-6. permanent release workflow verifies the accepted source/tag relationship;
-7. **Build distribution** rebuilds and accepts the tagged distribution before publication;
-8. release assets include the archive, SHA-256 sidecar, and `acceptance.json`;
-9. PostgreSQL server provenance remains pinned to the official source artifact and digest-pinned build image, with no opaque prebuilt server bundle or unresolved runtime dependency reintroduced.
+1. the release-cut source change touches only approved release metadata and moves `PRODUCT_VERSION` forward;
+2. source validation passes for the exact commit;
+3. the exact payload-affecting source passes **Accept runtime** before publication;
+4. permanent release workflow creates/verifies immutable `v$PRODUCT_VERSION` at that exact source and prepares a draft Release;
+5. **Build distribution** checks out the real tag, requires source description to equal that tag, repeats full runtime acceptance, and attaches archive/checksum/`acceptance.json` before publication;
+6. when Magnet Photos is the motivating consumer, current project promotion proof passes through repository-owned interfaces;
+7. PostgreSQL/runtime provenance boundaries remain intact.
+
+If an RC exposes a defect, its tag and published assets remain immutable. Keep the RC product version while fixing source; development descriptions attach to the RC tag. When ready, cut the next candidate with a release-metadata-only change (`rc.1` → `rc.2`). Do not increment PATCH for a defect in an unreleased target. If qualification shows the intended compatibility base is wrong, move to a new truthful base version.
+
+Finalization from the accepted RC to stable is release-metadata-only and receives full proof again. Any runtime behavior change requires another RC.
 
 No manual tag/upload path is authoritative. Temporary qualification workflows must not become an alternate release system.

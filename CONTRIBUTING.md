@@ -2,141 +2,217 @@
 
 ## Change flow
 
-This repository is intentionally direct-to-`main`. It is a small, single-purpose builder repository with immediate automated validation, so mandatory pull requests would add ceremony without creating a meaningful approval boundary.
+Normal repository work uses a topic branch and pull request.
 
-Use one coherent commit per change when practical and inspect the resulting GitHub Actions runs after pushing. Pull requests remain available when explicit review, temporary isolation, or multi-contributor coordination is useful; they are not the default path. Optional PRs receive lightweight **Validate** coverage and the same detailed commit-history policy as direct pushes.
+1. Start from the exact current `main` source.
+2. Make semantic checkpoint commits as useful review/resumption boundaries emerge.
+3. Keep each checkpoint internally coherent and independently truthful about what it verified.
+4. Open/update one PR that synthesizes the final branch state rather than concatenating commit bodies.
+5. Require **Validate** on the PR; use **Accept runtime** when the runtime itself needs full proof.
+6. Integrate with a **squash merge** so `main` receives one coherent commit for the completed review unit.
 
-Payload-affecting pushes to `main` automatically run the full **Accept runtime** build. Distribution publishing remains separate.
+Detailed branch commits remain available in the PR as cold historical evidence. The squash commit is the durable mainline record and follows the same semantic message contract.
+
+Create an issue only when unresolved work needs a durable anchor independent of the active PR: an external report awaiting work, a deferred follow-up that genuinely matters, a decision requiring separate discussion, or a release blocker not being resolved here. Do not create issue ceremony around self-contained work already fully represented by its PR.
 
 ## Commit messages
 
-The commit history is part of this repository's engineering record. A terse Conventional Commit subject is **not enough**.
-
-Every new commit—whether pushed directly to `main` or introduced through a PR—must use this structure:
+Every new semantic checkpoint commit uses:
 
 ```text
-type(scope): imperative summary
+type(scope): concise imperative summary
 
 Why:
-Explain the problem, decision, failure mode, or reason this change exists.
+Why this checkpoint exists; identify the requirement, failure, invariant, or decision.
 
 What:
-Explain the material implementation and behavior/authority that changed.
+What the final checkpoint changes and any important ownership consequences.
 
-Validation:
-State the evidence available at commit time: local checks that ran, or the exact post-push CI proof that is required. Do not claim a check passed before it actually ran.
+Verified:
+Checks or observations actually completed for this checkpoint.
+
+Impact:
+Optional. Use when compatibility, persistence, security, packaging, or operations deserve explicit treatment.
 ```
 
-The subject must be at most 72 characters and use a Conventional Commit type. Preferred types are `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `ci`, and `chore`. Use a focused lowercase scope such as `builder`, `runtime`, `python`, `github`, `dist`, `ci`, `repo`, `release`, or `validation`.
+Use a Conventional Commit type such as `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `ci`, or `chore`; keep the subject at most 72 characters. Mark actual breaking changes with `!` and a `BREAKING CHANGE:` footer when useful, but commit syntax never overrides real compatibility impact.
 
-The body is not filler. `Why:`, `What:`, and `Validation:` must each contain useful detail. **Validate** checks every commit newly introduced by a direct push and every commit in the PR range, not only the current tip. A PR with one terse intermediate commit therefore fails even if its latest commit is detailed. If using a PR, keep its commits compliant as you work or squash/rebase before asking for merge.
+`Verified:` is evidence already obtained. Do not write future-tense claims such as “CI will pass” or use the commit body as a task list. Post-push/PR CI results belong in the PR/review evidence; the commit must remain truthful at creation time.
 
-Example:
+The record describes the final checkpoint, not the editing chronology. Preserve useful rationale; leave failed attempts and transient debugging narration in tool logs, review discussion, or other historical evidence when it matters.
+
+## Pull requests
+
+A PR is the coherent review unit. Use the repository template and synthesize:
+
+- **Why** — the goal/problem/invariant;
+- **What** — the final branch behavior/authority change;
+- **Verified** — actual final-state evidence;
+- **Compatibility** — exactly one of `Internal`, `Fix`, `Additive`, or `Breaking`;
+- **Open / deferred** — only unresolved work that remains after this PR.
+
+Do not paste every commit body into the PR. Higher-level records should compress lower-level evidence into coherent meaning.
+
+### Compatibility classification
+
+Classify by the supported environment contract, not by diff size or commit labels:
+
+- **Internal** — no supported/public behavior changes.
+- **Fix** — corrects supported behavior without incompatibility.
+- **Additive** — adds a backward-compatible supported capability.
+- **Breaking** — makes an existing supported behavior/interface incompatible.
+
+Before `1.0.0`:
 
 ```text
-fix(runtime): preserve Git auth across bundle relocation
-
-Why:
-GitHub CLI can configure Git with an absolute path to its current executable, which breaks after moving this portable bundle.
-
-What:
-Use a repo-local location-neutral `!gh auth git-credential` helper and verify the authenticated push path without changing the remote.
-
-Validation:
-Behavioral transport tests cover helper setup, bundle relocation, absence of global credential mutation, and a no-write push dry run; post-push Validate and Accept runtime are required.
+Fix       → PATCH
+Additive  → MINOR
+Breaking  → MINOR
 ```
 
-Mark breaking changes with `!` and a `BREAKING CHANGE:` footer when applicable. Do not rewrite already-published history solely to improve older commit messages; enforce the stronger standard forward from the current history.
+From `1.0.0` onward:
+
+```text
+Fix       → PATCH
+Additive  → MINOR
+Breaking  → MAJOR
+```
+
+`Internal` does not force a release by itself. The eventual release number follows the cumulative compatibility impact since the previous release, not the number of PRs or commits.
+
+The supported contract includes documented `agent-env` commands/options and intentionally exported behavior, activation/relocation guarantees, documented offline/credential/security boundaries, artifact/manifest formats intentionally promised to consumers, and the supported runtime-host envelope. Private builder layout, helper implementation, temporary paths, test fixtures, and undocumented runtime internals are not compatibility promises.
+
+## Product version and source identity
+
+`PRODUCT_VERSION` in `versions.env` is the single product compatibility-version authority. It is ordinary SemVer or a real prerelease such as `0.2.0-rc.1`; **there is no `-dev` product version**.
+
+Git owns exact source identity. Between release/prerelease tags, `PRODUCT_VERSION` remains the nearest released product identity and source state is described from Git ancestry using the nearest reachable version tag, commit distance, and abbreviated SHA.
+
+Examples:
+
+```text
+exact stable release:
+  product 0.1.1
+  source  v0.1.1
+
+ordinary development after it:
+  product 0.1.1
+  source  v0.1.1-17-g4c2fa17c9a1
+
+exact release candidate:
+  product 0.2.0-rc.1
+  source  v0.2.0-rc.1
+
+second development commit after that candidate:
+  product 0.2.0-rc.1
+  source  v0.2.0-rc.1-2-g91ab3c4d5e6f
+```
+
+The numeric distance makes development ordering visible; the Git SHA identifies the exact source; the tag identifies the compatibility state the development source descends from. Full source SHA remains in machine-readable provenance.
+
+A development artifact therefore uses its source description directly:
+
+```text
+magnet-agent-env-linux-x64-v0.1.1-17-g4c2fa17c9a1.tar.gz
+magnet-agent-env-linux-x64-v0.2.0-rc.1-2-g91ab3c4d5e6f.tar.gz
+```
+
+At an exact tag the same rule naturally produces the release/prerelease name:
+
+```text
+magnet-agent-env-linux-x64-v0.2.0-rc.1.tar.gz
+magnet-agent-env-linux-x64-v0.2.0.tar.gz
+```
+
+Do not invent another build version or manually copy commit metadata into `versions.env`.
+
+## Source identity and release lifecycle
+
+A release/prerelease is a deliberate tagged compatibility state. Ordinary source commits do not change `PRODUCT_VERSION`.
+
+Supported optional prerelease meanings are:
+
+- `alpha.N` — intended target remains materially incomplete;
+- `beta.N` — feature scope is substantially complete while compatibility/qualification still settles;
+- `rc.N` — intended release scope/contract are frozen except release-blocking corrections;
+- final — qualified normal release.
+
+Do not manufacture stages that do not provide qualification value.
+
+### Cutting a release or prerelease
+
+Changing `PRODUCT_VERSION` is a dedicated **release-metadata-only** source change. The new value must move forward, and `.github/release-request.json` is updated to the same version in that change. That commit may temporarily be one commit ahead of its nearest existing tag; no further source work is allowed under the new product version until the matching tag exists.
+
+For example, after development based on `v0.1.1`, a release-cut PR changes only approved release metadata:
+
+```text
+PRODUCT_VERSION="0.2.0-rc.1"
+.github/release-request.json → {"version":"0.2.0-rc.1"}
+```
+
+After squash integration, **Accept runtime** proves the exact mainline source. Successful acceptance triggers the permanent publisher, which creates immutable tag:
+
+```text
+v0.2.0-rc.1
+```
+
+The exact tagged distribution is then built and accepted from that tag.
+
+### Debugging a release candidate
+
+If `0.2.0-rc.1` exposes a defect, **do not** change the product version back to a pseudo-development value and do not move/reuse the tag.
+
+Commit the correction normally while `PRODUCT_VERSION` remains `0.2.0-rc.1`. Development artifacts naturally become:
+
+```text
+v0.2.0-rc.1-1-g0123456789ab
+v0.2.0-rc.1-2-g123456789abc
+```
+
+When the source is again candidate-ready, make a release-metadata-only change to:
+
+```text
+0.2.0-rc.2
+```
+
+then tag/publish `v0.2.0-rc.2` after qualification. A defect in an unreleased `0.2.0` target therefore advances the RC number, not the patch number.
+
+If qualification proves the intended compatibility target itself is wrong, choose a new truthful base version; for example `1.8.0-rc.1` may legitimately lead to `2.0.0-rc.1` when a breaking contract change is required.
+
+### Finalizing
+
+Finalization changes only approved release metadata from the accepted candidate to the final version, for example:
+
+```text
+0.2.0-rc.3 → 0.2.0
+```
+
+The final commit must receive full proof again because its bytes differ. No runtime behavior changes are permitted between the accepted final RC and final release; behavior changes require another candidate.
+
+### Published immutability
+
+Published stable releases and prereleases are immutable. Never move/reuse a version tag or replace assets after publication. The release workflow is tag-first/draft-first: establish the exact tag, prepare the draft, build/attach/verify all artifacts, then publish. Enable GitHub release immutability administratively when available.
 
 ## Validation
 
-When a shell checkout is available, run:
+With a local checkout, run the smallest relevant checks while developing and the repository source gate before proposing integration:
 
 ```bash
 ./tests/static-check.sh
 ```
 
-For changes that may alter the produced runtime or its portability/integrity behavior, `./build.sh` is useful locally when practical.
+Runtime/payload changes additionally earn a complete `./build.sh` acceptance run when practical; the permanent **Accept runtime** workflow provides the canonical hosted acceptance path for `main` and deliberate runtime proof.
 
-A connector-only agent may not have a usable shell checkout. In that case it must not claim local validation: make the coherent direct-to-`main` commit, inspect **Validate**, and for payload-affecting changes require **Accept runtime** to succeed. GitHub Actions is an intentional supported acceptance host, not a fallback of last resort.
+Do not fragment a long-running gate merely to satisfy a wrapper timeout. Keep one logical process and give it adequate time or supervise/poll that same process.
 
-Do **not** manually refresh candidate hashes, run IDs, versions, or per-run chronology in tracked narrative files. `VALIDATION.md` defines the stable validation contract; successful **Accept runtime** runs upload `acceptance.json` evidence for the exact commit, and published Releases carry their runtime archive, checksum, and `acceptance.json`. Git history preserves why/what/validation for changes, and GitHub Actions preserves execution history. Superseded historical documents should be removed from the live tree once they no longer serve current operation or authority—their content remains recoverable from Git.
+A connector-only session must not claim local checks it did not run. Obtain a connector-backed Git handoff when coherent local Git semantics materially help; otherwise use the connected GitHub capability for remote state and rely only on evidence actually observed.
 
-## Compatibility and version selection
+## Release automation
 
-`BUNDLE_VERSION` is the SemVer compatibility/lifecycle authority for the environment. It is **not** a commit counter and does not identify each development archive by itself. Git owns exact source identity; the builder combines the development lifecycle version with the source commit when it needs a unique distributable build identity.
+A release-cut PR updates `PRODUCT_VERSION` and `.github/release-request.json` to the same intended stable/prerelease version. After squash integration, **Accept runtime** runs on the exact mainline commit. A successful mainline acceptance triggers `Publish release`, which verifies the release-cut record, creates/verifies immutable `v$PRODUCT_VERSION`, prepares/reuses a matching draft Release, and dispatches `Build distribution` against the real tag. Prerelease versions are published as GitHub prereleases.
 
-The supported compatibility surface is the documented environment contract: `agent-env` commands/options and intentionally exported behavior, archive activation and relocation guarantees, documented offline/credential/security boundaries, and the supported runtime-host envelope. Builder source layout, private helper implementation, temporary build paths, test-fixture structure, and undocumented internal runtime paths are not compatibility promises.
+`Build distribution` checks out the tag, verifies tag/SHA/product-version/source-description agreement, repeats the complete runtime build, writes `acceptance.json`, attaches archive/checksum/metadata to the draft, and only then publishes it.
 
-Classify material changes by their real contract effect, regardless of Conventional Commit label or diff size:
+Manual `Publish release` dispatch exists for idempotent recovery of an already accepted release source. `.github/release-request.json` contains only the requested version and is an auditable release command, not a second version authority.
 
-- **Internal** — no supported behavior changes.
-- **Fix** — restores/corrects supported behavior without incompatibility.
-- **Additive** — adds a backward-compatible supported capability.
-- **Breaking** — makes a supported behavior or interface incompatible.
-
-Before `1.0.0`, a Fix selects a PATCH release; Additive or Breaking work selects the next MINOR release. From `1.0.0` onward, use normal SemVer: Fix → PATCH, Additive → MINOR, Breaking → MAJOR. Internal work does not force a release by itself. The release target is chosen from the cumulative compatibility impact of the work being released; ordinary commits and PRs do not increment SemVer one-by-one.
-
-Conventional Commit syntax and automation may help discover likely impact, but actual supported-contract impact is authoritative. When compatibility, persistence, security, packaging, or operations materially change, make that consequence explicit in the commit/PR record without creating a second version authority.
-
-## Releases
-
-`BUNDLE_VERSION` in `versions.env` is the compatibility/lifecycle version authority. Active work uses `x.y.z-dev`; release candidates use SemVer prerelease identities such as `0.2.0-rc.1` and are not published through the stable release workflow. Stable release tags are exactly `v$BUNDLE_VERSION`. Exact development-build identity is derived from Git source identity rather than stored in `versions.env`.
-
-Development/candidate flow:
-
-1. keep `BUNDLE_VERSION` at `x.y.z-dev` while implementation, debugging, validation, or any known release blocker remains;
-2. run the inexpensive and targeted checks appropriate to the current change while staying in development state;
-3. only when the source is believed releasable, deliberately change `BUNDLE_VERSION` to the next unused `x.y.z-rc.N` and treat that candidate source as immutable;
-4. pass source validation and **Accept runtime** for that exact candidate source, then inspect/test the candidate archive directly and complete any required motivating-project promotion proof;
-5. if the candidate exposes a defect, reject it: the next development commit returns `BUNDLE_VERSION` to `x.y.z-dev`, fixes and validates normally, and a later candidate uses a new monotonically increasing RC number;
-6. only after candidate approval, change the source version to stable `x.y.z` and accept the exact final commit again.
-
-Normal stable release flow:
-
-1. change `BUNDLE_VERSION` from the accepted candidate identity to the intended stable version on `main`;
-2. require that exact commit's **Validate** and **Accept runtime** runs to succeed;
-3. invoke permanent **Publish release** for that exact accepted source;
-4. **Publish release** verifies acceptance, creates/verifies the exact lightweight Git tag, and creates/reuses only a matching **draft** Release;
-5. it dispatches **Build distribution** for that tag;
-6. **Build distribution** checks out the real tag, verifies it matches the source/version and a mutable draft, repeats the complete acceptance build, uploads the archive/checksum/`acceptance.json` to the draft, then publishes the Release.
-
-There are two durable ways to invoke **Publish release**:
-
-- **GitHub UI / workflow-dispatch capable client:** run **Publish release** and provide the accepted `target_ref`.
-- **Connector-only agent session:** create or update `.github/release-request.json` on `main` with the exact already-accepted commit SHA and version:
-
-```json
-{
-  "version": "0.2.0",
-  "target_sha": "0123456789abcdef0123456789abcdef01234567"
-}
-```
-
-Changing that request file triggers the same permanent publisher. The workflow requires an exact 40-character lowercase commit SHA, verifies its `BUNDLE_VERSION`, and refuses to publish unless that commit already has a successful **Accept runtime** result. The request file is an auditable release command, not version authority; `versions.env` remains authoritative.
-
-If a release build fails after the draft was prepared, the tag remains pinned to the accepted source and the draft remains recoverable. Correct the pipeline on `main`, accept the intended release source, retarget the request if the release source itself changed, then rerun the permanent publisher. Distribution assets may be replaced only while the Release is still draft; publication happens only after all release assets are attached successfully.
-
-**Build distribution** can also be run without a release tag to produce a short-lived Actions artifact without publishing anything.
-
-The explicit workflow dispatch from **Publish release** to **Build distribution** is intentional. GitHub suppresses most follow-on events caused by actions performed with `GITHUB_TOKEN`, while `workflow_dispatch` is explicitly allowed to start another workflow.
-
-### Release immutability
-
-The release pipeline is intentionally tag-first/draft-first so GitHub release immutability can be enabled safely. All assets are attached while the Release is draft and publication is the final action.
-
-Recommended repository setting for future releases when available: **Settings → General → Releases → Enable release immutability**. This setting is administrative and is not changed by the build workflows themselves.
-
-Pre-1.0 versions are appropriate while the environment accumulates real-world usage evidence. `1.0.0` should signal a deliberately proven/stable compatibility contract, not merely a working package.
-
-## Development and release version lifecycle
-
-Version identifiers describe lifecycle state; commits and artifact hashes describe exact bytes.
-
-- **Development:** keep `BUNDLE_VERSION` at `X.Y.Z-dev` while payload, validation, or release work is still changing or any known blocker remains. The exact source identity is the full Git commit. Distributable development builds derive `BUILD_ID=X.Y.Z-dev+g<12-char-source>` and use that identity in the archive filename; the full source SHA remains in runtime/acceptance provenance. The builder refuses dirty Git worktrees because an uncommitted tree cannot truthfully claim a commit identity. Exported source without `.git` must supply the exact commit through `MAGNET_AGENT_SOURCE_COMMIT`. Never hand-maintain `+g...` metadata in `versions.env`.
-- **Release candidate:** use `X.Y.Z-rc.N` only after the development source has no known release blockers and the strongest inexpensive/targeted checks have passed. Cutting an RC is a deliberate version-only promotion whenever practical. An RC identifies one immutable source commit; never modify code while retaining that RC identity.
-- **Rejected candidate:** if an RC exposes a defect, reject it, make the next development commit return `BUNDLE_VERSION` to `X.Y.Z-dev`, fix and validate normally, and never reuse the rejected RC number. Cut the next `rc.N` only when the branch is again believed releasable.
-- **Stable:** use `X.Y.Z` only after the candidate has passed the required direct artifact and motivating-project promotion proofs. The stable version change is deliberate and the exact stable commit must be accepted again because version bytes are part of the payload.
-- **Build metadata:** SemVer `+...` metadata is for derived snapshot identification, not readiness or precedence. Do not append metadata to an RC as a way to keep changing its source.
-
-Normal pull-request commits are development checkpoints. Run the inexpensive source gate locally before pushing; PR CI should provide lightweight `Validate` feedback. Use full `Accept runtime` deliberately when runtime proof is warranted, for a candidate, or automatically on the documented main-branch path. Do not use release-candidate numbering or full clean builds as an inner debugging loop.
+Do not hand-maintain run IDs, hashes, source descriptions, or build chronology in current-state docs. Git, Actions evidence, release metadata, commits, and PRs own those records.

@@ -1,6 +1,6 @@
-# Magnet Agent Environment @BUNDLE_VERSION@
+# Magnet Agent Environment @PRODUCT_VERSION@
 
-Build identity: `@BUILD_ID@`
+Source: `@SOURCE_DESCRIPTION@`
 
 Source commit: `@SOURCE_COMMIT@`
 
@@ -86,7 +86,7 @@ Probe shell GitHub only when it is actually needed. If shell networking is known
 
 ## Provenance and licenses
 
-`manifest/environment.json` records the compatibility version, derived build identity, exact source commit, and runtime/tool provenance. `manifest/versions.env` and the machine-readable `manifest/sources.tsv` record lifecycle/tool pins and source artifacts, including the managed python-build-standalone build selected by pinned uv. Direct third-party license/notice material is under `licenses/third-party/`; ShellCheck's GPL license and exact corresponding source are under `licenses/shellcheck/` and `licenses/source/`. Node and CPython also retain their upstream license files inside their bundled runtime trees.
+`manifest/environment.json` records the product version, Git source ancestry, exact source commit, and runtime/tool provenance. `manifest/versions.env` and the machine-readable `manifest/sources.tsv` record lifecycle/tool pins and source artifacts, including the managed python-build-standalone build selected by pinned uv. Direct third-party license/notice material is under `licenses/third-party/`; ShellCheck's GPL license and exact corresponding source are under `licenses/shellcheck/` and `licenses/source/`. Node and CPython also retain their upstream license files inside their bundled runtime trees.
 
 ## Mutable state
 
