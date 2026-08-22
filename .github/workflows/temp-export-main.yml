@@ -1,0 +1,46 @@
+name: Temporary export current main
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.head_ref == 'agent/versioning-tree-transport'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Create verified source handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          test "$source_sha" = "898169080f1ae3e285a471181d3d48c9e010878e"
+          git bundle create repository.bundle --all
+          mkdir verify-repo
+          git -C verify-repo init -q
+          git -C verify-repo bundle verify "$GITHUB_WORKSPACE/repository.bundle"
+          printf '%s\n' "$source_sha" > SOURCE_SHA
+          printf '%s\n' main > SOURCE_BRANCH
+          printf '%s\n' "$GITHUB_REPOSITORY" > REPOSITORY
+      - name: Upload handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: current-main-source-handoff
+          path: |
+            repository.bundle
+            SOURCE_SHA
+            SOURCE_BRANCH
+            REPOSITORY
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
