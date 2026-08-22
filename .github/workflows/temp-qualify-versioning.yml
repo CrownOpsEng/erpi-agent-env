@@ -1,0 +1,167 @@
+name: Temporary qualify versioning redesign
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    if: github.head_ref == 'agent/versioning-tree-transport'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      BASE_SHA: 898169080f1ae3e285a471181d3d48c9e010878e
+      EXPECTED_TREE: 90d24a6e0938f6b1970a1c1a04a02636eb391471
+      PATCH_XZ_SHA256: 0b14c41bf787fdafe501501219b46ae3c4c25891de89106056f3e7d90d4a8ba6
+      PATCH_SHA256: c4a929d20cdfe4181213ce63021c399a93a8f1bd787c06a8b18fa6ec3d9213b0
+      PUBLISH_BRANCH: agent/versioning-qualified-nonworkflow
+
+    steps:
+      - name: Check out transport inputs
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: transport
+          persist-credentials: false
+
+      - name: Check out exact product base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BASE_SHA }}
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+
+      - name: Reconstruct exact redesign tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_xz="$GITHUB_WORKSPACE/transport/.github/versioning-transport/product.patch.xz"
+          test -f "$patch_xz"
+          printf '%s  %s\n' "$PATCH_XZ_SHA256" "$patch_xz" | sha256sum -c -
+          xz -dc "$patch_xz" > "$RUNNER_TEMP/product.patch"
+          printf '%s  %s\n' "$PATCH_SHA256" "$RUNNER_TEMP/product.patch" | sha256sum -c -
+          test "$(git -C source rev-parse HEAD)" = "$BASE_SHA"
+          git -C source apply --index --binary "$RUNNER_TEMP/product.patch"
+          git -C source diff --cached --check
+          actual_tree="$(git -C source write-tree)"
+          test "$actual_tree" = "$EXPECTED_TREE"
+          printf 'qualified_tree=%s\n' "$actual_tree" >> "$GITHUB_ENV"
+
+      - name: Commit exact qualified product tree locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C source config user.name 'Magnet Agent Qualification'
+          git -C source config user.email 'agent-qualification@users.noreply.github.com'
+          git -C source commit -m 'test(release): qualify tagged source ancestry' \
+            -m 'Why:
+          The versioning redesign must be exercised as one committed source state so Git-derived ancestry, runtime provenance, and packaging use real repository semantics.' \
+            -m 'What:
+          Materialize the exact locally validated redesign tree on the exact current main parent for hosted source and runtime qualification only.' \
+            -m 'Verified:
+          The applied patch SHA-256 and resulting Git tree identity exactly match the independently validated redesign checkpoint before this temporary commit is created.'
+          test "$(git -C source rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          qual_sha="$(git -C source rev-parse HEAD)"
+          printf 'qual_sha=%s\n' "$qual_sha" >> "$GITHUB_ENV"
+
+      - name: Run complete source policy gate
+        working-directory: source
+        run: ./tests/static-check.sh
+
+      - name: Compute builder download cache key
+        id: download-cache
+        working-directory: source
+        run: echo "key=$(./scripts/download-cache-key.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore builder download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: source/.download-cache
+          key: magnet-agent-env-linux-x64-${{ steps.download-cache.outputs.key }}
+          restore-keys: |
+            magnet-agent-env-linux-x64-
+
+      - name: Build and exercise exact redesign runtime
+        working-directory: source
+        run: ./build.sh
+
+      - name: Record qualified identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd source
+          source ./versions.env
+          source_commit="$(git rev-parse HEAD)"
+          source_base_tag="$(git describe --tags --abbrev=0 --first-parent HEAD)"
+          source_distance="$(git rev-list --count --first-parent "${source_base_tag}..HEAD")"
+          if [[ "$source_distance" == 0 ]]; then
+            source_description="$source_base_tag"
+          else
+            source_description="${source_base_tag}-${source_distance}-g${source_commit:0:12}"
+          fi
+          sidecar="$(printf '%s\n' dist/*.tar.gz.sha256)"
+          python3 scripts/write-acceptance-metadata.py \
+            --sidecar "$sidecar" \
+            --output dist/acceptance.json \
+            --source-sha "$source_commit" \
+            --source-base-tag "$source_base_tag" \
+            --source-distance "$source_distance" \
+            --source-description "$source_description" \
+            --repository "$GITHUB_REPOSITORY" \
+            --workflow "$GITHUB_WORKFLOW" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --event "$GITHUB_EVENT_NAME"
+          {
+            printf 'base_sha=%s\n' "$BASE_SHA"
+            printf 'qualified_tree=%s\n' "$EXPECTED_TREE"
+            printf 'qualification_commit=%s\n' "$source_commit"
+            printf 'product_version=%s\n' "$PRODUCT_VERSION"
+            printf 'source_base_tag=%s\n' "$source_base_tag"
+            printf 'source_distance=%s\n' "$source_distance"
+            printf 'source_description=%s\n' "$source_description"
+            cat "$sidecar"
+          } > dist/qualification.txt
+          cat dist/qualification.txt
+          cat dist/acceptance.json
+
+      - name: Publish qualified non-workflow product blobs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd source
+          git reset --hard "$BASE_SHA"
+          xz -dc "$GITHUB_WORKSPACE/transport/.github/versioning-transport/product.patch.xz" > "$RUNNER_TEMP/product.patch"
+          git apply --index --binary "$RUNNER_TEMP/product.patch"
+          git restore --source="$BASE_SHA" --staged --worktree .github/workflows
+          test -n "$(git diff --cached --name-only)"
+          git config user.name 'Magnet Agent Qualification'
+          git config user.email 'agent-qualification@users.noreply.github.com'
+          git commit -m 'test(release): stage qualified non-workflow blobs' \
+            -m 'Why:
+          The connected GitHub capability needs the hosted-qualified product blobs in the repository object database without granting Actions workflow-write authority.' \
+            -m 'What:
+          Publish only the already-qualified non-workflow portion of the redesign on a temporary branch. Permanent workflow blobs are supplied separately before exact-tree comparison.' \
+            -m 'Verified:
+          The complete product tree passed source validation and full runtime qualification immediately before this staging commit; workflow paths are explicitly restored to the exact base.'
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push "$remote" "HEAD:refs/heads/${PUBLISH_BRANCH}"
+
+      - name: Upload qualification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: versioning-redesign-qualification
+          path: |
+            source/dist/*.tar.gz
+            source/dist/*.tar.gz.sha256
+            source/dist/acceptance.json
+            source/dist/qualification.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
