@@ -1,116 +1,126 @@
-name: Qualify Supabase CLI
+name: Qualify Supabase CLI promotion
 
 on:
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: qualify-supabase-cli-${{ github.ref }}
+  group: qualify-supabase-promotion-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   qualify:
-    name: Linux x86-64 release payload
+    name: Exact product tree and runtime
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 60
+    env:
+      BASE_SHA: eeddfa36438c6d132878f22901d46e1483d6d3d5
+      EXPECTED_TREE: 1af031270a1b220da5243f5fd105af0b449dadf3
+      PATCH_B64_SHA256: 693d0f0266365afc3b774bd9d9db24ca85c96858399cd27230f3d2b94e52f863
+      PATCH_SHA256: e7f579213cc90029648409d3d165a713c9fd36f58bc09239d4e3e4bd92e09773
+      FEATURE_BRANCH: feat/supabase-cli
     steps:
-      - name: Check out repository
+      - name: Check out transport source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          path: transport
 
-      - name: Qualify official Supabase CLI 2.114.0 archive
+      - name: Check out immutable RC7 baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: v0.2.0-rc.7
+          path: product
+
+      - name: Reconstruct exact permanent product tree
         shell: bash
         run: |
           set -euo pipefail
-          version=2.114.0
-          asset="supabase_${version}_linux_amd64.tar.gz"
-          base="https://github.com/supabase/cli/releases/download/v${version}"
-          work="$RUNNER_TEMP/supabase-cli-qualification"
-          extract="$work/extracted"
-          relocated="$work/Relocated – spaces and unicode/deep/path/bin"
-          probe="$work/project probe"
-          report="$work/report.txt"
-          mkdir -p "$extract" "$relocated" "$probe"
-
-          curl --fail --location --proto '=https' --tlsv1.2 --retry 4 --retry-all-errors \
-            -o "$work/checksums.txt" "$base/checksums.txt"
-          curl --fail --location --proto '=https' --tlsv1.2 --retry 4 --retry-all-errors \
-            -o "$work/$asset" "$base/$asset"
-
-          expected="$(awk -v asset="$asset" '$2 == asset || $2 == "*" asset {print $1}' "$work/checksums.txt")"
-          [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || {
-            echo "Could not resolve official checksum for $asset" >&2
-            cat "$work/checksums.txt" >&2
+          patch_b64="$GITHUB_WORKSPACE/transport/.github/supabase-cli-promotion.patch.gz.b64"
+          patch="$RUNNER_TEMP/supabase-cli-promotion.patch"
+          [[ "$(sha256sum "$patch_b64" | awk '{print $1}')" == "$PATCH_B64_SHA256" ]] || {
+            echo 'Promotion patch transport hash drifted.' >&2
             exit 1
           }
-          actual="$(sha256sum "$work/$asset" | awk '{print $1}')"
-          [[ "$actual" == "$expected" ]] || {
-            echo "Supabase CLI archive checksum mismatch: expected $expected, got $actual" >&2
+          base64 --decode "$patch_b64" | gzip -dc > "$patch"
+          [[ "$(sha256sum "$patch" | awk '{print $1}')" == "$PATCH_SHA256" ]] || {
+            echo 'Decoded promotion patch hash drifted.' >&2
             exit 1
           }
 
-          tar -xzf "$work/$asset" -C "$extract"
-          mapfile -t files < <(find "$extract" -maxdepth 2 -type f -printf '%P\n' | LC_ALL=C sort)
-          printf 'archive_sha256=%s\narchive_bytes=%s\n' "$actual" "$(stat -c '%s' "$work/$asset")" | tee "$report"
-          printf 'archive_files:\n' | tee -a "$report"
-          printf '  %s\n' "${files[@]}" | tee -a "$report"
-
-          [[ -x "$extract/supabase" ]] || { echo 'Archive is missing executable supabase' >&2; exit 1; }
-          [[ -x "$extract/supabase-go" ]] || { echo 'Archive is missing executable supabase-go' >&2; exit 1; }
-
-          for binary in supabase supabase-go; do
-            path="$extract/$binary"
-            {
-              printf '%s_sha256=%s\n' "$binary" "$(sha256sum "$path" | awk '{print $1}')"
-              printf '%s_bytes=%s\n' "$binary" "$(stat -c '%s' "$path")"
-              printf '%s_file=' "$binary"
-              file -b "$path"
-              printf '%s_ldd:\n' "$binary"
-              ldd "$path" 2>&1 || true
-              printf '%s_glibc_symbols:\n' "$binary"
-              readelf --version-info "$path" 2>/dev/null | grep -oE 'GLIBC_[0-9]+([.][0-9]+)+' | sort -Vu | tail -20 || true
-            } | tee -a "$report"
-          done
-
-          version_out="$($extract/supabase --version)"
-          printf 'supabase_version=%s\n' "$version_out" | tee -a "$report"
-          grep -F "$version" <<<"$version_out" >/dev/null
-
-          cp "$extract/supabase" "$relocated/supabase"
-          cp "$extract/supabase-go" "$relocated/supabase-go"
-          chmod 0755 "$relocated/supabase" "$relocated/supabase-go"
-
-          export HOME="$work/home"
-          export XDG_CONFIG_HOME="$HOME/.config"
-          export XDG_CACHE_HOME="$HOME/.cache"
-          mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
-          unset SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD SUPABASE_PROJECT_ID SUPABASE_PROJECT_REF || true
-
-          "$relocated/supabase" --help >/dev/null
-          "$relocated/supabase" db diff --help >/dev/null
-          "$relocated/supabase" migration squash --help >/dev/null
-
-          cd "$probe"
-          "$relocated/supabase" init --yes
-          test -f supabase/config.toml
-          "$relocated/supabase" migration new portable_probe
-          mapfile -t migrations < <(find supabase/migrations -maxdepth 1 -type f -name '*_portable_probe.sql' -print)
-          [[ ${#migrations[@]} -eq 1 ]] || {
-            echo "Expected exactly one portable_probe migration; found ${#migrations[@]}" >&2
-            find supabase -maxdepth 3 -print >&2 || true
+          cd "$GITHUB_WORKSPACE/product"
+          [[ "$(git rev-parse HEAD)" == "$BASE_SHA" ]] || {
+            echo "RC7 baseline drifted: $(git rev-parse HEAD)" >&2
             exit 1
           }
-          printf 'migration_file=%s\n' "${migrations[0]}" | tee -a "$report"
+          [[ "$(git describe --exact-match --tags HEAD)" == 'v0.2.0-rc.7' ]] || {
+            echo 'Baseline is not exact v0.2.0-rc.7.' >&2
+            exit 1
+          }
 
-          {
-            echo '### Supabase CLI 2.114.0 qualification'
-            echo '```text'
-            cat "$report"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          git apply --index --binary "$patch"
+          [[ "$(git write-tree)" == "$EXPECTED_TREE" ]] || {
+            echo "Promotion tree mismatch: expected $EXPECTED_TREE, got $(git write-tree)" >&2
+            git diff --cached --stat >&2
+            exit 1
+          }
+          git diff --cached --check
+          ./tests/static-check.sh
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -F - <<'MSG'
+feat(supabase): add portable CLI runtime
+
+Why:
+Supabase CLI 2.114.0 is already the qualified baseline for the bundled pg-delta and PostgREST capabilities, and Magnet Photos needs the actual CLI available in the portable execution harness without project-local installation.
+
+What:
+Pin the exact official Linux amd64 archive, redistribute the paired supabase and supabase-go executables behind a relocation-safe wrapper, preserve host/session credential and host-container boundaries, add provenance/license/doctor/docs, and verify filesystem-only CLI semantics including noninteractive migration creation and the glibc floor.
+
+Verified:
+The exact user-supplied archive matched the published SHA-256 f36a33ca867f1cce9ba5efa705863fdc545d1465d3719a721793ea67eb692c5a. Focused local qualification verified both 2.114.0 binaries, hostile relocation, init/migration behavior, command surfaces, and a GLIBC_2.17 maximum requirement. The completed product tree passed ./tests/static-check.sh locally, and hosted payload qualification run 32583860694 independently passed the official release archive checks.
+
+Impact:
+Additive supported capability. Full Supabase stack commands still require a host Docker-compatible runtime; remote operations still require host network access and credentials.
+MSG
+
+          [[ "$(git rev-parse HEAD^{tree})" == "$EXPECTED_TREE" ]] || {
+            echo 'Committed product tree does not match the qualified tree.' >&2
+            exit 1
+          }
+          ./tests/static-check.sh
+
+      - name: Build and accept complete runtime
+        shell: bash
+        working-directory: product
+        run: ./build.sh
+
+      - name: Publish qualified feature commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/product"
+          head_sha="$(git rev-parse HEAD)"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          current="$(git ls-remote "$remote" "refs/heads/$FEATURE_BRANCH" | awk '{print $1}')"
+          if [[ "$current" == "$head_sha" ]]; then
+            echo "Feature branch already points to qualified commit $head_sha"
+            exit 0
+          fi
+          [[ "$current" == "$BASE_SHA" ]] || {
+            echo "Refusing to overwrite $FEATURE_BRANCH at unexpected commit ${current:-<missing>}" >&2
+            exit 1
+          }
+          git push "$remote" "HEAD:refs/heads/$FEATURE_BRANCH" \
+            "--force-with-lease=refs/heads/$FEATURE_BRANCH:$BASE_SHA"
+          echo "Qualified feature commit: $head_sha"
