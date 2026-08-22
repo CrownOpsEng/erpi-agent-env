@@ -26,7 +26,7 @@ def main()->int:
     ap=argparse.ArgumentParser(); ap.add_argument('--json',action='store_true'); ns=ap.parse_args()
     manifest=json.loads((ROOT/'manifest/environment.json').read_text(encoding='utf-8'))
     data={
-      'bundle':{'root':str(ROOT),'version':manifest.get('bundle_version'),'target':manifest.get('target')},
+      'bundle':{'root':str(ROOT),'version':manifest.get('product_version'),'target':manifest.get('target')},
       'bundled':{
         'python':probe(ROOT/'env/bin/python',['--version']),
         'node':probe(ROOT/'bin/node',['--version']),

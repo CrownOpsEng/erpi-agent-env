@@ -38,28 +38,29 @@ The supported runtime contract is GNU/Linux x86-64 with kernel >= 4.18, glibc >=
 
 ## Build
 
-Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256sum, find, sed/awk/grep, a working Docker daemon, and internet access. A normal Git checkout is used to derive and verify exact source identity; an exported source tree without `.git` must provide `MAGNET_AGENT_SOURCE_COMMIT=<40-hex-sha>`. No sudo is used. Docker is a builder capability only; it is not bundled into the runtime.
+Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256sum, find, sed/awk/grep, Git history containing the reachable version tags, a working Docker daemon, and internet access. Exported source trees without `.git` must provide the full `MAGNET_AGENT_SOURCE_COMMIT`, `MAGNET_AGENT_SOURCE_BASE_TAG`, `MAGNET_AGENT_SOURCE_DISTANCE`, and `MAGNET_AGENT_SOURCE_DESCRIPTION` tuple. No sudo is used. Docker is a builder capability only; it is not bundled into the runtime.
 
 ```bash
 ./tests/static-check.sh
 ./build.sh
 ```
 
-`BUNDLE_VERSION` in `versions.env` is the compatibility/lifecycle version, not a per-build identifier. The builder derives exact development build identity from the committed source SHA and refuses dirty Git worktrees:
+`PRODUCT_VERSION` in `versions.env` is the released compatibility identity, not a development-build counter. Ordinary source commits leave it unchanged. The builder derives the artifact identity from the nearest reachable stable/prerelease tag, commit distance, and source SHA:
 
 ```text
-development: magnet-agent-env-linux-x64-v0.2.0-dev+g<12-char-source>.tar.gz
-candidate:   magnet-agent-env-linux-x64-v0.2.0-rc.8.tar.gz
-stable:      magnet-agent-env-linux-x64-v0.2.0.tar.gz
+stable descendant: magnet-agent-env-linux-x64-v0.1.1-17-g4c2fa17c9a1.tar.gz
+exact RC:          magnet-agent-env-linux-x64-v0.2.0-rc.1.tar.gz
+RC descendant:    magnet-agent-env-linux-x64-v0.2.0-rc.1-2-g91ab3c4d5e6f.tar.gz
+exact stable:      magnet-agent-env-linux-x64-v0.2.0.tar.gz
 ```
 
-The full 40-character source commit and derived build ID are recorded inside `manifest/environment.json` and in generated `acceptance.json`; the SHA-256 sidecar identifies the exact archive bytes. Release-candidate and stable filenames intentionally omit source metadata because those version identities are immutable and executable transition checks prevent a second source commit from retaining the same RC/stable identity.
+This is Git source identity, not invented SemVer. The numeric distance makes development order visible; the full 40-character source SHA, base tag, distance and source description are recorded in `manifest/environment.json` and `acceptance.json`; the archive SHA-256 identifies the exact bytes.
 
-Release candidates use SemVer prerelease identities such as `0.2.0-rc.1`. A candidate must never use the final stable version or create the stable release tag. Only after the candidate has passed direct artifact verification is `BUNDLE_VERSION` promoted to the stable version, and that exact final source commit must pass acceptance again before publication.
+There is no `-dev` product version. A release/prerelease is cut by a dedicated release-metadata-only `PRODUCT_VERSION`/release-request change and immutable `v$PRODUCT_VERSION` tag. Development after an RC keeps that RC product version and naturally describes itself from the RC tag until the next candidate tag is cut.
 
 Archive creation normalizes tar ordering/metadata, gzip headers, and the relocatable `pyvenv.cfg` placeholder so repeated packaging of the same accepted payload is byte-for-byte deterministic.
 
-Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under `.download-cache/` and are never shipped. GitHub Actions derives the shared download-cache key with `scripts/download-cache-key.sh` from dependency/build-input pins plus `requirements.lock`; lifecycle/archive metadata such as `BUNDLE_VERSION` does not churn that cache, while every reused artifact is still verified by its own pinned hash before use.
+Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under `.download-cache/` and are never shipped. GitHub Actions derives the shared download-cache key with `scripts/download-cache-key.sh` from dependency/build-input pins plus `requirements.lock`; product-version/archive metadata such as `PRODUCT_VERSION` does not churn that cache, while every reused artifact is still verified by its own pinned hash before use.
 The PostgreSQL server is built during every full acceptance/distribution build from the exact official PostgreSQL 17.10 source tarball inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10 regenerates scanner sources during this build, so the exact qualified AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM is a pinned build-only input: its SHA-256 is verified, its package identity/signature are checked inside the pinned image, it is installed from local bytes with container networking disabled, and it is not shipped in the runtime. The builder keeps the normal installed PostgreSQL prefix and deterministic GNU `ar` mode; optional readline, zlib, and ICU integrations are disabled only to reduce external runtime dependencies. The source-controlled PostgreSQL client/plpgsql_check payloads remain separately qualified inputs and can be reproduced with `scripts/rebuild-qualified-database-assets.sh` using the same pinned/offline PostgreSQL build prerequisites.
 
 Direct third-party license/attribution texts for redistributed command/database/capsule components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. PostgreSQL server provenance terminates at the pinned official source artifact and pinned build image rather than an opaque prebuilt server bundle; the official PostgreSQL copyright notice is retained in the runtime.
@@ -107,13 +108,13 @@ The package expands commands available **within permissions the host already gra
 
 ## Repository automation
 
-This repository is intentionally direct-to-`main`; PRs remain optional for explicit review/isolation. The permanent workflows are:
+Normal changes use topic branches and pull requests. Branch commits are detailed semantic checkpoints; the PR synthesizes the review unit and records one `Internal` / `Fix` / `Additive` / `Breaking` compatibility assessment; integration is a squash merge so `main` stays a sequence of coherent completed changes.
 
-- **Validate** — cheap source/static checks on every `main` push, optional PRs, and manual runs.
-- **Accept runtime** — deliberate full hydration/relocation/offline-rebuild/archive acceptance for development/candidate proof and automatic acceptance on payload-affecting `main` changes; retains only small checksum/`acceptance.json` evidence.
-- **Publish release** — manual or connector-triggered release gate. It resolves an exact accepted source commit, verifies **Accept runtime**, creates or verifies the exact release Git tag, and then creates or reuses the matching draft Release.
-- **Build distribution** — full tagged release build. It verifies the checked-out tag and mutable draft, attaches the archive, checksum and `acceptance.json`, and only then publishes the Release; it can also build a short-lived Actions artifact without a release tag.
+The permanent workflows are:
 
-For connector-only AI sessions, `.github/release-request.json` is the durable release command. `CONTRIBUTING.md` documents its exact schema and the release flow.
+- **Validate** — source/static checks plus commit-history and PR-description policy on pull requests and `main`.
+- **Accept runtime** — full hydration/relocation/offline-rebuild/archive acceptance for payload-affecting `main` changes and deliberate runtime proof.
+- **Publish release** — stable/prerelease gate for an exact accepted source. It creates/verifies immutable `v$PRODUCT_VERSION`, prepares/reuses the matching draft Release, and marks prerelease versions as GitHub prereleases.
+- **Build distribution** — full tagged build. It verifies tag/SHA/product-version agreement, attaches archive/checksum/`acceptance.json`, then publishes the draft.
 
-GitHub recommends draft-first publishing when release immutability is enabled because assets must be attached before publication. The workflow is designed for that model. Enabling repository **release immutability** is recommended for future releases so published tags/assets cannot be altered.
+For connector-only AI sessions, `.github/release-request.json` remains the auditable release command. `CONTRIBUTING.md` owns the exact record/version/release procedure. Enabling GitHub release immutability is recommended so published tags/assets cannot be altered.

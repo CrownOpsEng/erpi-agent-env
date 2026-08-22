@@ -4,7 +4,7 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 python3 - "$ROOT/versions.env" "$ROOT/requirements.lock" "$ROOT/vendor/pg-delta/package-lock.json" <<'PY'
 from pathlib import Path
 import hashlib,re,sys
-excluded={"BUNDLE_VERSION","BUILD_CUTOFF","ARCHIVE_MTIME","TARGET","MIN_KERNEL_VERSION","MIN_GLIBC_VERSION","MIN_GLIBCXX_SYMBOL"}
+excluded={"PRODUCT_VERSION","BUILD_CUTOFF","ARCHIVE_MTIME","TARGET","MIN_KERNEL_VERSION","MIN_GLIBC_VERSION","MIN_GLIBCXX_SYMBOL"}
 assign=re.compile(r'^([A-Z][A-Z0-9_]*)="([^"]*)"$')
 items=[]
 for raw in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
