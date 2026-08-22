@@ -143,7 +143,7 @@ BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"
 BUILDER_PIP_CACHE="$CACHE_DIR/pip-cache"
 BUILDER_NPM_CACHE="$CACHE_DIR/npm-cache"
 mkdir -p "$BUILDER_UV_CACHE" "$BUILDER_UV_PYTHON_CACHE" "$BUILDER_PIP_CACHE" "$BUILDER_NPM_CACHE"
-mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/runtime/pg-delta" "$BUILD/runtime/postgrest" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" "$BUILD/licenses/third-party" "$BUILD/licenses/postgresql" "$BUILD/licenses/pg-delta" "$BUILD/licenses/postgrest" \
+mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/runtime/pg-delta" "$BUILD/runtime/postgrest" "$BUILD/runtime/supabase" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" "$BUILD/licenses/third-party" "$BUILD/licenses/postgresql" "$BUILD/licenses/pg-delta" "$BUILD/licenses/postgrest" "$BUILD/licenses/supabase" \
   "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" \
   "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/state/postgrest" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
 ORIGINAL_BUILD_ROOT="$BUILD"
@@ -478,6 +478,30 @@ extract_single "$POSTGREST_AR" postgrest "$BUILD/runtime/postgrest/postgrest"
 file "$BUILD/runtime/postgrest/postgrest" | grep -F "statically linked" >/dev/null
 install -m 0644 "$SELF_DIR/vendor/postgrest/LICENSE" "$BUILD/licenses/postgrest/LICENSE"
 
+log "Supabase CLI $SUPABASE_CLI_VERSION"
+SUPABASE_CLI_AR="$DL/supabase_${SUPABASE_CLI_VERSION}_linux_amd64.tar.gz"
+fetch "https://github.com/supabase/cli/releases/download/v${SUPABASE_CLI_VERSION}/supabase_${SUPABASE_CLI_VERSION}_linux_amd64.tar.gz" "$SUPABASE_CLI_AR"
+verify_one "$SUPABASE_CLI_AR" "$SUPABASE_CLI_SHA256"
+SUPABASE_CLI_EXTRACT="$WORK/download-extract/supabase-cli"
+rm -rf "$SUPABASE_CLI_EXTRACT"; mkdir -p "$SUPABASE_CLI_EXTRACT"
+tar -xzf "$SUPABASE_CLI_AR" -C "$SUPABASE_CLI_EXTRACT"
+mapfile -t supabase_cli_files < <(find "$SUPABASE_CLI_EXTRACT" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+[[ "${supabase_cli_files[*]}" == 'supabase supabase-go' ]] || { printf 'Unexpected Supabase CLI archive contents: %s\n' "${supabase_cli_files[*]}" >&2; exit 1; }
+install -m 0755 "$SUPABASE_CLI_EXTRACT/supabase" "$BUILD/runtime/supabase/supabase"
+install -m 0755 "$SUPABASE_CLI_EXTRACT/supabase-go" "$BUILD/runtime/supabase/supabase-go"
+install -m 0755 "$SELF_DIR/templates/bin/supabase-wrapper" "$BUILD/bin/supabase"
+install -m 0644 "$SELF_DIR/vendor/supabase/LICENSE" "$BUILD/licenses/supabase/LICENSE"
+SUPABASE_GO_BINARY="$BUILD/runtime/supabase/supabase-go" "$BUILD/runtime/supabase/supabase" --version | grep -Fx "$SUPABASE_CLI_VERSION" >/dev/null
+"$BUILD/runtime/supabase/supabase-go" --version | grep -Fx "$SUPABASE_CLI_VERSION" >/dev/null
+file "$BUILD/runtime/supabase/supabase" | grep -F 'ELF 64-bit LSB executable, x86-64' >/dev/null
+file "$BUILD/runtime/supabase/supabase-go" | grep -F 'statically linked' >/dev/null
+SUPABASE_MAX_GLIBC="$(readelf --version-info "$BUILD/runtime/supabase/supabase" 2>/dev/null | grep -oE 'GLIBC_[0-9]+([.][0-9]+)+' | sort -Vu | tail -1)"
+[[ -n "$SUPABASE_MAX_GLIBC" ]] || { echo 'Could not determine Supabase CLI GLIBC floor.' >&2; exit 1; }
+version_at_least "$MIN_GLIBC_VERSION" "${SUPABASE_MAX_GLIBC#GLIBC_}" || {
+  echo "Supabase CLI exceeds runtime GLIBC floor: $SUPABASE_MAX_GLIBC > GLIBC_$MIN_GLIBC_VERSION" >&2
+  exit 1
+}
+
 log "PostgreSQL $POSTGRES_VERSION from pinned official source"
 PG_SOURCE_AR="$DL/postgresql-${POSTGRES_VERSION}.tar.bz2"
 PG_FLEX_RPM="$DL/${POSTGRES_FLEX_RPM_NEVRA}.rpm"
@@ -627,6 +651,7 @@ cat > "$BUILD/manifest/environment.json" <<JSON
     "postgresql": {"server": "$POSTGRES_VERSION", "server_source": "$POSTGRES_SOURCE_URL", "server_source_sha256": "$POSTGRES_SOURCE_SHA256", "server_build_image": "${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}", "pgtap": "$PGTAP_VERSION", "plpgsql_check": "$PLPGSQL_CHECK_VERSION", "client_tools": true, "disposable_clusters": true, "pgbench": true, "dump_restore": true, "amcheck": true, "checksums": true},
     "pg_delta": {"version": "$PG_DELTA_VERSION", "supabase_cli_baseline": "$PG_DELTA_SUPABASE_CLI_BASELINE", "surface": "plan-only", "live_connections": "numeric-loopback-only"},
     "postgrest": {"version": "$POSTGREST_VERSION", "supabase_cli_baseline": "$POSTGREST_SUPABASE_CLI_BASELINE", "database_targets": "numeric-loopback-only", "http_listener": "loopback-only"},
+    "supabase_cli": {"version": "$SUPABASE_CLI_VERSION", "distribution": "official-linux-amd64", "companion": "bundled-supabase-go", "credentials": "host/session", "container_runtime": "host-required-for-stack-commands"},
     "git_handoff": {"artifact_format": "git-bundle-zip-v1", "requires_host_git": true, "network": "not-required"},
     "node_capsules": {"postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION"},
     "utilities": {"shellcheck": "$SHELLCHECK_VERSION", "miller": "$MILLER_VERSION", "httpx_cli": true}
@@ -658,6 +683,7 @@ source_row shellcheck "$SHELLCHECK_VERSION" "https://github.com/koalaman/shellch
 source_row shellcheck-source "$SHELLCHECK_VERSION" "https://github.com/koalaman/shellcheck/archive/refs/tags/v$SHELLCHECK_VERSION.tar.gz" "$SHELLCHECK_SOURCE_SHA256"
 source_row miller "$MILLER_VERSION" "https://github.com/johnkerl/miller/releases/download/v$MILLER_VERSION/miller-$MILLER_VERSION-linux-amd64.tar.gz" "$MILLER_SHA256"
 source_row postgrest "$POSTGREST_VERSION" "https://github.com/PostgREST/postgrest/releases/download/v$POSTGREST_VERSION/postgrest-v$POSTGREST_VERSION-linux-static-x86-64.tar.xz" "$POSTGREST_SHA256"
+source_row supabase-cli "$SUPABASE_CLI_VERSION" "https://github.com/supabase/cli/releases/download/v$SUPABASE_CLI_VERSION/supabase_${SUPABASE_CLI_VERSION}_linux_amd64.tar.gz" "$SUPABASE_CLI_SHA256"
 source_row postgres-server-source "$POSTGRES_VERSION" "$POSTGRES_SOURCE_URL" "$POSTGRES_SOURCE_SHA256"
 source_row postgres-server-build-image manylinux_2_28_x86_64 "$POSTGRES_BUILD_IMAGE" "$POSTGRES_BUILD_IMAGE_SHA256"
 source_row postgres-server-build-flex "$POSTGRES_FLEX_RPM_NEVRA" "$POSTGRES_FLEX_RPM_URL" "$POSTGRES_FLEX_RPM_SHA256"

@@ -4,7 +4,7 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 for file in "$ROOT/build.sh" "$ROOT/tests/"*.sh "$ROOT/templates/scripts/"*.sh "$ROOT/templates/bin/agent-env" "$ROOT/scripts/normalize-python-links.sh" "$ROOT/scripts/build-identity.sh"; do
   bash -n "$file"
 done
-for file in "$ROOT/templates/bin/python-wrapper" "$ROOT/templates/bin/node-wrapper" "$ROOT/templates/bin/npm-wrapper" "$ROOT/templates/bin/npx-wrapper" "$ROOT/scripts/uv-isolated-exec.sh"; do
+for file in "$ROOT/templates/bin/python-wrapper" "$ROOT/templates/bin/node-wrapper" "$ROOT/templates/bin/npm-wrapper" "$ROOT/templates/bin/npx-wrapper" "$ROOT/templates/bin/supabase-wrapper" "$ROOT/scripts/uv-isolated-exec.sh"; do
   sh -n "$file"
 done
 for file in "$ROOT/templates/scripts/"*.py; do python3 -m py_compile "$file"; done
@@ -77,7 +77,7 @@ for path,record in pg_packages.items():
 print('hash-lock-and-vendor-shapes-ok')
 PY
 rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
-for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/git-handoff.py templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/postgrest.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/build-identity.sh scripts/check-version-transition.py scripts/check-commit-message.py scripts/check-pr-record.py scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE vendor/postgrest/LICENSE templates/scripts/pg-delta.mjs .github/pull_request_template.md tests/build-identity-check.sh tests/version-transition-check.sh tests/pr-record-check.sh tests/node-deps-safety-check.sh tests/git-handoff-check.sh; do
+for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/git-handoff.py templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/postgrest.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/build-identity.sh scripts/check-version-transition.py scripts/check-commit-message.py scripts/check-pr-record.py scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE vendor/postgrest/LICENSE vendor/supabase/LICENSE templates/bin/supabase-wrapper templates/scripts/pg-delta.mjs .github/pull_request_template.md tests/build-identity-check.sh tests/version-transition-check.sh tests/pr-record-check.sh tests/node-deps-safety-check.sh tests/git-handoff-check.sh; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime/build source missing: $file" >&2; exit 1; }
 done
 # The shipped router is a routing surface; do not enforce an arbitrary byte budget in place of semantic review.
@@ -121,6 +121,16 @@ grep -F 'verify_one "$POSTGREST_AR" "$POSTGREST_SHA256"' "$ROOT/build.sh" >/dev/
 grep -F 'PGRST_SERVER_HOST' "$ROOT/templates/scripts/postgrest.py" >/dev/null
 grep -F 'RETARGET_QUERY_KEYS' "$ROOT/templates/scripts/postgrest.py" >/dev/null
 grep -F 'postgrest run' "$ROOT/templates/bin/agent-env" >/dev/null
+# Supabase CLI is the exact official paired Linux amd64 release and keeps credentials outside the bundle.
+grep -F 'SUPABASE_CLI_VERSION="2.114.0"' "$ROOT/versions.env" >/dev/null
+grep -F 'SUPABASE_CLI_SHA256="f36a33ca867f1cce9ba5efa705863fdc545d1465d3719a721793ea67eb692c5a"' "$ROOT/versions.env" >/dev/null
+grep -F 'supabase_${SUPABASE_CLI_VERSION}_linux_amd64.tar.gz' "$ROOT/build.sh" >/dev/null
+grep -F 'SUPABASE_GO_BINARY="$ROOT/runtime/supabase/supabase-go"' "$ROOT/templates/bin/supabase-wrapper" >/dev/null
+grep -F 'source_row supabase-cli' "$ROOT/build.sh" >/dev/null
+grep -F 'SUPABASE_MAX_GLIBC=' "$ROOT/build.sh" >/dev/null
+grep -F "'supabase':probe(ROOT/'bin/supabase',['--version'])" "$ROOT/templates/scripts/doctor.py" >/dev/null
+grep -F 'SUPABASE_TELEMETRY_DISABLED=1 supabase migration new runtime_probe </dev/null' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+! grep -R -nE 'SUPABASE_ACCESS_TOKEN=|SUPABASE_DB_PASSWORD=|XDG_CONFIG_HOME=.*MAGNET_AGENT_ENV|HOME=.*MAGNET_AGENT_ENV' "$ROOT/templates/bin/supabase-wrapper" "$ROOT/templates/activate"
 # The v1 Python lock is source-controlled input, not resolved during hydration.
 grep -F 'verify_one "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"' "$ROOT/build.sh" >/dev/null
 ! grep -F 'pip compile' "$ROOT/build.sh"
