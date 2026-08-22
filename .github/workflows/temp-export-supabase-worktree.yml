@@ -1,0 +1,47 @@
+name: Temporary export Supabase worktree
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.head_ref == 'agent/supabase-cli-handoff'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out branch with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Build connector Git handoff
+        shell: bash
+        env:
+          SOURCE_BRANCH: agent/supabase-cli-handoff
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          git bundle create repository.bundle --all
+          printf '%s\n' "$source_sha" > SOURCE_SHA
+          printf '%s\n' "$SOURCE_BRANCH" > SOURCE_BRANCH
+          printf '%s\n' "$GITHUB_REPOSITORY" > REPOSITORY
+          python3 - <<'PY'
+          import zipfile
+          names=['repository.bundle','SOURCE_SHA','SOURCE_BRANCH','REPOSITORY']
+          with zipfile.ZipFile('repository-handoff.zip','w',compression=zipfile.ZIP_DEFLATED) as z:
+              for name in names: z.write(name,name)
+          PY
+
+      - name: Upload handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: supabase-cli-git-handoff
+          path: repository-handoff.zip
+          if-no-files-found: error
+          retention-days: 1
