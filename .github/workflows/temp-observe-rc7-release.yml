@@ -26,7 +26,7 @@ jobs:
 
             validate="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Validate" and .event == "push")] | sort_by(.created_at) | last // {}' <<<"$runs")"
             accept="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Accept runtime" and .event == "push")] | sort_by(.created_at) | last // {}' <<<"$runs")"
-            publish="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Publish release" and .event == "workflow_run")] | sort_by(.created_at) | last // {}' <<<"$runs")"
+            publish="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Publish release" and .event == "workflow_run" and .conclusion != "skipped")] | sort_by(.created_at) | last // {}' <<<"$runs")"
             distribution="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Build distribution" and .event == "workflow_dispatch")] | sort_by(.created_at) | last // {}' <<<"$runs")"
 
             for row in "$validate" "$accept" "$publish" "$distribution"; do
