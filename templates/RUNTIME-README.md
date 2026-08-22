@@ -39,6 +39,11 @@ Unix-domain sockets are deliberately disabled for this disposable runtime. All b
 
 The runtime includes pgTAP 1.3.3, plpgsql_check 2.8.11, pgbench, pg_dump/pg_restore, pg_amcheck, pg_checksums and normal client helpers. Project-specific compatibility roles, migrations, fixture data, test expectations, and production credentials do not belong in this bundle.
 
+
+### Supabase CLI
+
+`supabase` runs the pinned official Supabase CLI 2.114.0 Linux amd64 distribution. The wrapper always binds the matching bundled `supabase-go` companion while leaving `HOME`, XDG paths, access tokens, project credentials, and network policy as host/session state. Filesystem-only commands such as `supabase init` and `supabase migration new` work without a container runtime; commands that manage the local Supabase stack still require a usable host Docker-compatible runtime and any remote operations still require host network access and credentials.
+
 ### PostgREST request execution
 
 `agent-env postgrest run --db-uri postgresql://authenticator@127.0.0.1:54322/postgres --db-schemas api --db-anon-role anon --port 3000 -- COMMAND` starts the pinned standalone PostgREST 14.16 process, waits for its schema cache to become ready, exports `POSTGREST_URL` to `COMMAND`, and tears the service down when that command exits. The version is the exact upstream native default selected by the qualified Supabase CLI 2.114.0 baseline.

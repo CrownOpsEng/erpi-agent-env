@@ -71,7 +71,7 @@ with (root/'manifest/sources.tsv').open('r',encoding='utf-8',newline='') as hand
 assert rows and rows[0]==['component','version','url','sha256'], rows[:1]
 assert all(len(row)==4 and all(cell for cell in row) for row in rows[1:]), rows
 components={row[0] for row in rows[1:]}
-assert {'python-build-standalone','postgres-server-source','postgres-server-build-image','postgres-server-build-flex','postgrest','node-postgres','pgls-wasm','pg-delta-lock'} <= components
+assert {'python-build-standalone','postgres-server-source','postgres-server-build-image','postgres-server-build-flex','postgrest','supabase-cli','node-postgres','pgls-wasm','pg-delta-lock'} <= components
 licenses=root/'licenses/third-party'
 notice=licenses/'THIRD-PARTY-LICENSES.md'
 assert notice.is_file() and notice.stat().st_size>10000,notice
@@ -85,6 +85,11 @@ assert (root/'licenses/pg-delta/LICENSE').is_file()
 postgrest=env['capabilities']['postgrest']
 assert postgrest=={'version':'14.16','supabase_cli_baseline':'2.114.0','database_targets':'numeric-loopback-only','http_listener':'loopback-only'},postgrest
 assert (root/'licenses/postgrest/LICENSE').is_file()
+supabase=env['capabilities']['supabase_cli']
+assert supabase=={'version':'2.114.0','distribution':'official-linux-amd64','companion':'bundled-supabase-go','credentials':'host/session','container_runtime':'host-required-for-stack-commands'},supabase
+assert (root/'licenses/supabase/LICENSE').is_file()
+assert (root/'runtime/supabase/supabase').is_file() and (root/'runtime/supabase/supabase-go').is_file()
+assert not (root/'bin/supabase-go').exists(), 'supabase-go companion must not be ambient PATH surface'
 PY_META
 
 uv --version
@@ -99,6 +104,8 @@ gitleaks version
 shellcheck --version | grep -F 'version: 0.11.0' >/dev/null
 mlr --version | grep -F '6.20.2' >/dev/null
 "$ROOT/runtime/postgrest/postgrest" --version | grep -Fx 'PostgREST 14.16' >/dev/null
+supabase --version | grep -Fx '2.114.0' >/dev/null
+"$ROOT/runtime/supabase/supabase-go" --version | grep -Fx '2.114.0' >/dev/null
 httpx --help >/dev/null
 pip --version >/dev/null
 printf '{"a":1}\n' | jq -e '.a == 1' >/dev/null
@@ -109,6 +116,17 @@ node -e 'if (process.versions.node !== "24.19.0") process.exit(1)'
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-env-selftest.XXXXXX")"
 cleanup_tmp() { rm -rf "$TMP"; }
 trap cleanup_tmp EXIT
+
+SUPABASE_FIXTURE="$TMP/supabase-fixture"
+mkdir -p "$SUPABASE_FIXTURE"
+(
+  cd "$SUPABASE_FIXTURE"
+  HOME="$TMP/supabase-home" XDG_CONFIG_HOME="$TMP/supabase-home/.config" XDG_CACHE_HOME="$TMP/supabase-home/.cache" SUPABASE_TELEMETRY_DISABLED=1 supabase init --yes </dev/null >/dev/null
+  test -f supabase/config.toml
+  HOME="$TMP/supabase-home" XDG_CONFIG_HOME="$TMP/supabase-home/.config" XDG_CACHE_HOME="$TMP/supabase-home/.cache" SUPABASE_TELEMETRY_DISABLED=1 supabase migration new runtime_probe </dev/null >/dev/null
+  mapfile -t supabase_migrations < <(find supabase/migrations -maxdepth 1 -type f -name '*_runtime_probe.sql' -print)
+  [[ ${#supabase_migrations[@]} -eq 1 ]]
+)
 printf '#!/bin/sh\nprintf "ok\\n"\n' > "$TMP/good.sh"
 printf '#!/bin/sh\necho $UNQUOTED\n' > "$TMP/bad.sh"
 shellcheck "$TMP/good.sh" >/dev/null

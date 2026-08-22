@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+SUPABASE_GO_BINARY="$ROOT/runtime/supabase/supabase-go"
+export SUPABASE_GO_BINARY
+exec "$ROOT/runtime/supabase/supabase" "$@"

@@ -23,6 +23,7 @@ A payload-affecting source commit is releasable only after **Accept runtime** bu
 - PostgreSQL child-exit propagation and signal-interrupted teardown with no orphaned cluster state or occupied loopback port
 - exact pg-delta lock/API installation, plan-only routing, numeric-loopback refusal boundary, representative source→target→clone convergence, managed-schema filtering, and empty convergence re-plan
 - exact PostgREST upstream asset/version/static-binary provenance, numeric-loopback database refusal, loopback-only HTTP binding, real request-role impersonation/search-path/pre-request semantics, SECURITY DEFINER→SECURITY INVOKER success and SQLSTATE `42501` negative behavior over HTTP, plus interrupted-process cleanup
+- exact Supabase CLI 2.114.0 official Linux amd64 archive integrity, paired `supabase`/`supabase-go` runtime, supported-host GLIBC floor, relocation-safe companion routing, version probes, and filesystem-only `init`/`migration new` behavior under non-interactive stdin without bundled credentials or container-runtime assumptions
 - hostile relocation with spaces/unicode/deep paths
 - PostgreSQL lifecycle under that hostile relocation path over explicit `127.0.0.1` TCP with Unix-domain sockets disabled, preventing relocation depth from becoming a socket-path failure mode
 - rejection of original build-root residue and absolute symlinks
@@ -82,6 +83,15 @@ PostgREST 14.16 is pinned because it is the exact upstream native default select
 Acceptance must exercise the real PostgREST process rather than replacing it with `SET ROLE` or direct SQL. It proves request-role/session-role context, request search path, a configured generic pre-request function, and a SECURITY DEFINER wrapper calling a SECURITY INVOKER dependency in both a correctly granted path and a deliberately missing-schema-privilege path that surfaces SQLSTATE `42501` over HTTP. It also proves remote database refusal and signal cleanup.
 
 This capability is a discriminator for ordinary PostgREST semantics, not a claim of managed Supabase parity. Kong routing, Supabase Auth/API keys, Storage, Realtime and other provider topology remain outside the bundle. A PostgREST version or compatibility-baseline change requires fresh upstream-asset and runtime qualification before promotion.
+
+
+## Supabase CLI compatibility boundary
+
+Supabase CLI 2.114.0 is redistributed from the exact official Linux amd64 release archive as a paired runtime: the TypeScript/Bun `supabase` executable plus its matched `supabase-go` companion. The user-facing `supabase` wrapper resolves the bundle root at invocation time and exports only `SUPABASE_GO_BINARY` to the private companion path; `supabase-go` is not added to ambient `PATH`. `HOME`, XDG state, access tokens, database passwords, project links, and other credentials remain host/session state and are never redirected into immutable payload paths or bundled.
+
+Promotion does not claim that the portable environment supplies the full local Supabase stack by itself. Filesystem-only CLI behavior must work after hostile relocation without Docker or network access; stack-backed commands such as `supabase start`, local database lifecycle, containerized dump/diff paths, and service orchestration still require a usable host Docker-compatible runtime. Remote operations still require the host network and credentials the target repository/user intentionally provides.
+
+Acceptance verifies the exact archive hash and two-file distribution shape, both embedded version identities, the primary executable's GLIBC requirement against the environment floor, private companion routing, and real `supabase init` plus `supabase migration new` filesystem effects with stdin closed so non-interactive tests cannot hang waiting for input. Any Supabase CLI version, archive, companion-routing, or supported-host dependency change requires fresh qualification before promotion.
 
 ## Git handoff boundary
 

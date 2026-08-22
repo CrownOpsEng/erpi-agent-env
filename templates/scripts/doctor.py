@@ -34,6 +34,7 @@ def main()->int:
         'shellcheck':probe(ROOT/'bin/shellcheck',['--version']),
         'mlr':probe(ROOT/'bin/mlr',['--version']),
         'httpx_cli':probe(ROOT/'env/bin/httpx',['--help']),
+        'supabase':probe(ROOT/'bin/supabase',['--version']),
         'postgres_server':probe(ROOT/'runtime/postgres/server/bin/postgres',['--version']),
         'psql':probe(ROOT/'runtime/postgres/client/bin/psql',['--version']),
       },
