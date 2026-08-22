@@ -5,6 +5,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 cp "$ROOT/versions.env" "$TMP/versions.env"
+product_version="$(sed -n 's/^PRODUCT_VERSION="\([^"]*\)"$/\1/p' "$TMP/versions.env")"
+[[ -n "$product_version" ]] || { echo 'Fixture versions.env is missing PRODUCT_VERSION.' >&2; exit 1; }
 source_sha=0123456789abcdef0123456789abcdef01234567
 base_tag=v0.1.1
 distance=40
@@ -28,12 +30,12 @@ python3 "$ROOT/scripts/write-acceptance-metadata.py" \
   --run-attempt 2 \
   --event push
 
-python3 - <<'PY' "$TMP/acceptance.json" "$digest" "$artifact" "$source_sha"
+python3 - <<'PY' "$TMP/acceptance.json" "$digest" "$artifact" "$source_sha" "$product_version"
 import json, pathlib, sys
 record = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
 assert record['schema_version'] == 2
 assert record['status'] == 'accepted'
-assert record['product_version'] == '0.1.1'
+assert record['product_version'] == sys.argv[5]
 assert record['target'] == 'linux-x86_64-gnu'
 assert record['source'] == {
     'commit': sys.argv[4],
