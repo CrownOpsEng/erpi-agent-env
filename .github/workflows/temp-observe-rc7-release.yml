@@ -1,0 +1,71 @@
+name: Temporary observe RC7 release
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  observe:
+    if: github.head_ref == 'agent/rc7-release-observer'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: eeddfa36438c6d132878f22901d46e1483d6d3d5
+    steps:
+      - name: Observe exact RC7 workflow chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ((attempt=1; attempt<=150; attempt++)); do
+            runs="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&per_page=100")"
+
+            validate="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Validate" and .event == "push")] | sort_by(.created_at) | last // {}' <<<"$runs")"
+            accept="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Accept runtime" and .event == "push")] | sort_by(.created_at) | last // {}' <<<"$runs")"
+            publish="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Publish release" and .event == "workflow_run")] | sort_by(.created_at) | last // {}' <<<"$runs")"
+            distribution="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Build distribution" and .event == "workflow_dispatch")] | sort_by(.created_at) | last // {}' <<<"$runs")"
+
+            for row in "$validate" "$accept" "$publish" "$distribution"; do
+              failed="$(jq -r '(.status == "completed") and ((.conclusion // "") != "success")' <<<"$row")"
+              if [[ "$failed" == true ]]; then
+                printf 'validate=%s\naccept=%s\npublish=%s\ndistribution=%s\n' "$validate" "$accept" "$publish" "$distribution" >&2
+                exit 1
+              fi
+            done
+
+            complete="$(jq -rn --argjson v "$validate" --argjson a "$accept" --argjson p "$publish" --argjson d "$distribution" '
+              [$v,$a,$p,$d]
+              | all((.id // 0) != 0 and .status == "completed" and .conclusion == "success")')"
+            if [[ "$complete" == true ]]; then
+              jq -n \
+                --arg target_sha "$TARGET_SHA" \
+                --argjson validate "$validate" \
+                --argjson accept "$accept" \
+                --argjson publish "$publish" \
+                --argjson distribution "$distribution" \
+                '{target_sha:$target_sha,validate:$validate,accept:$accept,publish:$publish,distribution:$distribution}' \
+                > rc7-workflows.json
+              cat rc7-workflows.json
+              exit 0
+            fi
+
+            if (( attempt % 10 == 0 )); then
+              printf 'attempt=%s validate=%s accept=%s publish=%s distribution=%s\n' "$attempt" "$validate" "$accept" "$publish" "$distribution"
+            fi
+            sleep 20
+          done
+
+          echo 'Timed out waiting for the exact RC7 release workflow chain.' >&2
+          exit 1
+
+      - name: Upload exact RC7 workflow evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: exact-rc7-workflow-evidence
+          path: rc7-workflows.json
+          if-no-files-found: error
+          retention-days: 1
