@@ -48,3 +48,120 @@ jobs:
           ./tests/commit-range-check.sh
           ./tests/pr-record-check.sh
           ./tests/release-workflow-check.sh
+
+  supabase-promotion:
+    name: Supabase CLI exact product acceptance
+    if: github.event_name == 'pull_request' && github.head_ref == 'qualify/supabase-cli-2.114.0'
+    needs: builder
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      BASE_SHA: eeddfa36438c6d132878f22901d46e1483d6d3d5
+      EXPECTED_TREE: 1af031270a1b220da5243f5fd105af0b449dadf3
+      PATCH_B64_SHA256: 693d0f0266365afc3b774bd9d9db24ca85c96858399cd27230f3d2b94e52f863
+      PATCH_SHA256: e7f579213cc90029648409d3d165a713c9fd36f58bc09239d4e3e4bd92e09773
+      FEATURE_BRANCH: feat/supabase-cli
+    steps:
+      - name: Check out qualification source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: qualification
+
+      - name: Check out immutable RC7 baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: v0.2.0-rc.7
+          path: product
+
+      - name: Reconstruct exact permanent product tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_b64="$GITHUB_WORKSPACE/qualification/.github/supabase-cli-promotion.patch.gz.b64"
+          patch="$RUNNER_TEMP/supabase-cli-promotion.patch"
+          [[ "$(sha256sum "$patch_b64" | awk '{print $1}')" == "$PATCH_B64_SHA256" ]] || {
+            echo 'Promotion patch transport hash drifted.' >&2
+            exit 1
+          }
+          base64 --decode "$patch_b64" | gzip -dc > "$patch"
+          [[ "$(sha256sum "$patch" | awk '{print $1}')" == "$PATCH_SHA256" ]] || {
+            echo 'Decoded promotion patch hash drifted.' >&2
+            exit 1
+          }
+
+          cd "$GITHUB_WORKSPACE/product"
+          [[ "$(git rev-parse HEAD)" == "$BASE_SHA" ]] || {
+            echo "RC7 baseline drifted: $(git rev-parse HEAD)" >&2
+            exit 1
+          }
+          [[ "$(git describe --exact-match --tags HEAD)" == 'v0.2.0-rc.7' ]] || {
+            echo 'Baseline is not exact v0.2.0-rc.7.' >&2
+            exit 1
+          }
+
+          git apply --index --binary "$patch"
+          [[ "$(git write-tree)" == "$EXPECTED_TREE" ]] || {
+            echo "Promotion tree mismatch: expected $EXPECTED_TREE, got $(git write-tree)" >&2
+            git diff --cached --stat >&2
+            exit 1
+          }
+          git diff --cached --check
+          ./tests/static-check.sh
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -F - <<'MSG'
+          feat(supabase): add portable CLI runtime
+
+          Why:
+          Supabase CLI 2.114.0 is already the qualified baseline for the bundled pg-delta and PostgREST capabilities, and Magnet Photos needs the actual CLI available in the portable execution harness without project-local installation.
+
+          What:
+          Pin the exact official Linux amd64 archive, redistribute the paired supabase and supabase-go executables behind a relocation-safe wrapper, preserve host/session credential and host-container boundaries, add provenance/license/doctor/docs, and verify filesystem-only CLI semantics including noninteractive migration creation and the glibc floor.
+
+          Verified:
+          The exact user-supplied archive matched the published SHA-256 f36a33ca867f1cce9ba5efa705863fdc545d1465d3719a721793ea67eb692c5a. Focused local qualification verified both 2.114.0 binaries, hostile relocation, init/migration behavior, command surfaces, and a GLIBC_2.17 maximum requirement. The completed product tree passed ./tests/static-check.sh locally, and hosted payload qualification run 32583860694 independently passed the official release archive checks.
+
+          Impact:
+          Additive supported capability. Full Supabase stack commands still require a host Docker-compatible runtime; remote operations still require host network access and credentials.
+          MSG
+
+          [[ "$(git rev-parse HEAD^{tree})" == "$EXPECTED_TREE" ]] || {
+            echo 'Committed product tree does not match the qualified tree.' >&2
+            exit 1
+          }
+          ./tests/static-check.sh
+
+      - name: Build and accept complete runtime
+        shell: bash
+        working-directory: product
+        run: ./build.sh
+
+      - name: Publish qualified feature commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/product"
+          head_sha="$(git rev-parse HEAD)"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          current="$(git ls-remote "$remote" "refs/heads/$FEATURE_BRANCH" | awk '{print $1}')"
+          if [[ "$current" == "$head_sha" ]]; then
+            echo "Feature branch already points to qualified commit $head_sha"
+            exit 0
+          fi
+          [[ "$current" == "$BASE_SHA" ]] || {
+            echo "Refusing to overwrite $FEATURE_BRANCH at unexpected commit ${current:-<missing>}" >&2
+            exit 1
+          }
+          git push "$remote" "HEAD:refs/heads/$FEATURE_BRANCH" \
+            "--force-with-lease=refs/heads/$FEATURE_BRANCH:$BASE_SHA"
+          echo "Qualified feature commit: $head_sha"
