@@ -39,10 +39,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          patch_xz="$GITHUB_WORKSPACE/transport/.github/versioning-transport/product.patch.xz"
-          test -f "$patch_xz"
-          printf '%s  %s\n' "$PATCH_XZ_SHA256" "$patch_xz" | sha256sum -c -
-          xz -dc "$patch_xz" > "$RUNNER_TEMP/product.patch"
+          chunk_dir="$GITHUB_WORKSPACE/transport/.github/versioning-transport"
+          for spec in \
+            "xz-00 86f8cd1d2a98c7117cbfad5ac69b189dc927789e303b0b3fb260423ae017c990" \
+            "xz-01 795c4b1e226ef2a12ec1be39db52774f63e80ad3d47d2b03ccd9edf648ad4752" \
+            "xz-02 d0800f07690b8a7da7427d319e10a939fc8dc538e48c213e4d019f500db846fd" \
+            "xz-03-0 b1db6c37abee02297e79ae4207a3ae75fca9aa6e5fa3098a602f71481cc85902" \
+            "xz-03-1 097ce5c6edebb01b53b3b6414380a72d69ceb60a17e42115707be2448c039f6f" \
+            "xz-03-2 7a7baf3ee76da6558ec28ee6d1bc564235c49c813927d1138f02288c8fa1b27a" \
+            "xz-03-3 e0dda34c11415702a84132664a00ee380e3b1494f2331ab3b15fef49769b7cd2"; do
+            set -- $spec
+            test -f "$chunk_dir/$1"
+            printf '%s  %s\n' "$2" "$chunk_dir/$1" | sha256sum -c -
+          done
+          cat \
+            "$chunk_dir/xz-00" \
+            "$chunk_dir/xz-01" \
+            "$chunk_dir/xz-02" \
+            "$chunk_dir/xz-03-0" \
+            "$chunk_dir/xz-03-1" \
+            "$chunk_dir/xz-03-2" \
+            "$chunk_dir/xz-03-3" \
+            > "$RUNNER_TEMP/product.patch.xz.b64"
+          base64 -d "$RUNNER_TEMP/product.patch.xz.b64" > "$RUNNER_TEMP/product.patch.xz"
+          printf '%s  %s\n' "$PATCH_XZ_SHA256" "$RUNNER_TEMP/product.patch.xz" | sha256sum -c -
+          xz -dc "$RUNNER_TEMP/product.patch.xz" > "$RUNNER_TEMP/product.patch"
           printf '%s  %s\n' "$PATCH_SHA256" "$RUNNER_TEMP/product.patch" | sha256sum -c -
           test "$(git -C source rev-parse HEAD)" = "$BASE_SHA"
           git -C source apply --index --binary "$RUNNER_TEMP/product.patch"
@@ -137,7 +158,20 @@ jobs:
           set -euo pipefail
           cd source
           git reset --hard "$BASE_SHA"
-          xz -dc "$GITHUB_WORKSPACE/transport/.github/versioning-transport/product.patch.xz" > "$RUNNER_TEMP/product.patch"
+          chunk_dir="$GITHUB_WORKSPACE/transport/.github/versioning-transport"
+          cat \
+            "$chunk_dir/xz-00" \
+            "$chunk_dir/xz-01" \
+            "$chunk_dir/xz-02" \
+            "$chunk_dir/xz-03-0" \
+            "$chunk_dir/xz-03-1" \
+            "$chunk_dir/xz-03-2" \
+            "$chunk_dir/xz-03-3" \
+            > "$RUNNER_TEMP/product.patch.xz.b64"
+          base64 -d "$RUNNER_TEMP/product.patch.xz.b64" > "$RUNNER_TEMP/product.patch.xz"
+          printf '%s  %s\n' "$PATCH_XZ_SHA256" "$RUNNER_TEMP/product.patch.xz" | sha256sum -c -
+          xz -dc "$RUNNER_TEMP/product.patch.xz" > "$RUNNER_TEMP/product.patch"
+          printf '%s  %s\n' "$PATCH_SHA256" "$RUNNER_TEMP/product.patch" | sha256sum -c -
           git apply --index --binary "$RUNNER_TEMP/product.patch"
           git restore --source="$BASE_SHA" --staged --worktree .github/workflows
           test -n "$(git diff --cached --name-only)"
