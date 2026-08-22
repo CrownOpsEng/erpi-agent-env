@@ -11,6 +11,8 @@ for file in "$ROOT/templates/scripts/"*.py; do python3 -m py_compile "$file"; do
 python3 -m py_compile "$ROOT/scripts/normalize-python-sysconfig.py"
 python3 -m py_compile "$ROOT/scripts/write-acceptance-metadata.py"
 python3 -m py_compile "$ROOT/scripts/check-version-transition.py"
+python3 -m py_compile "$ROOT/scripts/check-commit-message.py"
+python3 -m py_compile "$ROOT/scripts/check-pr-record.py"
 python3 - <<'PY' "$ROOT/versions.env" "$ROOT/requirements.in" "$ROOT/requirements.lock" "$ROOT"
 import hashlib, json, pathlib, re, sys
 versions_path, req_in_path, lock_path, root = map(pathlib.Path, sys.argv[1:])
@@ -75,7 +77,7 @@ for path,record in pg_packages.items():
 print('hash-lock-and-vendor-shapes-ok')
 PY
 rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
-for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/git-handoff.py templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/postgrest.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/build-identity.sh scripts/check-version-transition.py scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE vendor/postgrest/LICENSE templates/scripts/pg-delta.mjs tests/build-identity-check.sh tests/version-transition-check.sh tests/node-deps-safety-check.sh tests/git-handoff-check.sh; do
+for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/git-handoff.py templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/postgrest.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/build-identity.sh scripts/check-version-transition.py scripts/check-commit-message.py scripts/check-pr-record.py scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE vendor/postgrest/LICENSE templates/scripts/pg-delta.mjs .github/pull_request_template.md tests/build-identity-check.sh tests/version-transition-check.sh tests/pr-record-check.sh tests/node-deps-safety-check.sh tests/git-handoff-check.sh; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime/build source missing: $file" >&2; exit 1; }
 done
 # The shipped router is a routing surface; do not enforce an arbitrary byte budget in place of semantic review.
@@ -181,8 +183,12 @@ fi
 python3 - <<'PY_VERSION' "$ROOT/versions.env"
 import re,sys
 text=open(sys.argv[1],encoding='utf-8').read()
-m=re.search(r'^BUNDLE_VERSION="([^"]+)"$',text,re.M)
-assert m and re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?',m.group(1)),m.group(1) if m else None
+matches=re.findall(r'^PRODUCT_VERSION="([^"]+)"$',text,re.M)
+assert len(matches)==1,matches
+version=matches[0]
+assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:alpha|beta|rc)\.[1-9][0-9]*)?',version),version
+assert '+g' not in version and not version.endswith('-dev'),version
+assert 'BUNDLE_VERSION=' not in text
 PY_VERSION
 grep -F 'BUILD_CUTOFF="2026-08-20T04:30:00Z"' "$ROOT/versions.env" >/dev/null
 grep -F 'ARCHIVE_MTIME="2026-08-20T04:30:00Z"' "$ROOT/versions.env" >/dev/null
@@ -197,8 +203,8 @@ grep -F "delimiter='\t'" "$ROOT/build.sh" >/dev/null
 ! grep -F 'component\tversion\turl\tsha256' "$ROOT/build.sh"
 grep -F 'vendor/licenses/THIRD-PARTY-LICENSES.md' "$ROOT/build.sh" >/dev/null
 grep -F 'licenses/third-party/THIRD-PARTY-LICENSES.md' "$ROOT/build.sh" >/dev/null
-grep -F '@BUNDLE_VERSION@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
-grep -F '@BUILD_ID@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
+grep -F '@PRODUCT_VERSION@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
+grep -F '@SOURCE_DESCRIPTION@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
 grep -F '@SOURCE_COMMIT@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
 grep -F 'shellcheck-v${SHELLCHECK_VERSION}-source.tar.gz' "$ROOT/build.sh" >/dev/null
 grep -F 'SHELLCHECK_SOURCE_SHA256' "$ROOT/build.sh" >/dev/null
@@ -207,33 +213,26 @@ grep -F -- '--sort=name --format=gnu --numeric-owner --owner=0 --group=0' "$ROOT
 grep -F 'gzip -n > "$dest"' "$ROOT/build.sh" >/dev/null
 grep -F 'Archive packaging is not deterministic for the accepted payload.' "$ROOT/build.sh" >/dev/null
 grep -F 'Immutable payload contains a group/world-writable regular file' "$ROOT/build.sh" >/dev/null
-grep -F 'Publish release accepts stable versions only; release candidates are validation artifacts.' "$ROOT/.github/workflows/publish-release.yml" >/dev/null
-# Version lifecycle policy.
-python3 - "$ROOT/versions.env" <<'PY_VERSION_LIFECYCLE'
-import re, sys
-from pathlib import Path
-text = Path(sys.argv[1]).read_text(encoding="utf-8")
-matches = re.findall(r'^BUNDLE_VERSION="([^"]+)"$', text, flags=re.M)
-assert len(matches) == 1, matches
-version = matches[0]
-assert "+" not in version, "build metadata is derived from source_commit, not stored in BUNDLE_VERSION"
-assert re.fullmatch(r"\d+\.\d+\.\d+(?:-dev|-rc\.[1-9]\d*)?", version), version
-PY_VERSION_LIFECYCLE
+grep -F 'args+=(--prerelease)' "$ROOT/.github/workflows/publish-release.yml" >/dev/null
+# Product version and Git source-ancestry policy.
 ! grep -q '^  pull_request:' "$ROOT/.github/workflows/accept-runtime.yml"
 grep -q '^  push:' "$ROOT/.github/workflows/accept-runtime.yml"
 grep -q '^  workflow_dispatch:' "$ROOT/.github/workflows/accept-runtime.yml"
-grep -F '## Compatibility and version selection' "$ROOT/CONTRIBUTING.md" >/dev/null
-grep -F '## Development and release version lifecycle' "$ROOT/CONTRIBUTING.md" >/dev/null
-grep -F '## Build identity and candidate boundary' "$ROOT/VALIDATION.md" >/dev/null
+grep -F '## Product version and source identity' "$ROOT/CONTRIBUTING.md" >/dev/null
+grep -F '## Source identity and release lifecycle' "$ROOT/CONTRIBUTING.md" >/dev/null
+grep -F '## Source identity and release boundary' "$ROOT/VALIDATION.md" >/dev/null
 grep -F 'source "$SELF_DIR/scripts/build-identity.sh"' "$ROOT/build.sh" >/dev/null
 grep -F 'MAGNET_AGENT_SOURCE_COMMIT' "$ROOT/build.sh" >/dev/null
+grep -F 'MAGNET_AGENT_SOURCE_BASE_TAG' "$ROOT/build.sh" >/dev/null
+grep -F 'MAGNET_AGENT_SOURCE_DISTANCE' "$ROOT/build.sh" >/dev/null
+grep -F 'MAGNET_AGENT_SOURCE_DESCRIPTION' "$ROOT/build.sh" >/dev/null
+grep -F "describe --tags --match 'v[0-9]*' --abbrev=0 --first-parent" "$ROOT/build.sh" >/dev/null
 grep -F 'Distributable builds require a clean committed source tree' "$ROOT/build.sh" >/dev/null
 grep -F 'ARTIFACT="$OUT_DIR/${ARTIFACT_STEM}.tar.gz"' "$ROOT/build.sh" >/dev/null
-! grep -F 'magnet-agent-env-linux-x64-v${BUNDLE_VERSION}.tar.gz' "$ROOT/build.sh"
-grep -F '"build_id": "$BUILD_ID"' "$ROOT/build.sh" >/dev/null
-grep -F '"source_commit": "$SOURCE_COMMIT"' "$ROOT/build.sh" >/dev/null
+grep -F '"product_version": "$PRODUCT_VERSION"' "$ROOT/build.sh" >/dev/null
+grep -F '"source": {"commit": "$SOURCE_COMMIT", "description": "$SOURCE_DESCRIPTION", "base_tag": "$SOURCE_BASE_TAG", "distance": $SOURCE_DISTANCE}' "$ROOT/build.sh" >/dev/null
 grep -F 'expected_filename = f"{artifact_stem}.tar.gz"' "$ROOT/scripts/write-acceptance-metadata.py" >/dev/null
-grep -F "build_id==f'{bundle_version}+g{source_commit[:12]}'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F "source_description == f'{source_base_tag}-{source_distance}-g{source_commit[:12]}'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
 grep -F 'POSTGRES_VERSION="17.10"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGRES_SOURCE_URL="https://ftp.postgresql.org/pub/source/v17.10/postgresql-17.10.tar.bz2"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGRES_SOURCE_SHA256="078a03516dcdbdb705fecaf415ea3d13a956c589e46f09fed68a06fb00598c90"' "$ROOT/versions.env" >/dev/null
@@ -333,6 +332,7 @@ require_contains 'kill -TERM "$runner_pid"' "$ROOT/templates/scripts/selftest.sh
 require_contains 'for (( attempt=0; attempt<100; attempt++ )); do' "$ROOT/templates/scripts/selftest.sh" 'dependency-free signal readiness loop'
 "$ROOT/tests/build-identity-check.sh"
 "$ROOT/tests/version-transition-check.sh"
+"$ROOT/tests/pr-record-check.sh"
 "$ROOT/tests/github-auth-check.sh"
 "$ROOT/tests/acceptance-metadata-check.sh"
 "$ROOT/tests/uv-isolation-check.sh"

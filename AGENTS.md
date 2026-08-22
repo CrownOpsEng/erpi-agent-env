@@ -13,7 +13,7 @@ The bundle's consumer agent contract is source-controlled as `payload/AGENTS.md.
 - Validation and acceptance contract: `VALIDATION.md`.
 - Consumer agent routing: `payload/AGENTS.md.in`.
 - Consumer operating reference: `templates/RUNTIME-README.md`.
-- Exact versions, integrity pins, and lifecycle version: `versions.env`.
+- Exact versions, integrity pins, and product version: `versions.env`.
 - Executable truth: `build.sh`, `scripts/`, `tests/`, and `.github/workflows/`.
 
 Read only the authority needed for the current concern. If surfaces disagree, treat that as drift rather than silently choosing one.
@@ -23,11 +23,10 @@ Read only the authority needed for the current concern. If surfaces disagree, tr
 - Preserve the fail-closed portability, integrity, credential-isolation, offline-recovery, and host-capability boundaries already encoded by executable checks.
 - Keep builder policy and consumer operation separate. Consumer files describe how to use an extracted bundle; builder files describe how to construct, validate, and release it. Do not copy build/release procedure into the consumer router.
 - Keep durable target-state files neutral and present-tense. Put chronology, rejected alternatives, and prior states in commits, pull requests, issues, Actions evidence, or explicit provenance records.
-- The repository is intentionally direct-to-`main`; use a pull request only when explicit review, isolation, or coordination earns it. Make one coherent commit per logical change when practical.
-- Every new commit follows the detailed record contract in `CONTRIBUTING.md`.
-- If no usable shell checkout exists, do not claim local validation. Make the coherent repository change through the connected GitHub capability and inspect **Validate**. Payload-affecting changes additionally require **Accept runtime** before a release candidate can be cut.
+- Normal changes use a topic branch and PR, with semantic checkpoint commits and squash integration; `CONTRIBUTING.md` owns the detailed record, compatibility, version, and release rules.
+- If no usable shell checkout exists, do not claim local validation. Use the connector-backed Git handoff when coherent local Git semantics matter; otherwise keep remote operations in the connected GitHub capability and report only observed proof.
 - Preserve one logical long-running validation. Give it an adequate outer timeout or supervise/poll that same process; do not fragment a suite merely to satisfy an agent wrapper timeout.
-- A release-candidate identity is immutable. If source must change after `X.Y.Z-rc.N`, the next source commit returns to `X.Y.Z-dev`; never modify code or documentation while retaining the rejected RC identity.
+- Product versions belong to real tagged stable/prerelease states. Ordinary development keeps the nearest released product version and derives source identity from Git ancestry; never invent a pseudo-development SemVer.
 - Never commit `dist/`, `.download-cache/`, credentials, runtime-generated mutable state, or manual copies of CI/release evidence.
 
 Keep this router small. Put detailed policy in its owner and objective rules in executable checks.

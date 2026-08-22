@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing draft release tag to build, attach, and publish (optional)
+        description: Existing draft release/prerelease tag to build, attach, and publish (optional)
         required: false
         type: string
 
@@ -19,7 +19,7 @@ jobs:
   build:
     name: Linux x86-64 runtime
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
 
@@ -28,12 +28,26 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
           ref: ${{ inputs.release_tag || github.sha }}
 
-      - name: Record exact source SHA
+      - name: Record exact source identity
         id: source
         shell: bash
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          base_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 --first-parent "$sha")"
+          distance="$(git rev-list --count --first-parent "${base_tag}..${sha}")"
+          if [[ "$distance" == 0 ]]; then
+            description="$base_tag"
+          else
+            description="${base_tag}-${distance}-g${sha:0:12}"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "base_tag=$base_tag" >> "$GITHUB_OUTPUT"
+          echo "distance=$distance" >> "$GITHUB_OUTPUT"
+          echo "description=$description" >> "$GITHUB_OUTPUT"
 
       - name: Compute builder download cache key
         id: download-cache
@@ -58,10 +72,14 @@ jobs:
         run: |
           set -euo pipefail
           source ./versions.env
-          expected="v${BUNDLE_VERSION}"
+          expected="v${PRODUCT_VERSION}"
           source_sha="$(git rev-parse HEAD)"
           [[ "$RELEASE_TAG" == "$expected" ]] || {
-            echo "Release tag $RELEASE_TAG does not match bundle version $expected." >&2
+            echo "Release tag $RELEASE_TAG does not match product version $expected." >&2
+            exit 1
+          }
+          [[ "${{ steps.source.outputs.distance }}" == 0 && "${{ steps.source.outputs.description }}" == "$RELEASE_TAG" ]] || {
+            echo "Tagged distribution must build from exact tag $RELEASE_TAG; source is ${{ steps.source.outputs.description }}." >&2
             exit 1
           }
 
@@ -74,30 +92,45 @@ jobs:
             exit 1
           }
 
-          is_draft="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .draft" | sed -n '1p')"
+          release_record="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | [.draft,.prerelease] | @tsv" | sed -n '1p')"
+          [[ -n "$release_record" ]] || {
+            echo "Release $RELEASE_TAG does not exist as a draft." >&2
+            exit 1
+          }
+          IFS=$'\t' read -r is_draft is_prerelease <<<"$release_record"
           [[ "$is_draft" == true ]] || {
-            echo "Release $RELEASE_TAG does not exist as a mutable draft." >&2
+            echo "Release $RELEASE_TAG is already published; refusing to replace immutable assets." >&2
+            exit 1
+          }
+          expected_prerelease=false
+          [[ "$PRODUCT_VERSION" == *-* ]] && expected_prerelease=true
+          [[ "$is_prerelease" == "$expected_prerelease" ]] || {
+            echo "Draft prerelease flag $is_prerelease does not match PRODUCT_VERSION $PRODUCT_VERSION." >&2
             exit 1
           }
 
       - name: Build and accept distribution
         env:
           MAGNET_AGENT_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}
+          MAGNET_AGENT_SOURCE_BASE_TAG: ${{ steps.source.outputs.base_tag }}
+          MAGNET_AGENT_SOURCE_DISTANCE: ${{ steps.source.outputs.distance }}
+          MAGNET_AGENT_SOURCE_DESCRIPTION: ${{ steps.source.outputs.description }}
         run: ./build.sh
 
       - name: Write acceptance metadata
         id: metadata
         shell: bash
-        env:
-          ACCEPTED_SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
           sidecar="$(printf '%s\n' dist/*.tar.gz.sha256)"
           python3 scripts/write-acceptance-metadata.py \
             --sidecar "$sidecar" \
             --output dist/acceptance.json \
-            --source-sha "$ACCEPTED_SOURCE_SHA" \
+            --source-sha "${{ steps.source.outputs.sha }}" \
+            --source-base-tag "${{ steps.source.outputs.base_tag }}" \
+            --source-distance "${{ steps.source.outputs.distance }}" \
+            --source-description "${{ steps.source.outputs.description }}" \
             --repository "$GITHUB_REPOSITORY" \
             --workflow "$GITHUB_WORKFLOW" \
             --run-id "$GITHUB_RUN_ID" \
@@ -112,6 +145,7 @@ jobs:
             cat dist/acceptance.json
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload distribution
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

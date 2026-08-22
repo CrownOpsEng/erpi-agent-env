@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the repository's detailed direct-to-main commit message contract."""
+"""Validate semantic checkpoint/mainline commit records."""
 
 from __future__ import annotations
 
@@ -10,12 +10,19 @@ SUBJECT_RE = re.compile(
     r"^(feat|fix|perf|refactor|test|docs|ci|chore)"
     r"(?:\([a-z0-9][a-z0-9-]*\))?!?: [^\s].+$"
 )
-SECTIONS = ("Why:", "What:", "Validation:")
+REQUIRED = ("Why:", "What:", "Verified:")
+OPTIONAL = "Impact:"
 
 
 def fail(message: str) -> None:
     print(f"Commit message policy: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def meaningful(lines: list[str], heading: str) -> None:
+    text = " ".join(line.strip() for line in lines if line.strip())
+    if len(text) < 12:
+        fail(f"{heading} needs a meaningful explanation, not a placeholder")
 
 
 def validate(message: str) -> None:
@@ -27,28 +34,38 @@ def validate(message: str) -> None:
     if len(subject) > 72:
         fail(f"subject is {len(subject)} characters; maximum is 72")
     if not SUBJECT_RE.fullmatch(subject):
-        fail("subject must use Conventional Commits: type(scope): imperative summary")
+        fail("subject must use Conventional Commits: type(scope): concise imperative summary")
 
     if len(lines) < 3 or lines[1] != "":
         fail("subject must be followed by a blank line and a detailed body")
 
     body = lines[2:]
-    positions: list[int] = []
-    for heading in SECTIONS:
-        try:
-            positions.append(body.index(heading))
-        except ValueError:
+    if "Validation:" in body:
+        fail("use Verified: for evidence actually obtained; Validation: is obsolete")
+
+    positions: dict[str, int] = {}
+    for heading in (*REQUIRED, OPTIONAL):
+        hits = [i for i, line in enumerate(body) if line == heading]
+        if len(hits) > 1:
+            fail(f"body section {heading} appears more than once")
+        if hits:
+            positions[heading] = hits[0]
+
+    for heading in REQUIRED:
+        if heading not in positions:
             fail(f"missing required body section {heading}")
 
-    if positions != sorted(positions) or len(set(positions)) != len(SECTIONS):
-        fail("body sections must appear once in Why, What, Validation order")
+    required_positions = [positions[h] for h in REQUIRED]
+    if required_positions != sorted(required_positions):
+        fail("body sections must appear in Why, What, Verified order")
+    if OPTIONAL in positions and positions[OPTIONAL] < positions["Verified:"]:
+        fail("Impact: must follow Verified:")
 
-    for index, heading in enumerate(SECTIONS):
-        start = positions[index] + 1
-        end = positions[index + 1] if index + 1 < len(SECTIONS) else len(body)
-        content = " ".join(line.strip() for line in body[start:end] if line.strip())
-        if len(content) < 12:
-            fail(f"{heading} needs a meaningful explanation, not a placeholder")
+    ordered = [(h, positions[h]) for h in (*REQUIRED, OPTIONAL) if h in positions]
+    ordered.sort(key=lambda item: item[1])
+    for idx, (heading, pos) in enumerate(ordered):
+        end = ordered[idx + 1][1] if idx + 1 < len(ordered) else len(body)
+        meaningful(body[pos + 1 : end], heading)
 
 
 def main() -> None:

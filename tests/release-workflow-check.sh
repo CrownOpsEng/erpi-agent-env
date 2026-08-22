@@ -3,30 +3,49 @@ set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PUBLISH="$ROOT/.github/workflows/publish-release.yml"
 BUILD="$ROOT/.github/workflows/build-dist.yml"
+VALIDATE="$ROOT/.github/workflows/validate.yml"
+REQUEST="$ROOT/.github/release-request.json"
 README="$ROOT/README.md"
 VALIDATION="$ROOT/VALIDATION.md"
 AGENTS="$ROOT/AGENTS.md"
 CONTRIBUTING="$ROOT/CONTRIBUTING.md"
 
-for file in "$PUBLISH" "$BUILD" "$README" "$VALIDATION" "$AGENTS" "$CONTRIBUTING"; do
-  [[ -s "$file" ]] || { echo "Required release-routing source missing: $file" >&2; exit 1; }
+for file in "$PUBLISH" "$BUILD" "$VALIDATE" "$REQUEST" "$README" "$VALIDATION" "$AGENTS" "$CONTRIBUTING"; do
+  [[ -s "$file" ]] || { echo "Required release/routing source missing: $file" >&2; exit 1; }
 done
 
-# An exact lightweight tag must exist before the draft is created so tagged
-# distribution checkout is a real Git ref, not only draft release metadata.
+python3 - <<'PY' "$REQUEST"
+import json, pathlib, re, sys
+record=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+assert set(record)=={'version'},record
+assert re.fullmatch(r'\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?',record['version']),record
+PY
+
+# PRs are the normal review unit and their title/body are mechanically checked.
+grep -F "github.event_name == 'pull_request'" "$VALIDATE" >/dev/null
+grep -F 'scripts/check-pr-record.py --title "$PR_TITLE"' "$VALIDATE" >/dev/null
+grep -F './tests/pr-record-check.sh' "$VALIDATE" >/dev/null
+grep -F 'Normal repository work uses a topic branch and pull request.' "$CONTRIBUTING" >/dev/null
+grep -F 'squash merge' "$CONTRIBUTING" >/dev/null
+
+# Successful main acceptance is the automatic release handoff; manual dispatch is recovery/idempotent.
+grep -F 'workflow_run:' "$PUBLISH" >/dev/null
+grep -F 'workflows: ["Accept runtime"]' "$PUBLISH" >/dev/null
+grep -F "github.event.workflow_run.head_branch == 'main'" "$PUBLISH" >/dev/null
+grep -F 'workflow_dispatch:' "$PUBLISH" >/dev/null
+grep -F 'release-request.json' "$PUBLISH" >/dev/null
+grep -F 'ordinary development from $base_tag; no release/prerelease will be published' "$PUBLISH" >/dev/null
+
+# Exact tag creation precedes draft creation; tags and published assets are never repointed/replaced.
 grep -F 'git/ref/tags/$release_tag' "$PUBLISH" >/dev/null
 grep -F '"ref=refs/tags/$release_tag"' "$PUBLISH" >/dev/null
-grep -F '"sha=$target_sha"' "$PUBLISH" >/dev/null
+grep -F '"sha=$TARGET_SHA"' "$PUBLISH" >/dev/null
+grep -F 'Immutable tag $release_tag already points to' "$PUBLISH" >/dev/null
 grep -F -- '--verify-tag' "$PUBLISH" >/dev/null
 grep -F -- '--draft' "$PUBLISH" >/dev/null
-grep -F 'Realigned draft release' "$PUBLISH" >/dev/null
-grep -F 'Reusing matching draft release' "$PUBLISH" >/dev/null
-grep -F 'already published at the accepted tag/SHA; no action is required' "$PUBLISH" >/dev/null
-grep -F "if: steps.release.outputs.published != 'true'" "$PUBLISH" >/dev/null
+grep -F 'args+=(--prerelease)' "$PUBLISH" >/dev/null
 grep -F 'gh workflow run build-dist.yml' "$PUBLISH" >/dev/null
 
-# Tag lookups must branch on gh's exit status. A 404 JSON error body must never
-# be captured through `|| true` and mistaken for a SHA.
 if grep -nE 'git/ref/tags/.*\|\|[[:space:]]*true' "$PUBLISH" "$BUILD"; then
   echo "Do not suppress tag-ref lookup failures into nonempty JSON values." >&2
   exit 1
@@ -35,22 +54,24 @@ grep -F 'if tag_sha="$(gh api' "$PUBLISH" >/dev/null
 grep -F 'if ! tag_sha="$(gh api' "$BUILD" >/dev/null
 
 tag_line="$(grep -nF '"ref=refs/tags/$release_tag"' "$PUBLISH" | cut -d: -f1)"
-create_line="$(grep -nF 'gh release create "$release_tag"' "$PUBLISH" | cut -d: -f1)"
+create_line="$(grep -nF 'args=(release create "$release_tag"' "$PUBLISH" | cut -d: -f1)"
 [[ -n "$tag_line" && -n "$create_line" && "$tag_line" -lt "$create_line" ]] || {
   echo "Release tag must be created/verified before draft Release creation." >&2
   exit 1
 }
 
-# Distribution builds verify the exact tag source, may repair draft assets, and
-# must never replace a published release.
-grep -F 'git/ref/tags/$RELEASE_TAG' "$BUILD" >/dev/null
-grep -F 'not checked-out source' "$BUILD" >/dev/null
-grep -F 'refusing to alter published assets' "$BUILD" >/dev/null
+# Distribution builds are exact-tag builds with complete source ancestry provenance.
+grep -F 'expected="v${PRODUCT_VERSION}"' "$BUILD" >/dev/null
+grep -F 'steps.source.outputs.distance' "$BUILD" >/dev/null
+grep -F 'steps.source.outputs.description' "$BUILD" >/dev/null
+grep -F 'Tagged distribution must build from exact tag' "$BUILD" >/dev/null
+grep -F 'MAGNET_AGENT_SOURCE_BASE_TAG: ${{ steps.source.outputs.base_tag }}' "$BUILD" >/dev/null
+grep -F 'MAGNET_AGENT_SOURCE_DISTANCE: ${{ steps.source.outputs.distance }}' "$BUILD" >/dev/null
+grep -F 'MAGNET_AGENT_SOURCE_DESCRIPTION: ${{ steps.source.outputs.description }}' "$BUILD" >/dev/null
+grep -F 'prerelease flag' "$BUILD" >/dev/null
+grep -F 'refusing to replace immutable assets' "$BUILD" >/dev/null
 grep -F 'gh release upload "$RELEASE_TAG"' "$BUILD" >/dev/null
 grep -F 'gh release edit "$RELEASE_TAG" --draft=false' "$BUILD" >/dev/null
-grep -F 'MAGNET_AGENT_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}' "$BUILD" >/dev/null
-grep -F "jq -er '.artifact.filename' dist/acceptance.json" "$BUILD" >/dev/null
-grep -F 'echo "name=${archive_name%.tar.gz}"' "$BUILD" >/dev/null
 
 attach_line="$(grep -nF 'gh release upload "$RELEASE_TAG"' "$BUILD" | cut -d: -f1)"
 publish_line="$(grep -nF 'gh release edit "$RELEASE_TAG" --draft=false' "$BUILD" | cut -d: -f1)"
@@ -59,8 +80,7 @@ publish_line="$(grep -nF 'gh release edit "$RELEASE_TAG" --draft=false' "$BUILD"
   exit 1
 }
 
-# Keep operator/agent docs version-neutral, current, and free of references to
-# retired manual history ledgers.
+# Current-state authority remains version-neutral and routes rather than duplicating procedure.
 ! grep -F 'v1.0.0' "$README"
 grep -F '**Publish release**' "$README" >/dev/null
 grep -F 'Change, commit, version, and release policy: `CONTRIBUTING.md`.' "$AGENTS" >/dev/null
@@ -68,6 +88,11 @@ if grep -F '.github/release-request.json' "$AGENTS" >/dev/null; then
   echo 'Root AGENTS.md should route release policy, not duplicate release-command procedure.' >&2
   exit 1
 fi
+if grep -R -nE 'PRODUCT_VERSION="[^"]*-dev|BUNDLE_VERSION="[^"]*-dev' "$ROOT" --exclude-dir=.git --exclude='commit-range-check.sh' --exclude='build-identity-check.sh' --exclude='version-transition-check.sh'; then
+  echo 'Live source must not reintroduce pseudo-development product versions.' >&2
+  exit 1
+fi
+
 for retired in 'BUILD-REVIEW.md' 'docs/validation-history.md'; do
   if grep -nF "$retired" "$README" "$VALIDATION" "$AGENTS" "$CONTRIBUTING"; then
     echo "Live authority docs reference retired history ledger: $retired" >&2

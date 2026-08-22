@@ -3,16 +3,19 @@ set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CHECKER="$ROOT/scripts/check-commit-message.py"
 
-valid='fix(repo): enforce detailed commit history
+valid='fix(repo): enforce semantic checkpoint records
 
 Why:
-The repository is intended to teach from its history, so terse subjects alone are not enough context for future review.
+The repository history is cold context for future review and resumption, so checkpoint commits need enough rationale to remain useful without loading unrelated guidance.
 
 What:
-Require structured rationale, implementation impact, and validation evidence on every direct-to-main commit.
+Require concise Conventional Commit subjects plus final-state Why, What, and Verified evidence, with optional Impact when compatibility or operations matter.
 
-Validation:
-The commit-message policy is exercised here with valid and invalid fixtures and is also checked by the Validate workflow.'
+Verified:
+The commit-message policy is exercised here with valid and invalid fixtures.
+
+Impact:
+This changes repository contribution records but not the runtime contract.'
 
 printf '%s\n' "$valid" | python3 "$CHECKER" >/dev/null
 
@@ -33,15 +36,25 @@ This subject does not use Conventional Commits.
 What:
 It should be rejected by the policy checker.
 
-Validation:
+Verified:
 The fixture expects a nonzero exit status.'
-expect_fail 'fix(repo): missing validation section
+expect_fail 'fix(repo): missing verified section
 
 Why:
 The body has a reason and implementation details.
 
 What:
-The validation section is deliberately absent.'
+The verified evidence section is deliberately absent.'
+expect_fail 'fix(repo): obsolete validation heading
+
+Why:
+The body is otherwise structurally complete.
+
+What:
+This fixture deliberately uses the superseded heading.
+
+Validation:
+The old heading must no longer satisfy the record contract.'
 expect_fail 'fix(repo): placeholder body
 
 Why:
@@ -50,7 +63,7 @@ ok
 What:
 ok
 
-Validation:
+Verified:
 ok'
 
 echo "Detailed commit-message policy checks passed."
