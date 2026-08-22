@@ -12,43 +12,42 @@ jobs:
   observe:
     if: github.head_ref == 'agent/main-acceptance-observer'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
       TARGET_SHA: f7a8c7ec82b18b33d3f7a79ab480cb07d3d352aa
     steps:
-      - name: Wait for exact main workflow chain
+      - name: Capture exact main workflow chain
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 90); do
-            runs="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&per_page=100")"
+          runs="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&per_page=100")"
 
-            validate="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Validate" and .event == "push")] | sort_by(.created_at) | last // {}' <<<"$runs")"
-            accept="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Accept runtime" and .event == "push")] | sort_by(.created_at) | last // {}' <<<"$runs")"
-            publish="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Publish release" and .event == "workflow_run")] | sort_by(.created_at) | last // {}' <<<"$runs")"
+          validate="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Validate" and .event == "push")] | sort_by(.created_at) | last // {}' <<<"$runs")"
+          accept="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Accept runtime" and .event == "push")] | sort_by(.created_at) | last // {}' <<<"$runs")"
+          publish="$(jq -c --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .name == "Publish release" and .event == "workflow_run")] | sort_by(.created_at) | last // {}' <<<"$runs")"
 
-            printf 'validate=%s\naccept=%s\npublish=%s\n' "$validate" "$accept" "$publish"
+          complete="$(jq -rn --argjson v "$validate" --argjson a "$accept" --argjson p "$publish" '
+            [$v,$a,$p]
+            | all((.id // 0) != 0 and .status == "completed" and .conclusion == "success")')"
+          [[ "$complete" == true ]] || {
+            printf 'validate=%s\naccept=%s\npublish=%s\n' "$validate" "$accept" "$publish" >&2
+            exit 1
+          }
 
-            failed="$(jq -rn --argjson v "$validate" --argjson a "$accept" --argjson p "$publish" '
-              [$v,$a,$p]
-              | any(.status == "completed" and (.conclusion != "success"))')"
-            if [[ "$failed" == true ]]; then
-              echo 'One or more exact-main workflow runs completed unsuccessfully.' >&2
-              exit 1
-            fi
+          jq -n \
+            --arg target_sha "$TARGET_SHA" \
+            --argjson validate "$validate" \
+            --argjson accept "$accept" \
+            --argjson publish "$publish" \
+            '{target_sha:$target_sha,validate:$validate,accept:$accept,publish:$publish}' \
+            > main-workflows.json
+          cat main-workflows.json
 
-            complete="$(jq -rn --argjson v "$validate" --argjson a "$accept" --argjson p "$publish" '
-              [$v,$a,$p]
-              | all((.id // 0) != 0 and .status == "completed" and .conclusion == "success")')"
-            if [[ "$complete" == true ]]; then
-              jq -n --argjson validate "$validate" --argjson accept "$accept" --argjson publish "$publish" \
-                '{validate:$validate,accept:$accept,publish:$publish}'
-              exit 0
-            fi
-
-            sleep 30
-          done
-
-          echo 'Timed out waiting for exact-main workflow chain.' >&2
-          exit 1
+      - name: Upload exact main workflow evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: exact-main-workflow-evidence
+          path: main-workflows.json
+          if-no-files-found: error
+          retention-days: 1
