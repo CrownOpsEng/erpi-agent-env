@@ -14,8 +14,8 @@ usage() {
   cat <<USAGE
 Usage: ./build.sh [--out DIR] [--cache DIR] [--keep-work]
 
-Build Magnet Agent Environment product ${PRODUCT_VERSION} for ${TARGET}.
-Artifact identity is derived from Git release/prerelease ancestry. Exported source trees without .git must provide MAGNET_AGENT_SOURCE_COMMIT, MAGNET_AGENT_SOURCE_BASE_TAG, MAGNET_AGENT_SOURCE_DISTANCE, and MAGNET_AGENT_SOURCE_DESCRIPTION.
+Build ERPI Agent Environment product ${PRODUCT_VERSION} for ${TARGET}.
+Artifact identity is derived from Git release/prerelease ancestry. Exported source trees without .git must provide ERPI_AGENT_SOURCE_COMMIT, ERPI_AGENT_SOURCE_BASE_TAG, ERPI_AGENT_SOURCE_DISTANCE, and ERPI_AGENT_SOURCE_DESCRIPTION.
 Requires an internet-connected supported Linux x86-64 host (kernel >= ${MIN_KERNEL_VERSION}, glibc >= ${MIN_GLIBC_VERSION}) with a working Docker daemon. No sudo is used.
 USAGE
 }
@@ -30,10 +30,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SOURCE_COMMIT="${MAGNET_AGENT_SOURCE_COMMIT:-}"
-SOURCE_BASE_TAG="${MAGNET_AGENT_SOURCE_BASE_TAG:-}"
-SOURCE_DISTANCE="${MAGNET_AGENT_SOURCE_DISTANCE:-}"
-SOURCE_DESCRIPTION="${MAGNET_AGENT_SOURCE_DESCRIPTION:-}"
+SOURCE_COMMIT="${ERPI_AGENT_SOURCE_COMMIT:-}"
+SOURCE_BASE_TAG="${ERPI_AGENT_SOURCE_BASE_TAG:-}"
+SOURCE_DISTANCE="${ERPI_AGENT_SOURCE_DISTANCE:-}"
+SOURCE_DESCRIPTION="${ERPI_AGENT_SOURCE_DESCRIPTION:-}"
 
 if command -v git >/dev/null 2>&1 && git -C "$SELF_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   CHECKOUT_COMMIT="$(git -C "$SELF_DIR" rev-parse HEAD)"
@@ -63,7 +63,7 @@ if command -v git >/dev/null 2>&1 && git -C "$SELF_DIR" rev-parse --is-inside-wo
     "SOURCE_DESCRIPTION:$SOURCE_DESCRIPTION:$RESOLVED_DESCRIPTION"; do
     IFS=: read -r label supplied resolved <<<"$pair"
     if [[ -n "$supplied" && "$supplied" != "$resolved" ]]; then
-      echo "MAGNET_AGENT_${label} $supplied does not match checked-out source value $resolved." >&2
+      echo "ERPI_AGENT_${label} $supplied does not match checked-out source value $resolved." >&2
       exit 1
     fi
   done
@@ -86,10 +86,10 @@ if command -v git >/dev/null 2>&1 && git -C "$SELF_DIR" rev-parse --is-inside-wo
   fi
 else
   missing=()
-  [[ -n "$SOURCE_COMMIT" ]] || missing+=(MAGNET_AGENT_SOURCE_COMMIT)
-  [[ -n "$SOURCE_BASE_TAG" ]] || missing+=(MAGNET_AGENT_SOURCE_BASE_TAG)
-  [[ -n "$SOURCE_DISTANCE" ]] || missing+=(MAGNET_AGENT_SOURCE_DISTANCE)
-  [[ -n "$SOURCE_DESCRIPTION" ]] || missing+=(MAGNET_AGENT_SOURCE_DESCRIPTION)
+  [[ -n "$SOURCE_COMMIT" ]] || missing+=(ERPI_AGENT_SOURCE_COMMIT)
+  [[ -n "$SOURCE_BASE_TAG" ]] || missing+=(ERPI_AGENT_SOURCE_BASE_TAG)
+  [[ -n "$SOURCE_DISTANCE" ]] || missing+=(ERPI_AGENT_SOURCE_DISTANCE)
+  [[ -n "$SOURCE_DESCRIPTION" ]] || missing+=(ERPI_AGENT_SOURCE_DESCRIPTION)
   if ((${#missing[@]})); then
     printf 'Cannot determine source ancestry without Git. Missing exported-source identity:' >&2
     printf ' %s' "${missing[@]}" >&2
@@ -134,9 +134,9 @@ docker info >/dev/null 2>&1 || { echo "A working Docker daemon is required to bu
 mkdir -p "$OUT_DIR" "$CACHE_DIR"
 OUT_DIR="$(CDPATH= cd -- "$OUT_DIR" && pwd -P)"
 CACHE_DIR="$(CDPATH= cd -- "$CACHE_DIR" && pwd -P)"
-WORK_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/magnet-agent-builder.XXXXXX")"
+WORK_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/erpi-agent-builder.XXXXXX")"
 WORK="$WORK_PARENT/Build Root With Spaces [relocation source]"
-BUILD="$WORK/magnet-agent-env"
+BUILD="$WORK/erpi-agent-env"
 DL="$CACHE_DIR"
 BUILDER_UV_CACHE="$CACHE_DIR/uv-cache"
 BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"
@@ -628,13 +628,13 @@ mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools
 
 cat > "$BUILD/manifest/environment.json" <<JSON
 {
-  "bundle": "Magnet Agent Environment",
+  "bundle": "ERPI Agent Environment",
   "product_version": "$PRODUCT_VERSION",
   "source": {"commit": "$SOURCE_COMMIT", "description": "$SOURCE_DESCRIPTION", "base_tag": "$SOURCE_BASE_TAG", "distance": $SOURCE_DISTANCE},
   "target": "$TARGET",
   "python_lock_resolution_cutoff": "$BUILD_CUTOFF",
   "python_lock_sha256": "$PYTHON_LOCK_SHA256",
-  "purpose": "Portable AI-agent execution capability layer; external to Magnet Photos project architecture",
+  "purpose": "Portable AI-agent execution capability layer; target repositories retain project architecture and dependency authority",
   "runtimes": {"python": "$PYTHON_VERSION", "python_distribution": "$PYTHON_DIST_ID", "node": "$NODE_VERSION"},
   "tools": {
     "uv": "$UV_VERSION",
@@ -745,7 +745,7 @@ done < <(find "$BUILD" -type l -print0)
 (( absolute_links == 0 )) || { echo "Absolute symlink(s) found." >&2; exit 1; }
 
 log "Relocation torture test"
-MOVED="$WORK_PARENT/Second Location – spaces and unicode/deep/nested/relocation/target/magnet-agent-env"
+MOVED="$WORK_PARENT/Second Location – spaces and unicode/deep/nested/relocation/target/erpi-agent-env"
 mkdir -p "$(dirname -- "$MOVED")"
 mv "$BUILD" "$MOVED"
 BUILD="$MOVED"
@@ -791,7 +791,7 @@ fi
 # sentinel instead of leaking the random builder path into the archive.
 PYVENV_CFG="$BUILD/env/pyvenv.cfg"
 awk '
-  /^home = / { print "home = __MAGNET_AGENT_RELOCATE__/runtime/python/current/bin"; next }
+  /^home = / { print "home = __ERPI_AGENT_RELOCATE__/runtime/python/current/bin"; next }
   { print }
 ' "$PYVENV_CFG" > "$PYVENV_CFG.tmp"
 mv "$PYVENV_CFG.tmp" "$PYVENV_CFG"
@@ -837,7 +837,7 @@ mv "$TMP_ART" "$ARTIFACT"
 EXTRACT_TEST="$WORK_PARENT/final extraction proof"
 mkdir -p "$EXTRACT_TEST"
 tar -xzf "$ARTIFACT" -C "$EXTRACT_TEST"
-EXTRACTED="$EXTRACT_TEST/magnet-agent-env"
+EXTRACTED="$EXTRACT_TEST/erpi-agent-env"
 "$EXTRACTED/bin/agent-env" selftest >/dev/null
 # The archive was created from $BUILD. First-use repair in the extracted copy
 # must remove that former absolute location everywhere, including pyvenv.cfg.

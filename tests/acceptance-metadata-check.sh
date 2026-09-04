@@ -11,7 +11,7 @@ source_sha=0123456789abcdef0123456789abcdef01234567
 base_tag=v0.1.1
 distance=40
 description=v0.1.1-40-g0123456789ab
-artifact="magnet-agent-env-linux-x64-${description}.tar.gz"
+artifact="erpi-agent-env-linux-x64-${description}.tar.gz"
 printf 'payload\n' > "$TMP/$artifact"
 digest="$(sha256sum "$TMP/$artifact" | awk '{print $1}')"
 printf '%s  %s\n' "$digest" "$artifact" > "$TMP/test.sha256"
@@ -24,7 +24,7 @@ python3 "$ROOT/scripts/write-acceptance-metadata.py" \
   --source-base-tag "$base_tag" \
   --source-distance "$distance" \
   --source-description "$description" \
-  --repository CrownOpsEng/magnet-photos-env \
+  --repository CrownOpsEng/erpi-agent-env \
   --workflow 'Accept runtime' \
   --run-id 123 \
   --run-attempt 2 \
@@ -43,7 +43,7 @@ assert record['source'] == {
     'base_tag': 'v0.1.1',
     'distance': 40,
 }
-assert record['repository'] == 'CrownOpsEng/magnet-photos-env'
+assert record['repository'] == 'CrownOpsEng/erpi-agent-env'
 assert record['workflow'] == {'name': 'Accept runtime', 'run_id': 123, 'run_attempt': 2, 'event': 'push'}
 assert record['artifact']['filename'] == sys.argv[3]
 assert record['artifact']['sha256'] == sys.argv[2]
@@ -61,7 +61,7 @@ if python3 "$ROOT/scripts/write-acceptance-metadata.py" \
   --source-base-tag "$base_tag" \
   --source-distance "$distance" \
   --source-description "$description" \
-  --repository CrownOpsEng/magnet-photos-env \
+  --repository CrownOpsEng/erpi-agent-env \
   --workflow 'Accept runtime' \
   --run-id 124 \
   --run-attempt 1 \
@@ -75,7 +75,7 @@ cat > "$TMP/release.env" <<'ENV'
 PRODUCT_VERSION="0.2.0-rc.1"
 TARGET="linux-x86_64-gnu"
 ENV
-release_artifact='magnet-agent-env-linux-x64-v0.2.0-rc.1.tar.gz'
+release_artifact='erpi-agent-env-linux-x64-v0.2.0-rc.1.tar.gz'
 printf 'release\n' > "$TMP/$release_artifact"
 release_digest="$(sha256sum "$TMP/$release_artifact" | awk '{print $1}')"
 printf '%s  %s\n' "$release_digest" "$release_artifact" > "$TMP/release.sha256"
@@ -87,7 +87,7 @@ python3 "$ROOT/scripts/write-acceptance-metadata.py" \
   --source-base-tag v0.2.0-rc.1 \
   --source-distance 0 \
   --source-description v0.2.0-rc.1 \
-  --repository CrownOpsEng/magnet-photos-env \
+  --repository CrownOpsEng/erpi-agent-env \
   --workflow 'Build distribution' \
   --run-id 125 \
   --run-attempt 1 \

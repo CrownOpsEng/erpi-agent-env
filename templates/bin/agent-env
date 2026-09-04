@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-export MAGNET_AGENT_ENV="$ROOT"
+export ERPI_AGENT_ENV="$ROOT"
 export VIRTUAL_ENV="$ROOT/env"
 export UV_CACHE_DIR="$ROOT/state/uv-cache"
 export UV_PYTHON_INSTALL_DIR="$ROOT/state/uv-python"

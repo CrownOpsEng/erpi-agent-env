@@ -10,7 +10,7 @@ items=[]
 for raw in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
     m=assign.fullmatch(raw)
     if m and m.group(1) not in excluded: items.append(m.groups())
-h=hashlib.sha256(); h.update(b"magnet-agent-env-download-cache-v1\0")
+h=hashlib.sha256(); h.update(b"erpi-agent-env-download-cache-v1\0")
 for name,value in sorted(items):
     h.update(name.encode()); h.update(b"="); h.update(value.encode()); h.update(b"\0")
 h.update(b"requirements.lock\0"); h.update(Path(sys.argv[2]).read_bytes())

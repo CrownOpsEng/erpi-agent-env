@@ -55,7 +55,7 @@ compute_build_identity() {
   SOURCE_BASE_TAG_ID="$source_base_tag"
   SOURCE_DISTANCE_ID="$source_distance"
   SOURCE_DESCRIPTION_ID="$source_description"
-  ARTIFACT_STEM="magnet-agent-env-${artifact_platform}-${source_description}"
+  ARTIFACT_STEM="erpi-agent-env-${artifact_platform}-${source_description}"
   export PRODUCT_VERSION_ID SOURCE_COMMIT_ID SOURCE_BASE_TAG_ID SOURCE_DISTANCE_ID SOURCE_DESCRIPTION_ID ARTIFACT_STEM
 }
 

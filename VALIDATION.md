@@ -1,6 +1,6 @@
 # Validation contract
 
-This file defines the stable validation authority for Magnet Agent Environment. Git history records changes; GitHub Actions and release assets record execution/publication evidence. Do not maintain a second hand-written run ledger here.
+This file defines the stable validation authority for ERPI Agent Environment. Git history records changes; GitHub Actions and release assets record execution/publication evidence. Do not maintain a second hand-written run ledger here.
 
 ## Source validation
 
@@ -72,7 +72,7 @@ A wrapper timeout is environmental evidence, not a test failure or success.
 
 ## pg-delta compatibility boundary
 
-The shipped pg-delta capability is intentionally narrower than the upstream CLI. `@supabase/pg-delta` is pinned exactly to `1.0.0-alpha.33`, with its complete npm lock and package integrity/license provenance, because that is the qualified default for Supabase CLI 2.114.0. Promotion requires useful and safe schema planning for the motivating Magnet Photos workflows; it does not require perfect behavioral parity with every Supabase CLI wrapper option.
+The shipped pg-delta capability is intentionally narrower than the upstream CLI. `@supabase/pg-delta` is pinned exactly to `1.0.0-alpha.33`, with its complete npm lock and package integrity/license provenance, because that is the qualified default for Supabase CLI 2.114.0. Promotion requires useful and safe schema planning for the motivating consumer workflows; it does not require perfect behavioral parity with every Supabase CLI wrapper option.
 
 Only `agent-env pg-delta plan` is exposed. Live source and target URLs must be numeric loopback, inherited PostgreSQL targeting variables are scrubbed, and upstream mutation commands such as `apply` or `sync` are not routed. Acceptance proves a representative plan can be generated without mutating source/target, applied by the test harness to a clone, and then converges to an empty re-plan. Any pg-delta version or compatibility-baseline change requires fresh qualification before promotion.
 
@@ -101,11 +101,11 @@ Restore must require host Git but no shell network or credential; reject malform
 
 Source validation covers positive multi-commit/multi-branch/tag restoration plus malformed metadata, branch/SHA mismatch, prerequisite bundles, unsafe ZIP members, hostile Git configuration, and destination refusal. Runtime acceptance exercises the shipped `agent-env git-handoff restore` command using a real locally generated full bundle. The capability is transport plumbing, not GitHub authentication and not a substitute for target-repository authority.
 
-## Project promotion proof
+## Consumer promotion proof
 
-A generic environment capability is not proven useful to Magnet Photos merely because its standalone self-test passes. Database-capability releases must additionally be exercised against the target repository's current authoritative migrations/tests before the environment release is published when that project is the motivating consumer.
+A reusable environment capability is not proven useful merely because its standalone self-test passes. When a capability is motivated by a specific consuming repository, release qualification must additionally exercise that repository's current authoritative interfaces/tests before the environment release is published.
 
-That project proof should use the repository's real pinned client dependency and existing suites unchanged wherever possible. The environment must not carry project schema, business logic, roles, migrations, or test expectations solely to manufacture a passing result.
+That consumer proof should use the repository's real pinned client dependency and existing suites unchanged wherever possible. The environment must not carry project schema, business logic, roles, migrations, or test expectations solely to manufacture a passing result.
 
 ## Source identity and release boundary
 
@@ -117,7 +117,7 @@ This boundary is mechanical and must prove both stable and prerelease ancestry. 
 
 Runtime `manifest/environment.json` and generated `acceptance.json` record product version, full source commit, source description, base tag, and numeric distance separately. The archive filename uses the source description directly; the SHA-256 sidecar remains authority for exact archive bytes.
 
-The builder refuses dirty worktrees. Exported source without `.git` must provide the complete source tuple (`MAGNET_AGENT_SOURCE_COMMIT`, `MAGNET_AGENT_SOURCE_BASE_TAG`, `MAGNET_AGENT_SOURCE_DISTANCE`, and `MAGNET_AGENT_SOURCE_DESCRIPTION`) because a SHA alone cannot reconstruct tag ancestry.
+The builder refuses dirty worktrees. Exported source without `.git` must provide the complete source tuple (`ERPI_AGENT_SOURCE_COMMIT`, `ERPI_AGENT_SOURCE_BASE_TAG`, `ERPI_AGENT_SOURCE_DISTANCE`, and `ERPI_AGENT_SOURCE_DESCRIPTION`) because a SHA alone cannot reconstruct tag ancestry.
 
 A `PRODUCT_VERSION` change is a dedicated release-metadata-only source change: `versions.env` and `.github/release-request.json` move together. It may be the single untagged release-cut commit ahead of the nearest existing tag; no later source commit may retain that ahead-of-tag product version. Once the matching tag is created, ordinary development may continue with the same product version and source descriptions anchored to that tag.
 
@@ -134,7 +134,7 @@ A release/prerelease requires:
 3. the exact payload-affecting source passes **Accept runtime** before publication;
 4. permanent release workflow creates/verifies immutable `v$PRODUCT_VERSION` at that exact source and prepares a draft Release;
 5. **Build distribution** checks out the real tag, requires source description to equal that tag, repeats full runtime acceptance, and attaches archive/checksum/`acceptance.json` before publication;
-6. when Magnet Photos is the motivating consumer, current project promotion proof passes through repository-owned interfaces;
+6. when a specific repository is the motivating consumer, current consumer promotion proof passes through repository-owned interfaces;
 7. PostgreSQL/runtime provenance boundaries remain intact.
 
 If an RC exposes a defect, its tag and published assets remain immutable. Keep the RC product version while fixing source; development descriptions attach to the RC tag. When ready, cut the next candidate with a release-metadata-only change (`rc.1` → `rc.2`). Do not increment PATCH for a defect in an unreleased target. If qualification shows the intended compatibility base is wrong, move to a new truthful base version.

@@ -51,7 +51,7 @@ def main()->int:
     }
     if ns.json: print(json.dumps(data,indent=2,sort_keys=True))
     else:
-        print(f"Magnet Agent Environment {data['bundle']['version']} @ {ROOT}")
+        print(f"ERPI Agent Environment {data['bundle']['version']} @ {ROOT}")
         for name,p in data['bundled'].items(): print(f"bundled {name}: {'yes' if p.get('available') else 'NO'} {p.get('output','')}")
         for name,p in data['host'].items(): print(f"host {name}: {'yes' if p.get('available') else 'no'}")
         print('repo:', ', '.join(k for k,v in data['repository'].items() if isinstance(v,bool) and v) or 'no repository markers')

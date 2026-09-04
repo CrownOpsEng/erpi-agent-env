@@ -20,11 +20,11 @@ import pathlib
 import sys
 path = pathlib.Path(sys.argv[1])
 expected = pathlib.Path(sys.argv[2])
-spec = importlib.util.spec_from_file_location("magnet_sysconfig_test", path)
+spec = importlib.util.spec_from_file_location("erpi_sysconfig_test", path)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 assert pathlib.Path(module.build_time_vars["BINDIR"]) == expected / "bin"
 assert pathlib.Path(module.build_time_vars["LIBDIR"]) == expected / "lib"
-assert "__MAGNET_AGENT_PYTHON_PREFIX__" not in repr(module.build_time_vars)
+assert "__ERPI_AGENT_PYTHON_PREFIX__" not in repr(module.build_time_vars)
 PY
 echo "Python sysconfig relocation check passed."

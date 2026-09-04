@@ -16,12 +16,12 @@ check() {
   grep -Fx "artifact_stem=$expected_stem" <<<"$output" >/dev/null
 }
 
-check 0.1.1 v0.1.1 0 v0.1.1 'magnet-agent-env-linux-x64-v0.1.1'
-check 0.1.1 v0.1.1 17 v0.1.1-17-g0123456789ab 'magnet-agent-env-linux-x64-v0.1.1-17-g0123456789ab'
-check 0.2.0-rc.1 v0.2.0-rc.1 0 v0.2.0-rc.1 'magnet-agent-env-linux-x64-v0.2.0-rc.1'
-check 0.2.0-rc.1 v0.2.0-rc.1 2 v0.2.0-rc.1-2-g0123456789ab 'magnet-agent-env-linux-x64-v0.2.0-rc.1-2-g0123456789ab'
+check 0.1.1 v0.1.1 0 v0.1.1 'erpi-agent-env-linux-x64-v0.1.1'
+check 0.1.1 v0.1.1 17 v0.1.1-17-g0123456789ab 'erpi-agent-env-linux-x64-v0.1.1-17-g0123456789ab'
+check 0.2.0-rc.1 v0.2.0-rc.1 0 v0.2.0-rc.1 'erpi-agent-env-linux-x64-v0.2.0-rc.1'
+check 0.2.0-rc.1 v0.2.0-rc.1 2 v0.2.0-rc.1-2-g0123456789ab 'erpi-agent-env-linux-x64-v0.2.0-rc.1-2-g0123456789ab'
 # A release-cut commit can carry the next product version while source still describes from the prior tag.
-check 0.2.0-rc.2 v0.2.0-rc.1 3 v0.2.0-rc.1-3-g0123456789ab 'magnet-agent-env-linux-x64-v0.2.0-rc.1-3-g0123456789ab'
+check 0.2.0-rc.2 v0.2.0-rc.1 3 v0.2.0-rc.1-3-g0123456789ab 'erpi-agent-env-linux-x64-v0.2.0-rc.1-3-g0123456789ab'
 
 if "$TOOL" 0.2.0-dev "$SHA" v0.1.1 1 v0.1.1-1-g0123456789ab linux-x86_64-gnu >/dev/null 2>&1; then
   echo 'Build identity accepted pseudo-development SemVer.' >&2

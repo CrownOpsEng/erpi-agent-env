@@ -113,15 +113,15 @@ The numeric distance makes development ordering visible; the Git SHA identifies 
 A development artifact therefore uses its source description directly:
 
 ```text
-magnet-agent-env-linux-x64-v0.1.1-17-g4c2fa17c9a1.tar.gz
-magnet-agent-env-linux-x64-v0.2.0-rc.1-2-g91ab3c4d5e6f.tar.gz
+erpi-agent-env-linux-x64-v0.1.1-17-g4c2fa17c9a1.tar.gz
+erpi-agent-env-linux-x64-v0.2.0-rc.1-2-g91ab3c4d5e6f.tar.gz
 ```
 
 At an exact tag the same rule naturally produces the release/prerelease name:
 
 ```text
-magnet-agent-env-linux-x64-v0.2.0-rc.1.tar.gz
-magnet-agent-env-linux-x64-v0.2.0.tar.gz
+erpi-agent-env-linux-x64-v0.2.0-rc.1.tar.gz
+erpi-agent-env-linux-x64-v0.2.0.tar.gz
 ```
 
 Do not invent another build version or manually copy commit metadata into `versions.env`.

@@ -91,8 +91,18 @@ if grep -R -nE 'export[[:space:]]+GH_CONFIG_DIR=|GH_CONFIG_DIR=' "$ROOT/template
   exit 1
 fi
 # Ad-hoc package/runtime installation belongs in mutable state rather than verified payload directories.
-grep -F 'UV_PYTHON_INSTALL_DIR="$MAGNET_AGENT_ENV/state/uv-python"' "$ROOT/templates/activate" >/dev/null
-grep -F 'NPM_CONFIG_PREFIX="$MAGNET_AGENT_ENV/state/npm-global"' "$ROOT/templates/activate" >/dev/null
+grep -F 'UV_PYTHON_INSTALL_DIR="$ERPI_AGENT_ENV/state/uv-python"' "$ROOT/templates/activate" >/dev/null
+grep -F 'NPM_CONFIG_PREFIX="$ERPI_AGENT_ENV/state/npm-global"' "$ROOT/templates/activate" >/dev/null
+# Current first-party authority must not regress to the retired product identity.
+# Build the token rather than embedding it so the guard does not match itself.
+legacy_brand="$(printf '%s%s' 'mag' 'net')"
+if grep -R -nFi --binary-files=without-match "$legacy_brand" \
+  "$ROOT/AGENTS.md" "$ROOT/README.md" "$ROOT/CONTRIBUTING.md" "$ROOT/VALIDATION.md" \
+  "$ROOT/build.sh" "$ROOT/versions.env" "$ROOT/.github" "$ROOT/payload" \
+  "$ROOT/scripts" "$ROOT/templates" "$ROOT/tests" "$ROOT/vendor/pg-delta"; then
+  echo "Retired product identity remains in current first-party source." >&2
+  exit 1
+fi
 # Mutable state is outside immutable payload verification/topology and is pristine in the distributed archive.
 grep -F "! -path './state/*'" "$ROOT/templates/scripts/verify.sh" >/dev/null
 grep -F '! -path "$ROOT/state/*"' "$ROOT/templates/scripts/selftest.sh" >/dev/null
@@ -130,7 +140,7 @@ grep -F 'source_row supabase-cli' "$ROOT/build.sh" >/dev/null
 grep -F 'SUPABASE_MAX_GLIBC=' "$ROOT/build.sh" >/dev/null
 grep -F "'supabase':probe(ROOT/'bin/supabase',['--version'])" "$ROOT/templates/scripts/doctor.py" >/dev/null
 grep -F 'SUPABASE_TELEMETRY_DISABLED=1 supabase migration new runtime_probe </dev/null' "$ROOT/templates/scripts/selftest.sh" >/dev/null
-! grep -R -nE 'SUPABASE_ACCESS_TOKEN=|SUPABASE_DB_PASSWORD=|XDG_CONFIG_HOME=.*MAGNET_AGENT_ENV|HOME=.*MAGNET_AGENT_ENV' "$ROOT/templates/bin/supabase-wrapper" "$ROOT/templates/activate"
+! grep -R -nE 'SUPABASE_ACCESS_TOKEN=|SUPABASE_DB_PASSWORD=|XDG_CONFIG_HOME=.*ERPI_AGENT_ENV|HOME=.*ERPI_AGENT_ENV' "$ROOT/templates/bin/supabase-wrapper" "$ROOT/templates/activate"
 # The v1 Python lock is source-controlled input, not resolved during hydration.
 grep -F 'verify_one "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"' "$ROOT/build.sh" >/dev/null
 ! grep -F 'pip compile' "$ROOT/build.sh"
@@ -147,7 +157,7 @@ grep -F 'PIP_CACHE_DIR="$BUILDER_PIP_CACHE"' "$ROOT/build.sh" >/dev/null
 # uv-managed absolute convenience links are preserved semantically but made relative.
 grep -F 'normalize-python-links.sh" "$BUILD/runtime/python"' "$ROOT/build.sh" >/dev/null
 # uv-managed Python sysconfig is normalized into a location-neutral, immutable file.
-grep -F '__MAGNET_AGENT_PYTHON_PREFIX__' "$ROOT/scripts/normalize-python-sysconfig.py" >/dev/null
+grep -F '__ERPI_AGENT_PYTHON_PREFIX__' "$ROOT/scripts/normalize-python-sysconfig.py" >/dev/null
 grep -F "sysconfig.get_config_var('BINDIR')" "$ROOT/templates/scripts/selftest.sh" >/dev/null
 # Native/compiled Python and uv-generated console entrypoints are exercised after each relocation/rebuild.
 grep -F 'import httpx, jsonschema, packaging, yaml, tomlkit, rpds' "$ROOT/templates/scripts/selftest.sh" >/dev/null
@@ -218,7 +228,7 @@ grep -F '@SOURCE_DESCRIPTION@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
 grep -F '@SOURCE_COMMIT@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
 grep -F 'shellcheck-v${SHELLCHECK_VERSION}-source.tar.gz' "$ROOT/build.sh" >/dev/null
 grep -F 'SHELLCHECK_SOURCE_SHA256' "$ROOT/build.sh" >/dev/null
-grep -F '__MAGNET_AGENT_RELOCATE__/runtime/python/current/bin' "$ROOT/build.sh" >/dev/null
+grep -F '__ERPI_AGENT_RELOCATE__/runtime/python/current/bin' "$ROOT/build.sh" >/dev/null
 grep -F -- '--sort=name --format=gnu --numeric-owner --owner=0 --group=0' "$ROOT/build.sh" >/dev/null
 grep -F 'gzip -n > "$dest"' "$ROOT/build.sh" >/dev/null
 grep -F 'Archive packaging is not deterministic for the accepted payload.' "$ROOT/build.sh" >/dev/null
@@ -232,10 +242,10 @@ grep -F '## Product version and source identity' "$ROOT/CONTRIBUTING.md" >/dev/n
 grep -F '## Source identity and release lifecycle' "$ROOT/CONTRIBUTING.md" >/dev/null
 grep -F '## Source identity and release boundary' "$ROOT/VALIDATION.md" >/dev/null
 grep -F 'source "$SELF_DIR/scripts/build-identity.sh"' "$ROOT/build.sh" >/dev/null
-grep -F 'MAGNET_AGENT_SOURCE_COMMIT' "$ROOT/build.sh" >/dev/null
-grep -F 'MAGNET_AGENT_SOURCE_BASE_TAG' "$ROOT/build.sh" >/dev/null
-grep -F 'MAGNET_AGENT_SOURCE_DISTANCE' "$ROOT/build.sh" >/dev/null
-grep -F 'MAGNET_AGENT_SOURCE_DESCRIPTION' "$ROOT/build.sh" >/dev/null
+grep -F 'ERPI_AGENT_SOURCE_COMMIT' "$ROOT/build.sh" >/dev/null
+grep -F 'ERPI_AGENT_SOURCE_BASE_TAG' "$ROOT/build.sh" >/dev/null
+grep -F 'ERPI_AGENT_SOURCE_DISTANCE' "$ROOT/build.sh" >/dev/null
+grep -F 'ERPI_AGENT_SOURCE_DESCRIPTION' "$ROOT/build.sh" >/dev/null
 grep -F "describe --tags --match 'v[0-9]*' --abbrev=0 --first-parent" "$ROOT/build.sh" >/dev/null
 grep -F 'Distributable builds require a clean committed source tree' "$ROOT/build.sh" >/dev/null
 grep -F 'ARTIFACT="$OUT_DIR/${ARTIFACT_STEM}.tar.gz"' "$ROOT/build.sh" >/dev/null
@@ -266,7 +276,7 @@ grep -F 'source_row postgres-server-build-flex' "$ROOT/build.sh" >/dev/null
 grep -F "'postgres-server-build-flex'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
 for workflow in "$ROOT/.github/workflows/accept-runtime.yml" "$ROOT/.github/workflows/build-dist.yml"; do
   grep -F 'name: Compute builder download cache key' "$workflow" >/dev/null
-  grep -F 'key: magnet-agent-env-linux-x64-${{ steps.download-cache.outputs.key }}' "$workflow" >/dev/null
+  grep -F 'key: erpi-agent-env-linux-x64-${{ steps.download-cache.outputs.key }}' "$workflow" >/dev/null
   ! grep -F "hashFiles('versions.env'" "$workflow" >/dev/null
 done
 [[ ! -e "$ROOT/vendor/database/postgres-server-17.10-linux-x64.txz" ]] || { echo 'Opaque prebuilt PostgreSQL server must not return.' >&2; exit 1; }
@@ -296,10 +306,10 @@ grep -F "unix_socket_directories = ''" "$ROOT/templates/scripts/postgres.py" >/d
 grep -F -- '--- PostgreSQL startup log ---' "$ROOT/templates/scripts/postgres.py" >/dev/null
 ! grep -F 'cluster / "socket"' "$ROOT/templates/scripts/postgres.py" >/dev/null
 grep -F 'package-lock.json is required' "$ROOT/templates/scripts/node-deps.py" >/dev/null
-! grep -R -nE 'anon|authenticated|service_role|magnet\.' "$ROOT/templates/scripts/postgres.py" "$ROOT/templates/scripts/pgtap.py" "$ROOT/templates/scripts/node-deps.py"
+! grep -R -nE 'anon|authenticated|service_role' "$ROOT/templates/scripts/postgres.py" "$ROOT/templates/scripts/pgtap.py" "$ROOT/templates/scripts/node-deps.py"
 # pg-delta is runtime-owned, exactly locked, plan-only, and restricted to numeric loopback.
 grep -F 'PG_DELTA_VERSION="1.0.0-alpha.33"' "$ROOT/versions.env" >/dev/null
-grep -F 'PG_DELTA_LOCK_SHA256="b61b7ff9631db90b051a52e87d6d317a303b5a7584db06cc4b351baa1e82f282"' "$ROOT/versions.env" >/dev/null
+grep -F 'PG_DELTA_LOCK_SHA256="fa6659239ce4e70738b5936f5690c2fdcf6bf2ef09e7c13a58c0009c8401bccf"' "$ROOT/versions.env" >/dev/null
 grep -F 'PG_DELTA_SUPABASE_CLI_BASELINE="2.114.0"' "$ROOT/versions.env" >/dev/null
 grep -F 'verify_one "$PG_DELTA_LOCK" "$PG_DELTA_LOCK_SHA256"' "$ROOT/build.sh" >/dev/null
 grep -F 'npm" ci --prefix "$BUILD/runtime/pg-delta" --ignore-scripts --no-audit --no-fund' "$ROOT/build.sh" >/dev/null

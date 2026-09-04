@@ -1,4 +1,4 @@
-# Magnet Agent Environment source router
+# ERPI Agent Environment source router
 
 ## Scope
 

@@ -65,9 +65,9 @@ grep -F 'expected="v${PRODUCT_VERSION}"' "$BUILD" >/dev/null
 grep -F 'steps.source.outputs.distance' "$BUILD" >/dev/null
 grep -F 'steps.source.outputs.description' "$BUILD" >/dev/null
 grep -F 'Tagged distribution must build from exact tag' "$BUILD" >/dev/null
-grep -F 'MAGNET_AGENT_SOURCE_BASE_TAG: ${{ steps.source.outputs.base_tag }}' "$BUILD" >/dev/null
-grep -F 'MAGNET_AGENT_SOURCE_DISTANCE: ${{ steps.source.outputs.distance }}' "$BUILD" >/dev/null
-grep -F 'MAGNET_AGENT_SOURCE_DESCRIPTION: ${{ steps.source.outputs.description }}' "$BUILD" >/dev/null
+grep -F 'ERPI_AGENT_SOURCE_BASE_TAG: ${{ steps.source.outputs.base_tag }}' "$BUILD" >/dev/null
+grep -F 'ERPI_AGENT_SOURCE_DISTANCE: ${{ steps.source.outputs.distance }}' "$BUILD" >/dev/null
+grep -F 'ERPI_AGENT_SOURCE_DESCRIPTION: ${{ steps.source.outputs.description }}' "$BUILD" >/dev/null
 grep -F 'prerelease flag' "$BUILD" >/dev/null
 grep -F 'refusing to replace immutable assets' "$BUILD" >/dev/null
 grep -F 'gh release upload "$RELEASE_TAG"' "$BUILD" >/dev/null

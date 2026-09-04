@@ -1,4 +1,4 @@
-# Magnet Agent Environment @PRODUCT_VERSION@
+# ERPI Agent Environment @PRODUCT_VERSION@
 
 Source: `@SOURCE_DESCRIPTION@`
 
@@ -9,7 +9,7 @@ Portable Linux x86-64 execution capability for AI-agent work. The target reposit
 ## Start
 
 ```bash
-source /path/to/magnet-agent-env/activate
+source /path/to/erpi-agent-env/activate
 agent-env doctor
 agent-env capabilities
 ```

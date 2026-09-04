@@ -1,8 +1,8 @@
-# Magnet Agent Environment Builder
+# ERPI Agent Environment Builder
 
-Builds a **portable Linux x86-64 AI-agent execution environment** for Magnet Photos and similar repositories when an agent has shell access but the host is missing useful tooling.
+Builds a **portable Linux x86-64 AI-agent execution environment** for repositories where an agent has shell access but the host is missing useful tooling.
 
-The bundle is deliberately external to the Magnet Photos application/dependency model. Target repositories remain authoritative for their own dependencies, safety rules, command surfaces, schemas, migrations, and application architecture.
+The bundle is deliberately external to target-project application/dependency models. Target repositories remain authoritative for their own dependencies, safety rules, command surfaces, schemas, migrations, and application architecture.
 
 The design target is high-leverage asymmetry: solve recurring execution-environment limitations once while keeping the permanent control surface small.
 
@@ -39,7 +39,7 @@ The supported runtime contract is GNU/Linux x86-64 with kernel >= 4.18, glibc >=
 
 ## Build
 
-Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256sum, find, sed/awk/grep, Git history containing the reachable version tags, a working Docker daemon, and internet access. Exported source trees without `.git` must provide the full `MAGNET_AGENT_SOURCE_COMMIT`, `MAGNET_AGENT_SOURCE_BASE_TAG`, `MAGNET_AGENT_SOURCE_DISTANCE`, and `MAGNET_AGENT_SOURCE_DESCRIPTION` tuple. No sudo is used. Docker is a builder capability only; it is not bundled into the runtime.
+Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256sum, find, sed/awk/grep, Git history containing the reachable version tags, a working Docker daemon, and internet access. Exported source trees without `.git` must provide the full `ERPI_AGENT_SOURCE_COMMIT`, `ERPI_AGENT_SOURCE_BASE_TAG`, `ERPI_AGENT_SOURCE_DISTANCE`, and `ERPI_AGENT_SOURCE_DESCRIPTION` tuple. No sudo is used. Docker is a builder capability only; it is not bundled into the runtime.
 
 ```bash
 ./tests/static-check.sh
@@ -49,10 +49,10 @@ Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256
 `PRODUCT_VERSION` in `versions.env` is the released compatibility identity, not a development-build counter. Ordinary source commits leave it unchanged. The builder derives the artifact identity from the nearest reachable stable/prerelease tag, commit distance, and source SHA:
 
 ```text
-stable descendant: magnet-agent-env-linux-x64-v0.1.1-17-g4c2fa17c9a1.tar.gz
-exact RC:          magnet-agent-env-linux-x64-v0.2.0-rc.1.tar.gz
-RC descendant:    magnet-agent-env-linux-x64-v0.2.0-rc.1-2-g91ab3c4d5e6f.tar.gz
-exact stable:      magnet-agent-env-linux-x64-v0.2.0.tar.gz
+stable descendant: erpi-agent-env-linux-x64-v0.1.1-17-g4c2fa17c9a1.tar.gz
+exact RC:          erpi-agent-env-linux-x64-v0.2.0-rc.1.tar.gz
+RC descendant:    erpi-agent-env-linux-x64-v0.2.0-rc.1-2-g91ab3c4d5e6f.tar.gz
+exact stable:      erpi-agent-env-linux-x64-v0.2.0.tar.gz
 ```
 
 This is Git source identity, not invented SemVer. The numeric distance makes development order visible; the full 40-character source SHA, base tag, distance and source description are recorded in `manifest/environment.json` and `acceptance.json`; the archive SHA-256 identifies the exact bytes.

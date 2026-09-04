@@ -64,19 +64,19 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .download-cache
-          key: magnet-agent-env-linux-x64-${{ steps.download-cache.outputs.key }}
+          key: erpi-agent-env-linux-x64-${{ steps.download-cache.outputs.key }}
           restore-keys: |
-            magnet-agent-env-linux-x64-
+            erpi-agent-env-linux-x64-
 
       - name: Run source validation
         run: ./tests/static-check.sh
 
       - name: Build and accept runtime
         env:
-          MAGNET_AGENT_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}
-          MAGNET_AGENT_SOURCE_BASE_TAG: ${{ steps.source.outputs.base_tag }}
-          MAGNET_AGENT_SOURCE_DISTANCE: ${{ steps.source.outputs.distance }}
-          MAGNET_AGENT_SOURCE_DESCRIPTION: ${{ steps.source.outputs.description }}
+          ERPI_AGENT_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}
+          ERPI_AGENT_SOURCE_BASE_TAG: ${{ steps.source.outputs.base_tag }}
+          ERPI_AGENT_SOURCE_DISTANCE: ${{ steps.source.outputs.distance }}
+          ERPI_AGENT_SOURCE_DESCRIPTION: ${{ steps.source.outputs.description }}
         run: ./build.sh
 
       - name: Write acceptance metadata

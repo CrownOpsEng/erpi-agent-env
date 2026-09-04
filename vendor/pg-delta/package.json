@@ -1,5 +1,5 @@
 {
-  "name": "magnet-agent-env-pg-delta-runtime",
+  "name": "erpi-agent-env-pg-delta-runtime",
   "private": true,
   "version": "0.0.0",
   "type": "module",
