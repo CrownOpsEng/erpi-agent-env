@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-for file in "$ROOT/build.sh" "$ROOT/tests/"*.sh "$ROOT/templates/scripts/"*.sh "$ROOT/templates/bin/agent-env" "$ROOT/scripts/normalize-python-links.sh" "$ROOT/scripts/build-identity.sh"; do
+for file in "$ROOT/build.sh" "$ROOT/tests/"*.sh "$ROOT/templates/scripts/"*.sh "$ROOT/templates/bin/agent-env" "$ROOT/scripts/normalize-python-links.sh" "$ROOT/scripts/build-identity.sh" "$ROOT/scripts/build-common.sh" "$ROOT/scripts/rebuild-qualified-database-assets.sh"; do
   bash -n "$file"
 done
 for file in "$ROOT/templates/bin/python-wrapper" "$ROOT/templates/bin/node-wrapper" "$ROOT/templates/bin/npm-wrapper" "$ROOT/templates/bin/npx-wrapper" "$ROOT/templates/bin/supabase-wrapper" "$ROOT/scripts/uv-isolated-exec.sh"; do
@@ -20,6 +20,7 @@ versions=versions_path.read_text(encoding='utf-8'); req_in=req_in_path.read_text
 vals=dict(re.findall(r'^(\w+)="([^"]*)"$', versions, flags=re.M))
 for name,value in vals.items():
     if name.endswith('_SHA256'): assert re.fullmatch(r'[0-9a-f]{64}',value),(name,value)
+    if name.endswith('_URL'): assert value.startswith('https://'),(name,value)
 assert hashlib.sha256(lock_path.read_bytes()).hexdigest()==vals['PYTHON_LOCK_SHA256']
 assert '/tmp/' not in lock and '# via' not in lock and 'Build Root' not in lock
 packages=re.findall(r'^([A-Za-z0-9_.-]+)==([^ \\n]+)',lock,flags=re.M); locked={n.lower():v for n,v in packages}
@@ -31,32 +32,30 @@ for line in req_in.splitlines():
 assert 'pytest' not in locked and 'setuptools' not in locked and 'wheel' not in locked
 checks={
  'vendor/database/postgresql-client-17.10-linux-x64-gnu.tar.gz':'POSTGRES_CLIENT_SHA256',
- 'vendor/database/plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz':'PLPGSQL_CHECK_SHA256',
- 'vendor/node-capsules/yaml-2.9.0.tgz':'YAML_SHA256',
- 'vendor/node-capsules/postgres-3.4.7.tgz':'POSTGRES_JS_SHA256',
- 'vendor/node-capsules/postgres-language-server-wasm-0.25.7.tgz':'PGLS_WASM_SHA256',
- 'vendor/node-capsules/fast-check-4.9.0.tgz':'FAST_CHECK_SHA256',
- 'vendor/node-capsules/pure-rand-8.4.2.tgz':'PURE_RAND_SHA256'}
+ 'vendor/database/plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz':'PLPGSQL_CHECK_SHA256'}
 for rel,key in checks.items():
     path=root/rel; assert path.is_file(),rel
     assert hashlib.sha256(path.read_bytes()).hexdigest()==vals[key],(rel,key)
 manifest_path=root/'vendor/node-capsules/manifest.json'
 manifest=json.loads(manifest_path.read_text(encoding='utf-8'))
 expected={
-    'yaml': (vals['YAML_VERSION'], f"yaml-{vals['YAML_VERSION']}.tgz", vals['YAML_SHA256']),
-    'postgres': (vals['POSTGRES_JS_VERSION'], f"postgres-{vals['POSTGRES_JS_VERSION']}.tgz", vals['POSTGRES_JS_SHA256']),
-    '@postgres-language-server/wasm': (vals['PGLS_WASM_VERSION'], f"postgres-language-server-wasm-{vals['PGLS_WASM_VERSION']}.tgz", vals['PGLS_WASM_SHA256']),
-    'fast-check': (vals['FAST_CHECK_VERSION'], f"fast-check-{vals['FAST_CHECK_VERSION']}.tgz", vals['FAST_CHECK_SHA256']),
-    'pure-rand': (vals['PURE_RAND_VERSION'], f"pure-rand-{vals['PURE_RAND_VERSION']}.tgz", vals['PURE_RAND_SHA256']),
+    'yaml': ('yaml', vals['YAML_VERSION'], f"yaml-{vals['YAML_VERSION']}.tgz", vals['YAML_SHA256']),
+    'postgres': ('node-postgres', vals['POSTGRES_JS_VERSION'], f"postgres-{vals['POSTGRES_JS_VERSION']}.tgz", vals['POSTGRES_JS_SHA256']),
+    '@postgres-language-server/wasm': ('pgls-wasm', vals['PGLS_WASM_VERSION'], f"postgres-language-server-wasm-{vals['PGLS_WASM_VERSION']}.tgz", vals['PGLS_WASM_SHA256']),
+    'fast-check': ('fast-check', vals['FAST_CHECK_VERSION'], f"fast-check-{vals['FAST_CHECK_VERSION']}.tgz", vals['FAST_CHECK_SHA256']),
+    'pure-rand': ('pure-rand', vals['PURE_RAND_VERSION'], f"pure-rand-{vals['PURE_RAND_VERSION']}.tgz", vals['PURE_RAND_SHA256']),
 }
 assert manifest.get('schema')==1
 assert isinstance(manifest.get('packages'),dict) and set(manifest['packages'])==set(expected)
-for name,(version,file,sha256) in expected.items():
+for name,(component,version,file,sha256) in expected.items():
     record=manifest['packages'][name]
+    assert record.get('component')==component,(name,'component')
     assert record.get('version')==version,(name,'version')
     assert record.get('file')==file,(name,'file')
     assert record.get('sha256')==sha256,(name,'sha256')
     assert re.fullmatch(r'sha512-[A-Za-z0-9+/]+={0,2}',record.get('integrity','')),(name,'integrity')
+    assert str(record.get('url','')).startswith('https://registry.npmjs.org/'),(name,'url')
+    assert not (root/'vendor/node-capsules'/file).exists(),(name,'capsule bytes should be acquired, not source-controlled')
 pg_package=json.loads((root/'vendor/pg-delta/package.json').read_text(encoding='utf-8'))
 pg_lock_path=root/'vendor/pg-delta/package-lock.json'
 pg_lock=json.loads(pg_lock_path.read_text(encoding='utf-8'))
@@ -79,7 +78,7 @@ for path,record in pg_packages.items():
 print('hash-lock-and-vendor-shapes-ok')
 PY
 rm -rf "$ROOT/templates/scripts/__pycache__" "$ROOT/scripts/__pycache__"
-for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/git-handoff.py templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/postgrest.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/build-identity.sh scripts/check-version-transition.py scripts/check-commit-message.py scripts/check-pr-record.py scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE vendor/postgrest/LICENSE vendor/supabase/LICENSE templates/bin/supabase-wrapper templates/scripts/pg-delta.mjs .github/pull_request_template.md tests/build-identity-check.sh tests/version-transition-check.sh tests/pr-record-check.sh tests/node-deps-safety-check.sh tests/git-handoff-check.sh; do
+for file in requirements.lock payload/AGENTS.md.in templates/RUNTIME-README.md templates/scripts/github.sh templates/scripts/git-handoff.py templates/scripts/doctor.py templates/scripts/postgres.py templates/scripts/postgrest.py templates/scripts/pgtap.py templates/scripts/node-deps.py templates/scripts/capabilities.py templates/bin/agent-env scripts/build-identity.sh scripts/build-common.sh scripts/check-version-transition.py scripts/check-commit-message.py scripts/check-pr-record.py scripts/uv-isolated-exec.sh scripts/write-acceptance-metadata.py scripts/rebuild-qualified-database-assets.sh vendor/licenses/THIRD-PARTY-LICENSES.md vendor/node-capsules/manifest.json vendor/pg-delta/package.json vendor/pg-delta/package-lock.json vendor/pg-delta/LICENSE vendor/postgrest/LICENSE vendor/supabase/LICENSE templates/bin/supabase-wrapper templates/scripts/pg-delta.mjs .github/pull_request_template.md tests/build-identity-check.sh tests/version-transition-check.sh tests/pr-record-check.sh tests/node-deps-safety-check.sh tests/git-handoff-check.sh; do
   [[ -s "$ROOT/$file" ]] || { echo "Required runtime/build source missing: $file" >&2; exit 1; }
 done
 # The shipped router is a routing surface; do not enforce an arbitrary byte budget in place of semantic review.
@@ -129,7 +128,7 @@ grep -F 'POSTGREST_VERSION="14.16"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGREST_SHA256="36b8ae140f188cfcd6003494805bf35a41e895f88c12be9183d60f91782145c6"' "$ROOT/versions.env" >/dev/null
 grep -F 'POSTGREST_SUPABASE_CLI_BASELINE="2.114.0"' "$ROOT/versions.env" >/dev/null
 grep -F 'postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz' "$ROOT/build.sh" >/dev/null
-grep -F 'verify_one "$POSTGREST_AR" "$POSTGREST_SHA256"' "$ROOT/build.sh" >/dev/null
+grep -F 'build_acquire_verified "$POSTGREST_URL" "$POSTGREST_AR" "$POSTGREST_SHA256"' "$ROOT/build.sh" >/dev/null
 grep -F 'PGRST_SERVER_HOST' "$ROOT/templates/scripts/postgrest.py" >/dev/null
 grep -F 'RETARGET_QUERY_KEYS' "$ROOT/templates/scripts/postgrest.py" >/dev/null
 grep -F 'postgrest run' "$ROOT/templates/bin/agent-env" >/dev/null
@@ -144,10 +143,10 @@ grep -F "'supabase':probe(ROOT/'bin/supabase',['--version'])" "$ROOT/templates/s
 grep -F 'SUPABASE_TELEMETRY_DISABLED=1 supabase migration new runtime_probe </dev/null' "$ROOT/templates/scripts/selftest.sh" >/dev/null
 ! grep -R -nE 'SUPABASE_ACCESS_TOKEN=|SUPABASE_DB_PASSWORD=|XDG_CONFIG_HOME=.*ERPI_AGENT_ENV|HOME=.*ERPI_AGENT_ENV' "$ROOT/templates/bin/supabase-wrapper" "$ROOT/templates/activate"
 # The v1 Python lock is source-controlled input, not resolved during hydration.
-grep -F 'verify_one "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"' "$ROOT/build.sh" >/dev/null
+grep -F 'build_verify_sha256 "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"' "$ROOT/build.sh" >/dev/null
 ! grep -F 'pip compile' "$ROOT/build.sh"
 # Pip bootstrap code is verified before execution.
-grep -F 'verify_one "$PIP_BOOT_WHEEL" "$PIP_BOOTSTRAP_WHEEL_SHA256"' "$ROOT/build.sh" >/dev/null
+grep -F 'build_verify_sha256 "$PIP_BOOT_WHEEL" "$PIP_BOOTSTRAP_WHEEL_SHA256"' "$ROOT/build.sh" >/dev/null
 grep -F 'PIP_BOOT_CACHE="$DL/pip-26.1.2-py3-none-any.whl"' "$ROOT/build.sh" >/dev/null
 # uv build/recovery operations are isolated from project/user selection overrides without suppressing proxy/CA settings.
 grep -F 'UV_NO_CONFIG=1' "$ROOT/scripts/uv-isolated-exec.sh" >/dev/null
@@ -284,7 +283,7 @@ done
 [[ ! -e "$ROOT/vendor/database/postgres-server-17.10-linux-x64.txz" ]] || { echo 'Opaque prebuilt PostgreSQL server must not return.' >&2; exit 1; }
 [[ ! -e "$ROOT/scripts/qualify-postgres-server.sh" ]] || { echo 'Temporary PostgreSQL qualification script must not remain in the live tree.' >&2; exit 1; }
 ! grep -F 'qualify-postgres-server' "$ROOT/.github/workflows/build-dist.yml"
-grep -F 'POSTGRES_BUILD_IMAGE_REF="${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}"' "$ROOT/build.sh" >/dev/null
+grep -F 'POSTGRES_BUILD_IMAGE_REF="$(build_docker_image_ref "$POSTGRES_BUILD_IMAGE" "$POSTGRES_BUILD_IMAGE_SHA256")"' "$ROOT/build.sh" >/dev/null
 grep -F './configure --prefix=/usr/local/pg-build --without-readline --without-zlib --without-icu' "$ROOT/build.sh" >/dev/null
 grep -F 'cp -a "$PG_BUILD_WORK/stage/usr/local/pg-build/." "$BUILD/runtime/postgres/server/"' "$ROOT/build.sh" >/dev/null
 grep -F 'Source-built PostgreSQL server unexpectedly contains a bundled third-party shared library.' "$ROOT/build.sh" >/dev/null
@@ -309,20 +308,22 @@ grep -F -- '--- PostgreSQL startup log ---' "$ROOT/templates/scripts/postgres.py
 ! grep -F 'cluster / "socket"' "$ROOT/templates/scripts/postgres.py" >/dev/null
 grep -F 'package-lock.json is required' "$ROOT/templates/scripts/node-deps.py" >/dev/null
 ! grep -R -nE 'anon|authenticated|service_role' "$ROOT/templates/scripts/postgres.py" "$ROOT/templates/scripts/pgtap.py" "$ROOT/templates/scripts/node-deps.py"
-# Repository-locked Node dependencies are immutable offline capsules; no package gets a bespoke global install path.
+# Repository-locked Node dependencies are immutable offline runtime capsules, acquired by the connected builder.
 grep -F 'YAML_VERSION="2.9.0"' "$ROOT/versions.env" >/dev/null
 grep -F 'YAML_SHA256="008fa204cb1ba700e0272ba045abbf09a6ffe63456e8146ba97cac6c2ad1ef91"' "$ROOT/versions.env" >/dev/null
-grep -F '"yaml": {"version": "2.9.0", "file": "yaml-2.9.0.tgz"' "$ROOT/vendor/node-capsules/manifest.json" >/dev/null
-grep -F '"yaml-${YAML_VERSION}.tgz:${YAML_SHA256}"' "$ROOT/build.sh" >/dev/null
-grep -F 'source_row yaml "$YAML_VERSION" "vendor/node-capsules/yaml-$YAML_VERSION.tgz" "$YAML_SHA256"' "$ROOT/build.sh" >/dev/null
+grep -F '"component": "yaml"' "$ROOT/vendor/node-capsules/manifest.json" >/dev/null
+grep -F '"url": "https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz"' "$ROOT/vendor/node-capsules/manifest.json" >/dev/null
+grep -F 'build_acquire_verified "$url" "$capsule" "$hash"' "$ROOT/build.sh" >/dev/null
+grep -F 'source_row "$component" "$version" "$url" "$hash"' "$ROOT/build.sh" >/dev/null
+! find "$ROOT/vendor/node-capsules" -maxdepth 1 -type f -name '*.tgz' -print -quit | grep -q .
 ! grep -R -nF 'runtime/node/lib/node_modules/yaml' "$ROOT/build.sh" "$ROOT/templates" "$ROOT/README.md" "$ROOT/VALIDATION.md"
 ! grep -R -nF 'NODE_PATH=' "$ROOT/templates/activate" "$ROOT/templates/bin/node-wrapper" "$ROOT/templates/bin/agent-env"
 # pg-delta is runtime-owned, exactly locked, plan-only, and restricted to numeric loopback.
 grep -F 'PG_DELTA_VERSION="1.0.0-alpha.33"' "$ROOT/versions.env" >/dev/null
 grep -F 'PG_DELTA_LOCK_SHA256="fa6659239ce4e70738b5936f5690c2fdcf6bf2ef09e7c13a58c0009c8401bccf"' "$ROOT/versions.env" >/dev/null
 grep -F 'PG_DELTA_SUPABASE_CLI_BASELINE="2.114.0"' "$ROOT/versions.env" >/dev/null
-grep -F 'verify_one "$PG_DELTA_LOCK" "$PG_DELTA_LOCK_SHA256"' "$ROOT/build.sh" >/dev/null
-grep -F 'npm" ci --prefix "$BUILD/runtime/pg-delta" --ignore-scripts --no-audit --no-fund' "$ROOT/build.sh" >/dev/null
+grep -F 'build_verify_sha256 "$PG_DELTA_LOCK" "$PG_DELTA_LOCK_SHA256"' "$ROOT/build.sh" >/dev/null
+grep -F 'build_connected_npm "$BUILD/bin/npm" ci --prefix "$BUILD/runtime/pg-delta" --ignore-scripts --no-audit --no-fund' "$ROOT/build.sh" >/dev/null
 grep -F 'rm -rf "$BUILD/runtime/pg-delta/node_modules/.bin"' "$ROOT/build.sh" >/dev/null
 grep -F 'source_row pg-delta-lock' "$ROOT/build.sh" >/dev/null
 grep -F 'pg-delta-package-lock.json' "$ROOT/scripts/download-cache-key.sh" >/dev/null
@@ -337,6 +338,17 @@ grep -F 'auth.managed_noise' "$ROOT/templates/scripts/selftest.sh" >/dev/null
 ! grep -E '^[[:space:]]*(apply|sync)\)' "$ROOT/templates/bin/agent-env"
 [[ ! -e "$ROOT/.github/workflows/tmp-pg-delta-qualification.yml" ]] || { echo 'Temporary pg-delta qualification workflow must not remain after promotion.' >&2; exit 1; }
 [[ ! -e "$ROOT/.github/workflows/tmp-export-source.yml" ]] || { echo 'Temporary source-export workflow must not remain after promotion.' >&2; exit 1; }
+# Connected acquisition is centralized: direct artifacts use one verified cache path, while lock-driven resolvers only neutralize accidental offline-only selection.
+grep -F 'source "$SELF_DIR/scripts/build-common.sh"' "$ROOT/build.sh" >/dev/null
+grep -F 'source "$SELF_DIR/scripts/build-common.sh"' "$ROOT/scripts/rebuild-qualified-database-assets.sh" >/dev/null
+grep -F 'build_acquire_verified "$PYTHON_DISTRIBUTION_URL" "$PYTHON_AR" "$PYTHON_DISTRIBUTION_SHA256"' "$ROOT/build.sh" >/dev/null
+grep -F -- '--mirror "file://$PYTHON_MIRROR_ROOT"' "$ROOT/build.sh" >/dev/null
+grep -F 'build_connected_pip "$BUILD/env/bin/python" -m pip download' "$ROOT/build.sh" >/dev/null
+grep -F 'build_connected_npm "$BUILD/bin/npm" ci' "$ROOT/build.sh" >/dev/null
+[[ "$(grep -R -l 'curl --fail --location' "$ROOT/build.sh" "$ROOT/scripts" --include='*.sh' | wc -l)" == 1 ]] || { echo 'Direct download implementation must live only in scripts/build-common.sh.' >&2; exit 1; }
+grep -F 'PLPGSQL_CHECK_SOURCE_URL=' "$ROOT/versions.env" >/dev/null
+grep -F 'build_acquire_verified "$PLPGSQL_CHECK_SOURCE_URL"' "$ROOT/scripts/rebuild-qualified-database-assets.sh" >/dev/null
+"$ROOT/tests/build-common-check.sh"
 # Candidate boundaries are enforced both structurally and by executable regression tests.
 require_contains() {
   local needle="$1" file="$2" label="$3"
@@ -371,10 +383,10 @@ require_contains 'for (( attempt=0; attempt<100; attempt++ )); do' "$ROOT/templa
 "$ROOT/tests/sysconfig-relocation-check.sh"
 "$ROOT/tests/node-deps-safety-check.sh"
 "$ROOT/tests/git-handoff-check.sh"
-node_fetch_count="$(grep -Fc 'fetch "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" "$NODE_AR"' "$ROOT/build.sh")"
-[[ "$node_fetch_count" == 1 ]] || { echo "Expected exactly one Node fetch call, found $node_fetch_count" >&2; exit 1; }
+node_acquire_count="$(grep -Fc 'build_acquire_verified "$NODE_URL" "$NODE_AR" "$NODE_SHA256"' "$ROOT/build.sh")"
+[[ "$node_acquire_count" == 1 ]] || { echo "Expected exactly one shared Node acquisition call, found $node_acquire_count" >&2; exit 1; }
 if grep -F 'registry.npmjs.org/yaml' "$ROOT/build.sh" >/dev/null; then
-  echo 'yaml must be supplied through the immutable Node capsule path, not a bespoke build-time fetch.' >&2
+  echo 'yaml source URL belongs in the capsule manifest, not bespoke build logic.' >&2
   exit 1
 fi
 echo "Builder static checks passed."

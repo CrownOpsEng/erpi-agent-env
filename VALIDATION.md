@@ -4,7 +4,7 @@ This file defines the stable validation authority for ERPI Agent Environment. Gi
 
 ## Source validation
 
-`./tests/static-check.sh` is the fast source gate. It must fail closed on malformed scripts, inconsistent pins/locks, missing required source, unsafe credential handling, router ownership/structure drift, invalid portability assumptions, mismatched source-controlled qualified native payloads, malformed provenance metadata, incomplete required direct-license material, and unsafe Node-capsule filesystem/ownership behavior.
+`./tests/static-check.sh` is the fast source gate. It must fail closed on malformed scripts, inconsistent pins/locks/acquisition metadata, missing required source, unsafe credential handling, router ownership/structure drift, invalid portability assumptions, mismatched source-controlled qualified native payloads, malformed provenance metadata, incomplete required direct-license material, and unsafe Node-capsule filesystem/ownership behavior. Source validation itself remains network-free.
 
 Source validation does not prove the runtime.
 
@@ -14,9 +14,9 @@ A payload-affecting source commit is releasable only after **Accept runtime** bu
 
 - verified upstream/custom payload hashes before execution or inclusion
 - supported Linux x86-64/glibc host contract
-- exact managed-Python build provenance plus Python relocation repair, native-import checks, and offline venv destruction/rebuild
+- exact SHA-verified python-build-standalone acquisition through the shared cache path, uv-managed installation from that local mirror, Python relocation repair, native-import checks, and offline venv destruction/rebuild
 - bundled command functional probes, including ShellCheck positive/negative behavior, Miller transformation, HTTPX CLI localhost execution, and host-Git-backed connector handoff restoration when Git is available
-- exact-lock offline Node capsule hydration using the real bundled packages, content-bound ownership, import execution, and safe cleanup
+- connected acquisition of every Node capsule from its manifest URL with pinned SHA-256, followed by exact-lock offline hydration using the real bundled packages, content-bound ownership, import execution, and safe cleanup
 - source-level Node-capsule negative tests for lock mismatch, all-or-nothing late conflicts, symlinked `node_modules`/scope escape attempts, stale ownership, pre-existing repository packages, and legacy-marker refusal
 - PostgreSQL server/client version and extension integration checks
 - disposable PostgreSQL start/query, pgTAP positive/negative accounting, plpgsql_check, dump/restore, `pg_amcheck`, pgbench, and stopped-cluster checksum verification when the acceptance host is unprivileged
@@ -37,6 +37,13 @@ The accepted archive hash and exact source SHA belong in machine-generated `acce
 
 Before merge, prefer a complete local `./build.sh` run on the clean, committed final PR head whenever the host has working Docker. If local Docker is unavailable, manually dispatch **Accept runtime** with the exact final PR-head SHA as `target_ref` and require that run to succeed immediately before merge. The automatic post-merge run on the exact `main` SHA remains mandatory before release publication.
 
+
+## Connected build acquisition boundary
+
+Pinned direct artifacts share one acquisition primitive: verify and reuse a valid cache entry, discard a corrupt entry, otherwise download from the pinned HTTPS URL to temporary bytes, verify SHA-256, and only then promote those bytes into the cache. The normal builder and qualified-native maintainer rebuild path use that same primitive; package-specific download implementations are not permitted where this model applies.
+
+Lock-driven ecosystems remain resolver-owned. Python wheel download and pg-delta `npm ci` use their exact source-controlled locks and remain connected during environment construction. The builder explicitly overrides inherited offline-only selection such as pip `no-index` or npm `offline`, while preserving ordinary configured indexes/registries, mirrors, proxies, certificate roots, and authentication. Runtime recovery paths remain intentionally offline and must not inherit this connected-build behavior.
+
 ## PostgreSQL source/native qualification
 
 The PostgreSQL server is not accepted from a prebuilt third-party binary bundle. Every full runtime build fetches the exact pinned official PostgreSQL source tarball, verifies its SHA-256, and builds the normal install prefix inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10's normal build regenerates scanner sources, so its Flex prerequisite is also immutable: the builder verifies the exact pinned AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM SHA-256 and package identity/signature, installs that local RPM without dependency resolution or package scripts, and disables container networking for the PostgreSQL compilation. Flex is a build input recorded in provenance, not redistributed runtime payload. Deterministic GNU `ar` mode (`AROPT=crsD`) is required for PostgreSQL static archives. Optional readline, zlib, and ICU integrations are disabled to avoid unnecessary external runtime-library dependencies; the resulting ELF symbol floor and dynamic dependencies are checked before runtime acceptance.
@@ -47,11 +54,11 @@ Any future server source, configure, build-image, Flex build-input, client, or e
 
 ## Node capsule boundary
 
-Offline Node capsules supply immutable bytes only when a target repository's lock requests the exact pinned version and npm integrity. This includes `yaml` 2.9.0; consumer proof must demonstrate that a repository locking that exact dependency can hydrate it and execute its normal Node-side YAML path without Python/PyYAML substitution. Capsules never become dependency authority.
+Offline Node capsules supply immutable bytes only when a target repository's lock requests the exact pinned version and npm integrity. This includes `yaml` 2.9.0; consumer proof must demonstrate that a repository locking that exact dependency can hydrate it and execute its normal Node-side YAML path without Python/PyYAML substitution. Capsule archive bytes are acquired by the connected builder from the source-controlled manifest URL and verified against the pinned SHA-256 before packaging; they are not source-checkout prerequisites. Capsules never become dependency authority.
 
 Hydration must remain repository-contained and transactional: validate every destination and capsule before writing; reject symlink/path escapes; stage all missing packages before any commit; never claim matching packages that already belong to the repository; and write content-bound ownership only after successful commit. Cleanup must verify all recorded ownership before deleting anything and fail closed if the package contents or marker cannot be trusted.
 
-Any change to this boundary requires the dedicated source-level negative suite plus real runtime hydration/import/cleanup acceptance. A happy-path package import alone is not sufficient evidence.
+Any change to this boundary requires the dedicated network-free source-level negative suite plus real connected-build acquisition and runtime hydration/import/cleanup acceptance. A happy-path package import alone is not sufficient evidence.
 
 ## Long-running commands and supervision
 

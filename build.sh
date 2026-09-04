@@ -5,6 +5,8 @@ umask 022
 SELF_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck disable=SC1091
 source "$SELF_DIR/versions.env"
+# shellcheck disable=SC1091
+source "$SELF_DIR/scripts/build-common.sh"
 
 OUT_DIR="$SELF_DIR/dist"
 CACHE_DIR="$SELF_DIR/.download-cache"
@@ -109,8 +111,7 @@ fi
 source "$SELF_DIR/scripts/build-identity.sh"
 compute_build_identity "$PRODUCT_VERSION" "$SOURCE_COMMIT" "$SOURCE_BASE_TAG" "$SOURCE_DISTANCE" "$SOURCE_DESCRIPTION" "$TARGET"
 
-need() { command -v "$1" >/dev/null 2>&1 || { echo "Required build command missing: $1" >&2; exit 1; }; }
-for cmd in bash curl tar gzip bzip2 xz sha256sum find file readelf grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname env docker id; do need "$cmd"; done
+for cmd in bash curl tar gzip bzip2 xz sha256sum find file readelf grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname env docker id dirname basename; do build_need "$cmd"; done
 TAR_VERSION="$(tar --version 2>/dev/null || true)"
 grep -q 'GNU tar' <<<"$TAR_VERSION" || { echo "GNU tar is required by this builder." >&2; exit 1; }
 [[ "$(uname -s)" == Linux ]] || { echo "Builder target is Linux only." >&2; exit 1; }
@@ -175,23 +176,6 @@ reset_runtime_state() {
     "$BUILD/state/postgres" \
     "$BUILD/state/postgrest"
 }
-fetch() {
-  local url="$1" dest="$2"
-  if [[ -s "$dest" ]]; then
-    echo "Using cached $(basename "$dest")"
-    return
-  fi
-  local tmp="$dest.part.$$"
-  rm -f "$tmp"
-  curl --fail --location --proto '=https' --tlsv1.2 --retry 4 --retry-all-errors --connect-timeout 20 -o "$tmp" "$url"
-  mv "$tmp" "$dest"
-}
-verify_one() {
-  local file="$1" expected="$2"
-  local actual
-  actual="$(sha256sum "$file" | awk '{print $1}')"
-  [[ "$actual" == "$expected" ]] || { echo "SHA-256 mismatch for $file" >&2; echo " expected $expected" >&2; echo " actual   $actual" >&2; exit 1; }
-}
 extract_single() {
   local archive="$1" pattern="$2" dest="$3"
   local scratch="$WORK/download-extract/$(basename "$dest").$$"
@@ -210,7 +194,7 @@ extract_single() {
 
 cp "$SELF_DIR/versions.env" "$BUILD/manifest/versions.env"
 cp "$SELF_DIR/requirements.in" "$BUILD/manifest/requirements.in"
-verify_one "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"
+build_verify_sha256 "$SELF_DIR/requirements.lock" "$PYTHON_LOCK_SHA256"
 cp "$SELF_DIR/requirements.lock" "$BUILD/manifest/requirements.lock"
 cp "$SELF_DIR/templates/RUNTIME-README.md" "$BUILD/README.md"
 sed -i \
@@ -229,15 +213,23 @@ printf '%s\n' "$PRODUCT_VERSION" > "$BUILD/VERSION"
 
 log "uv $UV_VERSION"
 UV_AR="$DL/uv-${UV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-fetch "https://releases.astral.sh/github/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_AR"
-verify_one "$UV_AR" "$UV_SHA256"
+build_acquire_verified "$UV_URL" "$UV_AR" "$UV_SHA256"
 extract_single "$UV_AR" uv "$BUILD/bin/uv"
 # uvx is deliberately a relative symlink: it is an alias for uv and survives relocation.
 ln -s uv "$BUILD/bin/uvx"
 "$BUILD/bin/uv" --version | grep -F "uv $UV_VERSION" >/dev/null
 
-log "CPython $PYTHON_VERSION via pinned uv"
-UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" python install "$PYTHON_VERSION" --install-dir "$BUILD/runtime/python" --no-bin --managed-python
+log "CPython $PYTHON_VERSION via exact pinned python-build-standalone archive"
+PYTHON_AR="$DL/cpython-${PYTHON_VERSION}+${PYTHON_DISTRIBUTION_BUILD}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+build_acquire_verified "$PYTHON_DISTRIBUTION_URL" "$PYTHON_AR" "$PYTHON_DISTRIBUTION_SHA256"
+PYTHON_MIRROR_ROOT="$WORK/python-install-mirror"
+PYTHON_MIRROR_REL="${PYTHON_DISTRIBUTION_URL#https://github.com/astral-sh/python-build-standalone/releases/download/}"
+PYTHON_MIRROR_REL="${PYTHON_MIRROR_REL//%2B/+}"
+[[ "$PYTHON_MIRROR_REL" != "$PYTHON_DISTRIBUTION_URL" ]] || { echo "Pinned Python URL is outside the supported python-build-standalone mirror base." >&2; exit 1; }
+PYTHON_MIRROR_FILE="$PYTHON_MIRROR_ROOT/$PYTHON_MIRROR_REL"
+mkdir -p "$(dirname -- "$PYTHON_MIRROR_FILE")"
+install -m 0644 "$PYTHON_AR" "$PYTHON_MIRROR_FILE"
+UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" python install "$PYTHON_VERSION" --mirror "file://$PYTHON_MIRROR_ROOT" --install-dir "$BUILD/runtime/python" --no-bin --managed-python
 BASE_PY="$(find "$BUILD/runtime/python" -mindepth 2 -maxdepth 4 -path "*/bin/python${PYTHON_MINOR}" -print -quit)"
 [[ -n "$BASE_PY" && -x "$BASE_PY" ]] || { echo "uv did not install expected Python $PYTHON_VERSION" >&2; exit 1; }
 BASE_ROOT="$(CDPATH= cd -- "$(dirname -- "$BASE_PY")/.." && pwd -P)"
@@ -280,21 +272,19 @@ log "Frozen Python analysis layer and offline wheelhouse"
 # The same wheel remains in wheelhouse as part of the offline recovery set.
 PIP_BOOT_CACHE="$DL/pip-26.1.2-py3-none-any.whl"
 PIP_BOOT_WHEEL="$BUILD/wheelhouse/pip-26.1.2-py3-none-any.whl"
-fetch "$PIP_BOOTSTRAP_WHEEL_URL" "$PIP_BOOT_CACHE"
-verify_one "$PIP_BOOT_CACHE" "$PIP_BOOTSTRAP_WHEEL_SHA256"
+build_acquire_verified "$PIP_BOOTSTRAP_WHEEL_URL" "$PIP_BOOT_CACHE" "$PIP_BOOTSTRAP_WHEEL_SHA256"
 install -m 0644 "$PIP_BOOT_CACHE" "$PIP_BOOT_WHEEL"
-verify_one "$PIP_BOOT_WHEEL" "$PIP_BOOTSTRAP_WHEEL_SHA256"
+build_verify_sha256 "$PIP_BOOT_WHEEL" "$PIP_BOOTSTRAP_WHEEL_SHA256"
 UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip install --python "$BUILD/env/bin/python" \
   --no-index --find-links "$BUILD/wheelhouse" "pip==26.1.2"
-PIP_CACHE_DIR="$BUILDER_PIP_CACHE" "$BUILD/env/bin/python" -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: --dest "$BUILD/wheelhouse" -r "$BUILD/manifest/requirements.lock"
+PIP_CACHE_DIR="$BUILDER_PIP_CACHE" build_connected_pip "$BUILD/env/bin/python" -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: --dest "$BUILD/wheelhouse" -r "$BUILD/manifest/requirements.lock"
 UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" UV_LINK_MODE=copy "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip sync --python "$BUILD/env/bin/python" \
   --require-hashes --no-index --find-links "$BUILD/wheelhouse" "$BUILD/manifest/requirements.lock"
 UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip check --python "$BUILD/env/bin/python"
 
 log "Node.js $NODE_VERSION"
 NODE_AR="$DL/node-v${NODE_VERSION}-linux-x64.tar.xz"
-fetch "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" "$NODE_AR"
-verify_one "$NODE_AR" "$NODE_SHA256"
+build_acquire_verified "$NODE_URL" "$NODE_AR" "$NODE_SHA256"
 rm -rf "$WORK/node-extract"; mkdir -p "$WORK/node-extract"
 tar -xJf "$NODE_AR" -C "$WORK/node-extract"
 NODE_SRC="$WORK/node-extract/node-v${NODE_VERSION}-linux-x64"
@@ -309,7 +299,7 @@ chmod 0755 "$BUILD/bin/node" "$BUILD/bin/npm" "$BUILD/bin/npx"
 
 log "pg-delta $PG_DELTA_VERSION plan-only runtime"
 PG_DELTA_LOCK="$SELF_DIR/vendor/pg-delta/package-lock.json"
-verify_one "$PG_DELTA_LOCK" "$PG_DELTA_LOCK_SHA256"
+build_verify_sha256 "$PG_DELTA_LOCK" "$PG_DELTA_LOCK_SHA256"
 install -m 0644 "$SELF_DIR/vendor/pg-delta/package.json" "$BUILD/runtime/pg-delta/package.json"
 install -m 0644 "$PG_DELTA_LOCK" "$BUILD/runtime/pg-delta/package-lock.json"
 install -m 0644 "$PG_DELTA_LOCK" "$BUILD/manifest/pg-delta-package-lock.json"
@@ -340,7 +330,7 @@ for path, record in packages.items():
     assert str(record.get('resolved','')).startswith('https://registry.npmjs.org/'), (path, 'resolved')
     assert record.get('license'), (path, 'license')
 PY_PG_DELTA_LOCK
-NPM_CONFIG_CACHE="$BUILDER_NPM_CACHE" "$BUILD/bin/npm" ci --prefix "$BUILD/runtime/pg-delta" --ignore-scripts --no-audit --no-fund
+NPM_CONFIG_CACHE="$BUILDER_NPM_CACHE" build_connected_npm "$BUILD/bin/npm" ci --prefix "$BUILD/runtime/pg-delta" --ignore-scripts --no-audit --no-fund
 "$BUILD/env/bin/python" - "$SELF_DIR/vendor/pg-delta/LICENSE" "$BUILD/runtime/pg-delta/node_modules/@supabase/pg-delta/LICENSE" <<'PY_PG_DELTA_LICENSE'
 import pathlib, sys
 source, installed = map(pathlib.Path, sys.argv[1:])
@@ -374,91 +364,88 @@ assert rows
 PY_PG_DELTA_PROVENANCE
 
 log "Offline Node capability capsules"
-mkdir -p "$BUILD/runtime/node-capsules"
-for spec in \
-  "yaml-${YAML_VERSION}.tgz:${YAML_SHA256}" \
-  "postgres-${POSTGRES_JS_VERSION}.tgz:${POSTGRES_JS_SHA256}" \
-  "postgres-language-server-wasm-${PGLS_WASM_VERSION}.tgz:${PGLS_WASM_SHA256}" \
-  "fast-check-${FAST_CHECK_VERSION}.tgz:${FAST_CHECK_SHA256}" \
-  "pure-rand-${PURE_RAND_VERSION}.tgz:${PURE_RAND_SHA256}"; do
-  file="${spec%%:*}"; hash="${spec##*:}"
-  verify_one "$SELF_DIR/vendor/node-capsules/$file" "$hash"
-  install -m 0644 "$SELF_DIR/vendor/node-capsules/$file" "$BUILD/runtime/node-capsules/$file"
-done
+mkdir -p "$BUILD/runtime/node-capsules" "$DL/node-capsules"
 NODE_CAPSULE_MANIFEST="$SELF_DIR/vendor/node-capsules/manifest.json"
-"$BUILD/env/bin/python" - "$NODE_CAPSULE_MANIFEST" \
+NODE_CAPSULE_SOURCES="$WORK/node-capsule-sources.tsv"
+"$BUILD/env/bin/python" - "$NODE_CAPSULE_MANIFEST" "$NODE_CAPSULE_SOURCES" \
   "$YAML_VERSION" "$YAML_SHA256" \
   "$POSTGRES_JS_VERSION" "$POSTGRES_JS_SHA256" \
   "$PGLS_WASM_VERSION" "$PGLS_WASM_SHA256" \
   "$FAST_CHECK_VERSION" "$FAST_CHECK_SHA256" \
   "$PURE_RAND_VERSION" "$PURE_RAND_SHA256" <<'PY_NODE_MANIFEST'
-import json, pathlib, re, sys
+import csv, json, pathlib, re, sys
 path=pathlib.Path(sys.argv[1])
-values=sys.argv[2:]
+out=pathlib.Path(sys.argv[2])
+values=sys.argv[3:]
 expected={
-    'yaml': (values[0], f'yaml-{values[0]}.tgz', values[1]),
-    'postgres': (values[2], f'postgres-{values[2]}.tgz', values[3]),
-    '@postgres-language-server/wasm': (values[4], f'postgres-language-server-wasm-{values[4]}.tgz', values[5]),
-    'fast-check': (values[6], f'fast-check-{values[6]}.tgz', values[7]),
-    'pure-rand': (values[8], f'pure-rand-{values[8]}.tgz', values[9]),
+    'yaml': ('yaml', values[0], f'yaml-{values[0]}.tgz', values[1]),
+    'postgres': ('node-postgres', values[2], f'postgres-{values[2]}.tgz', values[3]),
+    '@postgres-language-server/wasm': ('pgls-wasm', values[4], f'postgres-language-server-wasm-{values[4]}.tgz', values[5]),
+    'fast-check': ('fast-check', values[6], f'fast-check-{values[6]}.tgz', values[7]),
+    'pure-rand': ('pure-rand', values[8], f'pure-rand-{values[8]}.tgz', values[9]),
 }
 data=json.loads(path.read_text(encoding='utf-8'))
 assert data.get('schema') == 1, data.get('schema')
 packages=data.get('packages')
 assert isinstance(packages,dict) and set(packages)==set(expected), sorted(packages or {})
-for name,(version,file,sha256) in expected.items():
+rows=[]
+for name,(component,version,file,sha256) in expected.items():
     record=packages[name]
+    assert record.get('component') == component, (name,record.get('component'),component)
     assert record.get('version') == version, (name,record.get('version'),version)
     assert record.get('file') == file, (name,record.get('file'),file)
     assert record.get('sha256') == sha256, (name,record.get('sha256'),sha256)
     assert re.fullmatch(r'sha512-[A-Za-z0-9+/]+={0,2}', record.get('integrity','')), (name,record.get('integrity'))
+    url=record.get('url','')
+    assert url.startswith('https://registry.npmjs.org/'), (name,url)
+    rows.append((component,version,file,sha256,record['integrity'],url))
+with out.open('w',encoding='utf-8',newline='') as handle:
+    writer=csv.writer(handle,delimiter='\t',lineterminator='\n')
+    writer.writerows(rows)
 PY_NODE_MANIFEST
+while IFS=$'\t' read -r component version file hash integrity url; do
+  capsule="$DL/node-capsules/$file"
+  build_acquire_verified "$url" "$capsule" "$hash"
+  install -m 0644 "$capsule" "$BUILD/runtime/node-capsules/$file"
+done < "$NODE_CAPSULE_SOURCES"
 install -m 0644 "$NODE_CAPSULE_MANIFEST" "$BUILD/manifest/node-capsules.json"
 
 log "GitHub CLI $GH_VERSION"
 GH_AR="$DL/gh_${GH_VERSION}_linux_amd64.tar.gz"
-fetch "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" "$GH_AR"
-verify_one "$GH_AR" "$GH_SHA256"
+build_acquire_verified "$GH_URL" "$GH_AR" "$GH_SHA256"
 extract_single "$GH_AR" gh "$BUILD/bin/gh"
 
 log "jq $JQ_VERSION"
 JQ_BIN="$DL/jq-linux-amd64-${JQ_VERSION}"
-fetch "https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-amd64" "$JQ_BIN"
-verify_one "$JQ_BIN" "$JQ_SHA256"
+build_acquire_verified "$JQ_URL" "$JQ_BIN" "$JQ_SHA256"
 install -m 0755 "$JQ_BIN" "$BUILD/bin/jq"
 
 log "yq $YQ_VERSION"
 YQ_BIN="$DL/yq_linux_amd64-${YQ_VERSION}"
-fetch "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" "$YQ_BIN"
-verify_one "$YQ_BIN" "$YQ_SHA256"
+build_acquire_verified "$YQ_URL" "$YQ_BIN" "$YQ_SHA256"
 install -m 0755 "$YQ_BIN" "$BUILD/bin/yq"
 
 log "ripgrep $RIPGREP_VERSION"
 RG_AR="$DL/ripgrep-${RIPGREP_VERSION}-x86_64-unknown-linux-musl.tar.gz"
-fetch "https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep-${RIPGREP_VERSION}-x86_64-unknown-linux-musl.tar.gz" "$RG_AR"
-verify_one "$RG_AR" "$RIPGREP_SHA256"
+build_acquire_verified "$RIPGREP_URL" "$RG_AR" "$RIPGREP_SHA256"
 extract_single "$RG_AR" rg "$BUILD/bin/rg"
 
 log "actionlint $ACTIONLINT_VERSION"
 ACTION_AR="$DL/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-fetch "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" "$ACTION_AR"
-verify_one "$ACTION_AR" "$ACTIONLINT_SHA256"
+build_acquire_verified "$ACTIONLINT_URL" "$ACTION_AR" "$ACTIONLINT_SHA256"
 extract_single "$ACTION_AR" actionlint "$BUILD/bin/actionlint"
 
 log "gitleaks $GITLEAKS_VERSION"
 GITLEAKS_AR="$DL/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-fetch "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "$GITLEAKS_AR"
-verify_one "$GITLEAKS_AR" "$GITLEAKS_SHA256"
+build_acquire_verified "$GITLEAKS_URL" "$GITLEAKS_AR" "$GITLEAKS_SHA256"
 extract_single "$GITLEAKS_AR" gitleaks "$BUILD/bin/gitleaks"
 
 log "ShellCheck $SHELLCHECK_VERSION"
 SHELLCHECK_AR="$DL/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
-fetch "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" "$SHELLCHECK_AR"
-verify_one "$SHELLCHECK_AR" "$SHELLCHECK_SHA256"
+build_acquire_verified "$SHELLCHECK_URL" "$SHELLCHECK_AR" "$SHELLCHECK_SHA256"
 extract_single "$SHELLCHECK_AR" shellcheck "$BUILD/bin/shellcheck"
 SHELLCHECK_SOURCE_AR="$DL/shellcheck-v${SHELLCHECK_VERSION}-source.tar.gz"
-fetch "https://github.com/koalaman/shellcheck/archive/refs/tags/v${SHELLCHECK_VERSION}.tar.gz" "$SHELLCHECK_SOURCE_AR"
-verify_one "$SHELLCHECK_SOURCE_AR" "$SHELLCHECK_SOURCE_SHA256"
+build_acquire_verified "$SHELLCHECK_SOURCE_URL" "$SHELLCHECK_SOURCE_AR" "$SHELLCHECK_SOURCE_SHA256"
 install -m 0644 "$SHELLCHECK_SOURCE_AR" "$BUILD/licenses/source/shellcheck-v${SHELLCHECK_VERSION}-source.tar.gz"
 rm -rf "$WORK/shellcheck-source"; mkdir -p "$WORK/shellcheck-source"
 tar -xzf "$SHELLCHECK_SOURCE_AR" -C "$WORK/shellcheck-source"
@@ -475,14 +462,12 @@ install -m 0644 "$SHELLCHECK_SOURCE_ROOT/LICENSE" "$BUILD/licenses/shellcheck/LI
 
 log "Miller $MILLER_VERSION"
 MILLER_AR="$DL/miller-${MILLER_VERSION}-linux-amd64.tar.gz"
-fetch "https://github.com/johnkerl/miller/releases/download/v${MILLER_VERSION}/miller-${MILLER_VERSION}-linux-amd64.tar.gz" "$MILLER_AR"
-verify_one "$MILLER_AR" "$MILLER_SHA256"
+build_acquire_verified "$MILLER_URL" "$MILLER_AR" "$MILLER_SHA256"
 extract_single "$MILLER_AR" mlr "$BUILD/bin/mlr"
 
 log "PostgREST $POSTGREST_VERSION"
 POSTGREST_AR="$DL/postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz"
-fetch "https://github.com/PostgREST/postgrest/releases/download/v${POSTGREST_VERSION}/postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz" "$POSTGREST_AR"
-verify_one "$POSTGREST_AR" "$POSTGREST_SHA256"
+build_acquire_verified "$POSTGREST_URL" "$POSTGREST_AR" "$POSTGREST_SHA256"
 extract_single "$POSTGREST_AR" postgrest "$BUILD/runtime/postgrest/postgrest"
 "$BUILD/runtime/postgrest/postgrest" --version | grep -Fx "PostgREST $POSTGREST_VERSION" >/dev/null
 file "$BUILD/runtime/postgrest/postgrest" | grep -F "statically linked" >/dev/null
@@ -490,8 +475,7 @@ install -m 0644 "$SELF_DIR/vendor/postgrest/LICENSE" "$BUILD/licenses/postgrest/
 
 log "Supabase CLI $SUPABASE_CLI_VERSION"
 SUPABASE_CLI_AR="$DL/supabase_${SUPABASE_CLI_VERSION}_linux_amd64.tar.gz"
-fetch "https://github.com/supabase/cli/releases/download/v${SUPABASE_CLI_VERSION}/supabase_${SUPABASE_CLI_VERSION}_linux_amd64.tar.gz" "$SUPABASE_CLI_AR"
-verify_one "$SUPABASE_CLI_AR" "$SUPABASE_CLI_SHA256"
+build_acquire_verified "$SUPABASE_CLI_URL" "$SUPABASE_CLI_AR" "$SUPABASE_CLI_SHA256"
 SUPABASE_CLI_EXTRACT="$WORK/download-extract/supabase-cli"
 rm -rf "$SUPABASE_CLI_EXTRACT"; mkdir -p "$SUPABASE_CLI_EXTRACT"
 tar -xzf "$SUPABASE_CLI_AR" -C "$SUPABASE_CLI_EXTRACT"
@@ -517,12 +501,10 @@ PG_SOURCE_AR="$DL/postgresql-${POSTGRES_VERSION}.tar.bz2"
 PG_FLEX_RPM="$DL/${POSTGRES_FLEX_RPM_NEVRA}.rpm"
 PG_CLIENT_AR="$SELF_DIR/vendor/database/postgresql-client-${POSTGRES_VERSION}-linux-x64-gnu.tar.gz"
 PLCHECK_AR="$SELF_DIR/vendor/database/plpgsql-check-${PLPGSQL_CHECK_VERSION}-pg17-linux-x64-gnu.tar.gz"
-fetch "$POSTGRES_SOURCE_URL" "$PG_SOURCE_AR"
-verify_one "$PG_SOURCE_AR" "$POSTGRES_SOURCE_SHA256"
-fetch "$POSTGRES_FLEX_RPM_URL" "$PG_FLEX_RPM"
-verify_one "$PG_FLEX_RPM" "$POSTGRES_FLEX_RPM_SHA256"
-verify_one "$PG_CLIENT_AR" "$POSTGRES_CLIENT_SHA256"
-verify_one "$PLCHECK_AR" "$PLPGSQL_CHECK_SHA256"
+build_acquire_verified "$POSTGRES_SOURCE_URL" "$PG_SOURCE_AR" "$POSTGRES_SOURCE_SHA256"
+build_acquire_verified "$POSTGRES_FLEX_RPM_URL" "$PG_FLEX_RPM" "$POSTGRES_FLEX_RPM_SHA256"
+build_verify_sha256 "$PG_CLIENT_AR" "$POSTGRES_CLIENT_SHA256"
+build_verify_sha256 "$PLCHECK_AR" "$PLPGSQL_CHECK_SHA256"
 
 # Build the ordinary PostgreSQL installation tree at a stable in-container path.
 # Optional readline/zlib/ICU integrations are disabled to avoid adding host
@@ -533,10 +515,7 @@ rm -rf "$PG_BUILD_WORK" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgre
 mkdir -p "$PG_BUILD_WORK" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$WORK/postgres-client" "$WORK/plcheck"
 tar -xjf "$PG_SOURCE_AR" -C "$PG_BUILD_WORK"
 install -m 0644 "$PG_FLEX_RPM" "$PG_BUILD_WORK/postgres-flex.rpm"
-POSTGRES_BUILD_IMAGE_REF="${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}"
-if ! docker image inspect "$POSTGRES_BUILD_IMAGE_REF" >/dev/null 2>&1; then
-  docker pull "$POSTGRES_BUILD_IMAGE_REF" >/dev/null
-fi
+POSTGRES_BUILD_IMAGE_REF="$(build_docker_image_ref "$POSTGRES_BUILD_IMAGE" "$POSTGRES_BUILD_IMAGE_SHA256")"
 docker run --rm --network none \
   -e POSTGRES_VERSION="$POSTGRES_VERSION" \
   -e POSTGRES_FLEX_VERSION="$POSTGRES_FLEX_VERSION" \
@@ -679,32 +658,30 @@ SOURCES_TSV="$BUILD/manifest/sources.tsv"
 : > "$SOURCES_TSV"
 source_row() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$SOURCES_TSV"; }
 source_row component version url sha256
-source_row uv "$UV_VERSION" "https://releases.astral.sh/github/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256"
+source_row uv "$UV_VERSION" "$UV_URL" "$UV_SHA256"
 source_row python-build-standalone "${PYTHON_VERSION}+${PYTHON_DISTRIBUTION_BUILD}" "$PYTHON_DISTRIBUTION_URL" "$PYTHON_DISTRIBUTION_SHA256"
-source_row node "$NODE_VERSION" "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" "$NODE_SHA256"
-source_row gh "$GH_VERSION" "https://github.com/cli/cli/releases/download/v$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz" "$GH_SHA256"
-source_row jq "$JQ_VERSION" "https://github.com/jqlang/jq/releases/download/jq-$JQ_VERSION/jq-linux-amd64" "$JQ_SHA256"
-source_row yq "$YQ_VERSION" "https://github.com/mikefarah/yq/releases/download/v$YQ_VERSION/yq_linux_amd64" "$YQ_SHA256"
+source_row node "$NODE_VERSION" "$NODE_URL" "$NODE_SHA256"
+source_row gh "$GH_VERSION" "$GH_URL" "$GH_SHA256"
+source_row jq "$JQ_VERSION" "$JQ_URL" "$JQ_SHA256"
+source_row yq "$YQ_VERSION" "$YQ_URL" "$YQ_SHA256"
 source_row pip-bootstrap 26.1.2 "$PIP_BOOTSTRAP_WHEEL_URL" "$PIP_BOOTSTRAP_WHEEL_SHA256"
-source_row ripgrep "$RIPGREP_VERSION" "https://github.com/BurntSushi/ripgrep/releases/download/$RIPGREP_VERSION/ripgrep-$RIPGREP_VERSION-x86_64-unknown-linux-musl.tar.gz" "$RIPGREP_SHA256"
-source_row actionlint "$ACTIONLINT_VERSION" "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" "$ACTIONLINT_SHA256"
-source_row gitleaks "$GITLEAKS_VERSION" "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "$GITLEAKS_SHA256"
-source_row shellcheck "$SHELLCHECK_VERSION" "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/shellcheck-v$SHELLCHECK_VERSION.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256"
-source_row shellcheck-source "$SHELLCHECK_VERSION" "https://github.com/koalaman/shellcheck/archive/refs/tags/v$SHELLCHECK_VERSION.tar.gz" "$SHELLCHECK_SOURCE_SHA256"
-source_row miller "$MILLER_VERSION" "https://github.com/johnkerl/miller/releases/download/v$MILLER_VERSION/miller-$MILLER_VERSION-linux-amd64.tar.gz" "$MILLER_SHA256"
-source_row postgrest "$POSTGREST_VERSION" "https://github.com/PostgREST/postgrest/releases/download/v$POSTGREST_VERSION/postgrest-v$POSTGREST_VERSION-linux-static-x86-64.tar.xz" "$POSTGREST_SHA256"
-source_row supabase-cli "$SUPABASE_CLI_VERSION" "https://github.com/supabase/cli/releases/download/v$SUPABASE_CLI_VERSION/supabase_${SUPABASE_CLI_VERSION}_linux_amd64.tar.gz" "$SUPABASE_CLI_SHA256"
+source_row ripgrep "$RIPGREP_VERSION" "$RIPGREP_URL" "$RIPGREP_SHA256"
+source_row actionlint "$ACTIONLINT_VERSION" "$ACTIONLINT_URL" "$ACTIONLINT_SHA256"
+source_row gitleaks "$GITLEAKS_VERSION" "$GITLEAKS_URL" "$GITLEAKS_SHA256"
+source_row shellcheck "$SHELLCHECK_VERSION" "$SHELLCHECK_URL" "$SHELLCHECK_SHA256"
+source_row shellcheck-source "$SHELLCHECK_VERSION" "$SHELLCHECK_SOURCE_URL" "$SHELLCHECK_SOURCE_SHA256"
+source_row miller "$MILLER_VERSION" "$MILLER_URL" "$MILLER_SHA256"
+source_row postgrest "$POSTGREST_VERSION" "$POSTGREST_URL" "$POSTGREST_SHA256"
+source_row supabase-cli "$SUPABASE_CLI_VERSION" "$SUPABASE_CLI_URL" "$SUPABASE_CLI_SHA256"
 source_row postgres-server-source "$POSTGRES_VERSION" "$POSTGRES_SOURCE_URL" "$POSTGRES_SOURCE_SHA256"
 source_row postgres-server-build-image manylinux_2_28_x86_64 "$POSTGRES_BUILD_IMAGE" "$POSTGRES_BUILD_IMAGE_SHA256"
 source_row postgres-server-build-flex "$POSTGRES_FLEX_RPM_NEVRA" "$POSTGRES_FLEX_RPM_URL" "$POSTGRES_FLEX_RPM_SHA256"
 source_row postgres-client "$POSTGRES_VERSION" "vendor/database/postgresql-client-$POSTGRES_VERSION-linux-x64-gnu.tar.gz" "$POSTGRES_CLIENT_SHA256"
 source_row pgtap "$PGTAP_VERSION" "vendor/pgtap/pgtap--$PGTAP_VERSION.sql" "generated-from-$PGTAP_SOURCE_SHA256"
 source_row plpgsql-check "$PLPGSQL_CHECK_VERSION" "vendor/database/plpgsql-check-$PLPGSQL_CHECK_VERSION-pg17-linux-x64-gnu.tar.gz" "$PLPGSQL_CHECK_SHA256"
-source_row yaml "$YAML_VERSION" "vendor/node-capsules/yaml-$YAML_VERSION.tgz" "$YAML_SHA256"
-source_row node-postgres "$POSTGRES_JS_VERSION" "vendor/node-capsules/postgres-$POSTGRES_JS_VERSION.tgz" "$POSTGRES_JS_SHA256"
-source_row pgls-wasm "$PGLS_WASM_VERSION" "vendor/node-capsules/postgres-language-server-wasm-$PGLS_WASM_VERSION.tgz" "$PGLS_WASM_SHA256"
-source_row fast-check "$FAST_CHECK_VERSION" "vendor/node-capsules/fast-check-$FAST_CHECK_VERSION.tgz" "$FAST_CHECK_SHA256"
-source_row pure-rand "$PURE_RAND_VERSION" "vendor/node-capsules/pure-rand-$PURE_RAND_VERSION.tgz" "$PURE_RAND_SHA256"
+while IFS=$'\t' read -r component version file hash integrity url; do
+  source_row "$component" "$version" "$url" "$hash"
+done < "$NODE_CAPSULE_SOURCES"
 source_row pg-delta-lock "$PG_DELTA_VERSION" "vendor/pg-delta/package-lock.json" "$PG_DELTA_LOCK_SHA256"
 "$BUILD/env/bin/python" - "$SOURCES_TSV" <<'PY_SOURCES'
 import csv, pathlib, sys

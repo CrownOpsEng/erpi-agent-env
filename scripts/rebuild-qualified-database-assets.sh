@@ -3,14 +3,16 @@ set -euo pipefail
 SELF_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # shellcheck disable=SC1091
 source "$SELF_DIR/versions.env"
-command -v docker >/dev/null || { echo 'Docker is required only for this maintainer rebuild path.' >&2; exit 1; }
-for c in curl tar sha256sum find file readelf sort awk install python3 id; do command -v "$c" >/dev/null || { echo "Missing: $c" >&2; exit 1; }; done
+# shellcheck disable=SC1091
+source "$SELF_DIR/scripts/build-common.sh"
+build_need docker || { echo 'Docker is required only for this maintainer rebuild path.' >&2; exit 1; }
+for c in curl tar sha256sum find file readelf sort awk install python3 id; do build_need "$c"; done
 OUT="${1:-$SELF_DIR/dist/native-rebuild}"
 mkdir -p "$OUT"; OUT="$(CDPATH= cd -- "$OUT" && pwd -P)"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/agent-env-native-rebuild.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
-sha(){ sha256sum "$1" | awk '{print $1}'; }
-fetch(){ curl --fail --location --proto '=https' --tlsv1.2 --retry 4 --retry-all-errors --connect-timeout 20 -o "$2" "$1"; test "$(sha "$2")" = "$3"; }
+CACHE="$SELF_DIR/.download-cache/native-rebuild"
+mkdir -p "$CACHE"
 max_glibc(){ find "$1" -type f -print0 | while IFS= read -r -d '' f; do if file "$f" | grep -q ELF; then readelf --version-info "$f" 2>/dev/null || true; fi; done | grep -oE 'GLIBC_[0-9]+([.][0-9]+)+' | sort -Vu | tail -1; }
 require_floor(){ local v; v="$(max_glibc "$1")"; python3 - "$v" <<'PY'
 import re,sys
@@ -18,14 +20,14 @@ m=re.fullmatch(r'GLIBC_(\d+)\.(\d+)',sys.argv[1]); assert m,sys.argv[1]
 assert tuple(map(int,m.groups())) <= (2,28), sys.argv[1]
 PY
 }
-PL_URL='https://github.com/okbob/plpgsql_check/archive/refs/tags/v2.8.11.tar.gz'
-PL_SHA='de01ebd2e87a064418c453a74dafb43c2d41acbecdfd80c78cb5b6a95b834d27'
-fetch "$POSTGRES_SOURCE_URL" "$WORK/postgresql.tar.bz2" "$POSTGRES_SOURCE_SHA256"
-fetch "$POSTGRES_FLEX_RPM_URL" "$WORK/postgres-flex.rpm" "$POSTGRES_FLEX_RPM_SHA256"
-fetch "$PL_URL" "$WORK/plpgsql-check.tar.gz" "$PL_SHA"
+build_acquire_verified "$POSTGRES_SOURCE_URL" "$CACHE/postgresql-$POSTGRES_VERSION.tar.bz2" "$POSTGRES_SOURCE_SHA256"
+build_acquire_verified "$POSTGRES_FLEX_RPM_URL" "$CACHE/$POSTGRES_FLEX_RPM_NEVRA.rpm" "$POSTGRES_FLEX_RPM_SHA256"
+build_acquire_verified "$PLPGSQL_CHECK_SOURCE_URL" "$CACHE/plpgsql-check-$PLPGSQL_CHECK_VERSION.tar.gz" "$PLPGSQL_CHECK_SOURCE_SHA256"
+install -m 0644 "$CACHE/postgresql-$POSTGRES_VERSION.tar.bz2" "$WORK/postgresql.tar.bz2"
+install -m 0644 "$CACHE/$POSTGRES_FLEX_RPM_NEVRA.rpm" "$WORK/postgres-flex.rpm"
+install -m 0644 "$CACHE/plpgsql-check-$PLPGSQL_CHECK_VERSION.tar.gz" "$WORK/plpgsql-check.tar.gz"
 tar -xjf "$WORK/postgresql.tar.bz2" -C "$WORK"; tar -xzf "$WORK/plpgsql-check.tar.gz" -C "$WORK"
-IMAGE="${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}"
-if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then docker pull "$IMAGE" >/dev/null; fi
+IMAGE="$(build_docker_image_ref "$POSTGRES_BUILD_IMAGE" "$POSTGRES_BUILD_IMAGE_SHA256")"
 docker run --rm --network none \
   -e POSTGRES_FLEX_VERSION="$POSTGRES_FLEX_VERSION" \
   -e POSTGRES_FLEX_RPM_NEVRA="$POSTGRES_FLEX_RPM_NEVRA" \
@@ -59,6 +61,6 @@ cp "$WORK/plpgsql_check-2.8.11"/plpgsql_check--*.sql "$WORK/plcheck-payload/"; c
 require_floor "$WORK/client-payload"; require_floor "$WORK/plcheck-payload"
 tar --sort=name --mtime='UTC 2026-08-20' --owner=0 --group=0 --numeric-owner -czf "$OUT/postgresql-client-17.10-linux-x64-gnu.tar.gz" -C "$WORK" client-payload
 tar --sort=name --mtime='UTC 2026-08-20' --owner=0 --group=0 --numeric-owner -czf "$OUT/plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz" -C "$WORK" plcheck-payload
-test "$(sha "$OUT/postgresql-client-17.10-linux-x64-gnu.tar.gz")" = "$POSTGRES_CLIENT_SHA256"
-test "$(sha "$OUT/plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz")" = "$PLPGSQL_CHECK_SHA256"
+build_verify_sha256 "$OUT/postgresql-client-17.10-linux-x64-gnu.tar.gz" "$POSTGRES_CLIENT_SHA256"
+build_verify_sha256 "$OUT/plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz" "$PLPGSQL_CHECK_SHA256"
 printf 'Reproduced exact qualified payloads:\n%s\n%s\n' "$OUT/postgresql-client-17.10-linux-x64-gnu.tar.gz" "$OUT/plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz"

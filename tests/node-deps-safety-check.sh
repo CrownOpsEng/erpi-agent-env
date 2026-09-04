@@ -7,16 +7,33 @@ RUNTIME="$TMP/runtime"
 mkdir -p "$RUNTIME/scripts" "$RUNTIME/runtime/node-capsules" "$RUNTIME/manifest"
 cp "$ROOT/templates/scripts/node-deps.py" "$RUNTIME/scripts/node-deps.py"
 cp "$ROOT/vendor/node-capsules/manifest.json" "$RUNTIME/manifest/node-capsules.json"
-cp "$ROOT/vendor/node-capsules/"*.tgz "$RUNTIME/runtime/node-capsules/"
 chmod +x "$RUNTIME/scripts/node-deps.py"
 
-python3 - <<'PY' "$RUNTIME/manifest/node-capsules.json" "$TMP/package-lock.template.json"
-import json,sys
-manifest=json.load(open(sys.argv[1],encoding='utf-8'))
+# Source validation stays network-free: generate deterministic local package fixtures,
+# then bind the runtime-copy manifest to those exact bytes. The real connected builder
+# separately proves acquisition of the upstream capsules from the same source manifest.
+python3 - <<'PY' "$RUNTIME/manifest/node-capsules.json" "$RUNTIME/runtime/node-capsules" "$TMP/package-lock.template.json"
+import base64, gzip, hashlib, io, json, pathlib, tarfile, sys
+manifest_path=pathlib.Path(sys.argv[1]); capsule_dir=pathlib.Path(sys.argv[2]); lock_path=pathlib.Path(sys.argv[3])
+manifest=json.loads(manifest_path.read_text(encoding='utf-8'))
 packages={"": {"name":"fixture","version":"1.0.0"}}
 for name,cap in manifest["packages"].items():
+    package_json=json.dumps({"name":name,"version":cap["version"],"type":"module"},sort_keys=True,separators=(',',':')).encode()+b'\n'
+    files={"package/package.json":package_json,"package/src/index.js":b'export default true\n'}
+    raw=io.BytesIO()
+    with tarfile.open(fileobj=raw,mode='w',format=tarfile.GNU_FORMAT) as tf:
+        for rel,data in sorted(files.items()):
+            info=tarfile.TarInfo(rel); info.size=len(data); info.mtime=0; info.mode=0o644; info.uid=0; info.gid=0; info.uname=''; info.gname=''
+            tf.addfile(info,io.BytesIO(data))
+    out=capsule_dir/cap['file']
+    with out.open('wb') as handle:
+        with gzip.GzipFile(filename='',mode='wb',fileobj=handle,mtime=0) as gz: gz.write(raw.getvalue())
+    data=out.read_bytes()
+    cap['sha256']=hashlib.sha256(data).hexdigest()
+    cap['integrity']='sha512-'+base64.b64encode(hashlib.sha512(data).digest()).decode()
     packages[f"node_modules/{name}"]={"version":cap["version"],"integrity":cap["integrity"]}
-json.dump({"name":"fixture","version":"1.0.0","lockfileVersion":3,"requires":True,"packages":packages},open(sys.argv[2],'w',encoding='utf-8'),indent=2)
+manifest_path.write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
+lock_path.write_text(json.dumps({"name":"fixture","version":"1.0.0","lockfileVersion":3,"requires":True,"packages":packages},indent=2)+'\n',encoding='utf-8')
 PY
 
 make_repo() {
@@ -78,7 +95,7 @@ if run_deps "$repo" clean >/dev/null 2>&1; then echo 'modified owned package une
 
 # A matching package already supplied by the repository stays foreign and survives cleanup.
 repo="$TMP/foreign-match"; make_repo "$repo"; mkdir -p "$repo/node_modules/postgres"
-tar -xOzf "$ROOT/vendor/node-capsules/postgres-3.4.7.tgz" package/package.json > "$repo/node_modules/postgres/package.json"
+tar -xOzf "$RUNTIME/runtime/node-capsules/postgres-3.4.7.tgz" package/package.json > "$repo/node_modules/postgres/package.json"
 printf 'foreign sentinel\n' > "$repo/node_modules/postgres/KEEP"
 run_deps "$repo" hydrate >/dev/null
 python3 - <<'PY' "$repo/node_modules/.agent-env-node-deps.json"
@@ -91,7 +108,7 @@ run_deps "$repo" clean >/dev/null
 
 # RC1's name-only marker is not trustworthy enough to delete repository files.
 repo="$TMP/legacy"; make_repo "$repo"; mkdir -p "$repo/node_modules/postgres"
-tar -xOzf "$ROOT/vendor/node-capsules/postgres-3.4.7.tgz" package/package.json > "$repo/node_modules/postgres/package.json"
+tar -xOzf "$RUNTIME/runtime/node-capsules/postgres-3.4.7.tgz" package/package.json > "$repo/node_modules/postgres/package.json"
 printf '{"packages":["postgres"]}\n' > "$repo/node_modules/.agent-env-node-deps.json"
 if run_deps "$repo" clean >/dev/null 2>&1; then echo 'legacy ownership marker unexpectedly trusted' >&2; exit 1; fi
 [[ -d "$repo/node_modules/postgres" ]]
