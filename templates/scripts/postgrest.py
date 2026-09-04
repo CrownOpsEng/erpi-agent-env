@@ -160,7 +160,7 @@ def main() -> int:
                 "POSTGREST_URL": f"http://127.0.0.1:{args.port}",
                 "POSTGREST_HOST": "127.0.0.1",
                 "POSTGREST_PORT": str(args.port),
-                "MAGNET_AGENT_POSTGREST": "1",
+                "ERPI_AGENT_POSTGREST": "1",
             }
         )
         child = subprocess.Popen(args.command, env=child_env)

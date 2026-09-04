@@ -3,6 +3,7 @@ set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PUBLISH="$ROOT/.github/workflows/publish-release.yml"
 BUILD="$ROOT/.github/workflows/build-dist.yml"
+ACCEPT="$ROOT/.github/workflows/accept-runtime.yml"
 VALIDATE="$ROOT/.github/workflows/validate.yml"
 REQUEST="$ROOT/.github/release-request.json"
 README="$ROOT/README.md"
@@ -10,7 +11,7 @@ VALIDATION="$ROOT/VALIDATION.md"
 AGENTS="$ROOT/AGENTS.md"
 CONTRIBUTING="$ROOT/CONTRIBUTING.md"
 
-for file in "$PUBLISH" "$BUILD" "$VALIDATE" "$REQUEST" "$README" "$VALIDATION" "$AGENTS" "$CONTRIBUTING"; do
+for file in "$PUBLISH" "$BUILD" "$ACCEPT" "$VALIDATE" "$REQUEST" "$README" "$VALIDATION" "$AGENTS" "$CONTRIBUTING"; do
   [[ -s "$file" ]] || { echo "Required release/routing source missing: $file" >&2; exit 1; }
 done
 
@@ -27,6 +28,11 @@ grep -F 'scripts/check-pr-record.py --title "$PR_TITLE"' "$VALIDATE" >/dev/null
 grep -F './tests/pr-record-check.sh' "$VALIDATE" >/dev/null
 grep -F 'Normal repository work uses a topic branch and pull request.' "$CONTRIBUTING" >/dev/null
 grep -F 'squash merge' "$CONTRIBUTING" >/dev/null
+grep -F 'instead of requiring a ceremonial metadata-only PR' "$CONTRIBUTING" >/dev/null
+grep -F 'manually dispatch **Accept runtime** with that exact 40-character SHA as `target_ref`' "$CONTRIBUTING" >/dev/null
+grep -F 'target_ref:' "$ACCEPT" >/dev/null
+grep -F 'ref: ${{ inputs.target_ref || github.sha }}' "$ACCEPT" >/dev/null
+grep -F 'automatic post-merge run on the exact `main` SHA remains mandatory' "$VALIDATION" >/dev/null
 
 # Successful main acceptance is the automatic release handoff; manual dispatch is recovery/idempotent.
 grep -F 'workflow_run:' "$PUBLISH" >/dev/null
@@ -65,9 +71,9 @@ grep -F 'expected="v${PRODUCT_VERSION}"' "$BUILD" >/dev/null
 grep -F 'steps.source.outputs.distance' "$BUILD" >/dev/null
 grep -F 'steps.source.outputs.description' "$BUILD" >/dev/null
 grep -F 'Tagged distribution must build from exact tag' "$BUILD" >/dev/null
-grep -F 'MAGNET_AGENT_SOURCE_BASE_TAG: ${{ steps.source.outputs.base_tag }}' "$BUILD" >/dev/null
-grep -F 'MAGNET_AGENT_SOURCE_DISTANCE: ${{ steps.source.outputs.distance }}' "$BUILD" >/dev/null
-grep -F 'MAGNET_AGENT_SOURCE_DESCRIPTION: ${{ steps.source.outputs.description }}' "$BUILD" >/dev/null
+grep -F 'ERPI_AGENT_SOURCE_BASE_TAG: ${{ steps.source.outputs.base_tag }}' "$BUILD" >/dev/null
+grep -F 'ERPI_AGENT_SOURCE_DISTANCE: ${{ steps.source.outputs.distance }}' "$BUILD" >/dev/null
+grep -F 'ERPI_AGENT_SOURCE_DESCRIPTION: ${{ steps.source.outputs.description }}' "$BUILD" >/dev/null
 grep -F 'prerelease flag' "$BUILD" >/dev/null
 grep -F 'refusing to replace immutable assets' "$BUILD" >/dev/null
 grep -F 'gh release upload "$RELEASE_TAG"' "$BUILD" >/dev/null

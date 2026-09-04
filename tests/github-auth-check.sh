@@ -45,7 +45,7 @@ case "$1 $2" in
     exit 0
     ;;
   "api user") test -f "$state" && { echo 'test-user'; exit 0; } ;;
-  "repo view") test -f "$state" && { printf 'CrownOpsEng/magnet-photos-env\tADMIN\n'; exit 0; } ;;
+  "repo view") test -f "$state" && { printf 'CrownOpsEng/erpi-agent-env\tADMIN\n'; exit 0; } ;;
 esac
 if [ "$1 $2" = "auth git-credential" ] && [ "${3:-}" = get ]; then
   cat >/dev/null
@@ -130,7 +130,7 @@ case "$1 $2" in
   "auth token") exit 0 ;;
   "auth status") exit 0 ;;
   "api user") echo 'test-user'; exit 0 ;;
-  "repo view") printf 'CrownOpsEng/magnet-photos-env\tADMIN\n'; exit 0 ;;
+  "repo view") printf 'CrownOpsEng/erpi-agent-env\tADMIN\n'; exit 0 ;;
 esac
 if [ "$1 $2" = "auth git-credential" ] && [ "${3:-}" = get ]; then
   cat >/dev/null
@@ -150,7 +150,7 @@ printf 'fixture\n' > fixture.txt
 "$REAL_GIT" add fixture.txt
 "$REAL_GIT" commit -qm fixture
 "$REAL_GIT" branch -M main
-"$REAL_GIT" remote add origin https://github.com/CrownOpsEng/magnet-photos-env.git
+"$REAL_GIT" remote add origin https://github.com/CrownOpsEng/erpi-agent-env.git
 "$TMP/github.sh" git >"$TMP/git-ready.out" 2>"$TMP/git-ready.err"
 helpers="$("$REAL_GIT" config --local --get-all credential.https://github.com.helper)"
 grep -Fxq '!gh auth git-credential' <<<"$helpers"

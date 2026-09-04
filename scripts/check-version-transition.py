@@ -49,17 +49,12 @@ def parse(text: str) -> Version:
     )
 
 
-def validate(parent: str, current: str, metadata_only: bool) -> None:
+def validate(parent: str, current: str) -> None:
     parent_version = parse(parent)
     current_version = parse(current)
 
     if current == parent:
         return
-
-    if not metadata_only:
-        raise SystemExit(
-            "Changing PRODUCT_VERSION is release metadata work and may not be mixed with runtime/source changes"
-        )
 
     if current_version.order_key <= parent_version.order_key:
         raise SystemExit(
@@ -71,9 +66,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--parent-version", required=True)
     parser.add_argument("--current-version", required=True)
-    parser.add_argument("--metadata-only", required=True, choices=("true", "false"))
     args = parser.parse_args()
-    validate(args.parent_version, args.current_version, args.metadata_only == "true")
+    validate(args.parent_version, args.current_version)
     print("Version transition check passed.")
 
 

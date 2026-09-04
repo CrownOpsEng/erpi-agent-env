@@ -67,7 +67,7 @@ def command_env(port: int, bootstrap_user: str) -> dict[str, str]:
         "PGDATABASE": "postgres",
         "PGUSER": bootstrap_user,
         "DATABASE_URL": f"postgresql://{quote(bootstrap_user, safe='')}:postgres@127.0.0.1:{port}/postgres",
-        "MAGNET_AGENT_POSTGRES": "1",
+        "ERPI_AGENT_POSTGRES": "1",
     })
     return client_env(env)
 

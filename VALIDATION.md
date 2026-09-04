@@ -1,6 +1,6 @@
 # Validation contract
 
-This file defines the stable validation authority for Magnet Agent Environment. Git history records changes; GitHub Actions and release assets record execution/publication evidence. Do not maintain a second hand-written run ledger here.
+This file defines the stable validation authority for ERPI Agent Environment. Git history records changes; GitHub Actions and release assets record execution/publication evidence. Do not maintain a second hand-written run ledger here.
 
 ## Source validation
 
@@ -35,6 +35,8 @@ A payload-affecting source commit is releasable only after **Accept runtime** bu
 
 The accepted archive hash and exact source SHA belong in machine-generated `acceptance.json` and the archive sidecar, not copied into narrative docs.
 
+Before merge, prefer a complete local `./build.sh` run on the clean, committed final PR head whenever the host has working Docker. If local Docker is unavailable, manually dispatch **Accept runtime** with the exact final PR-head SHA as `target_ref` and require that run to succeed immediately before merge. The automatic post-merge run on the exact `main` SHA remains mandatory before release publication.
+
 ## PostgreSQL source/native qualification
 
 The PostgreSQL server is not accepted from a prebuilt third-party binary bundle. Every full runtime build fetches the exact pinned official PostgreSQL source tarball, verifies its SHA-256, and builds the normal install prefix inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10's normal build regenerates scanner sources, so its Flex prerequisite is also immutable: the builder verifies the exact pinned AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM SHA-256 and package identity/signature, installs that local RPM without dependency resolution or package scripts, and disables container networking for the PostgreSQL compilation. Flex is a build input recorded in provenance, not redistributed runtime payload. Deterministic GNU `ar` mode (`AROPT=crsD`) is required for PostgreSQL static archives. Optional readline, zlib, and ICU integrations are disabled to avoid unnecessary external runtime-library dependencies; the resulting ELF symbol floor and dynamic dependencies are checked before runtime acceptance.
@@ -42,6 +44,10 @@ The PostgreSQL server is not accepted from a prebuilt third-party binary bundle.
 The source-controlled PostgreSQL client and plpgsql_check payloads are qualified build inputs. Their pinned hashes are validated by source checks and by `build.sh` before extraction. They are qualified from a controlled GLIBC 2.28 build using pinned PostgreSQL 17.10/plpgsql_check sources; maximum GLIBC requirements are 2.25 for the client payload and 2.17 for plpgsql_check. `scripts/rebuild-qualified-database-assets.sh` provides their pinned maintainer reproduction path.
 
 Any future server source, configure, build-image, Flex build-input, client, or extension-native change requires full source validation and runtime acceptance. A harness defect is fixed and the complete relevant qualification is rerun; partial progress is not promoted as success.
+
+## Bundled Node library boundary
+
+`yaml` 2.9.0 is part of the portable Node runtime. The npm archive version and SHA-256 are pinned, the builder installs its package payload directly under the bundled Node `lib/node_modules`, and runtime self-test must import, parse, and stringify YAML without modifying the target repository.
 
 ## Node capsule boundary
 
@@ -72,7 +78,7 @@ A wrapper timeout is environmental evidence, not a test failure or success.
 
 ## pg-delta compatibility boundary
 
-The shipped pg-delta capability is intentionally narrower than the upstream CLI. `@supabase/pg-delta` is pinned exactly to `1.0.0-alpha.33`, with its complete npm lock and package integrity/license provenance, because that is the qualified default for Supabase CLI 2.114.0. Promotion requires useful and safe schema planning for the motivating Magnet Photos workflows; it does not require perfect behavioral parity with every Supabase CLI wrapper option.
+The shipped pg-delta capability is intentionally narrower than the upstream CLI. `@supabase/pg-delta` is pinned exactly to `1.0.0-alpha.33`, with its complete npm lock and package integrity/license provenance, because that is the qualified default for Supabase CLI 2.114.0. Promotion requires useful and safe schema planning for the motivating consumer workflows; it does not require perfect behavioral parity with every Supabase CLI wrapper option.
 
 Only `agent-env pg-delta plan` is exposed. Live source and target URLs must be numeric loopback, inherited PostgreSQL targeting variables are scrubbed, and upstream mutation commands such as `apply` or `sync` are not routed. Acceptance proves a representative plan can be generated without mutating source/target, applied by the test harness to a clone, and then converges to an empty re-plan. Any pg-delta version or compatibility-baseline change requires fresh qualification before promotion.
 
@@ -83,7 +89,6 @@ PostgREST 14.16 is pinned because it is the exact upstream native default select
 Acceptance must exercise the real PostgREST process rather than replacing it with `SET ROLE` or direct SQL. It proves request-role/session-role context, request search path, a configured generic pre-request function, and a SECURITY DEFINER wrapper calling a SECURITY INVOKER dependency in both a correctly granted path and a deliberately missing-schema-privilege path that surfaces SQLSTATE `42501` over HTTP. It also proves remote database refusal and signal cleanup.
 
 This capability is a discriminator for ordinary PostgREST semantics, not a claim of managed Supabase parity. Kong routing, Supabase Auth/API keys, Storage, Realtime and other provider topology remain outside the bundle. A PostgREST version or compatibility-baseline change requires fresh upstream-asset and runtime qualification before promotion.
-
 
 ## Supabase CLI compatibility boundary
 
@@ -101,11 +106,11 @@ Restore must require host Git but no shell network or credential; reject malform
 
 Source validation covers positive multi-commit/multi-branch/tag restoration plus malformed metadata, branch/SHA mismatch, prerequisite bundles, unsafe ZIP members, hostile Git configuration, and destination refusal. Runtime acceptance exercises the shipped `agent-env git-handoff restore` command using a real locally generated full bundle. The capability is transport plumbing, not GitHub authentication and not a substitute for target-repository authority.
 
-## Project promotion proof
+## Consumer promotion proof
 
-A generic environment capability is not proven useful to Magnet Photos merely because its standalone self-test passes. Database-capability releases must additionally be exercised against the target repository's current authoritative migrations/tests before the environment release is published when that project is the motivating consumer.
+A reusable environment capability is not proven useful merely because its standalone self-test passes. When a capability is motivated by a specific consuming repository, release qualification must additionally exercise that repository's current authoritative interfaces/tests before the environment release is published.
 
-That project proof should use the repository's real pinned client dependency and existing suites unchanged wherever possible. The environment must not carry project schema, business logic, roles, migrations, or test expectations solely to manufacture a passing result.
+That consumer proof should use the repository's real pinned client dependency and existing suites unchanged wherever possible. The environment must not carry project schema, business logic, roles, migrations, or test expectations solely to manufacture a passing result.
 
 ## Source identity and release boundary
 
@@ -117,11 +122,11 @@ This boundary is mechanical and must prove both stable and prerelease ancestry. 
 
 Runtime `manifest/environment.json` and generated `acceptance.json` record product version, full source commit, source description, base tag, and numeric distance separately. The archive filename uses the source description directly; the SHA-256 sidecar remains authority for exact archive bytes.
 
-The builder refuses dirty worktrees. Exported source without `.git` must provide the complete source tuple (`MAGNET_AGENT_SOURCE_COMMIT`, `MAGNET_AGENT_SOURCE_BASE_TAG`, `MAGNET_AGENT_SOURCE_DISTANCE`, and `MAGNET_AGENT_SOURCE_DESCRIPTION`) because a SHA alone cannot reconstruct tag ancestry.
+The builder refuses dirty worktrees. Exported source without `.git` must provide the complete source tuple (`ERPI_AGENT_SOURCE_COMMIT`, `ERPI_AGENT_SOURCE_BASE_TAG`, `ERPI_AGENT_SOURCE_DISTANCE`, and `ERPI_AGENT_SOURCE_DESCRIPTION`) because a SHA alone cannot reconstruct tag ancestry.
 
-A `PRODUCT_VERSION` change is a dedicated release-metadata-only source change: `versions.env` and `.github/release-request.json` move together. It may be the single untagged release-cut commit ahead of the nearest existing tag; no later source commit may retain that ahead-of-tag product version. Once the matching tag is created, ordinary development may continue with the same product version and source descriptions anchored to that tag.
+A coherent review range may combine its implementation and forward `PRODUCT_VERSION` change: `versions.env` and `.github/release-request.json` move together in the final state. This preserves one normal squash-merged review unit. No later source range may retain that ahead-of-tag product version; once the matching tag is created, ordinary development may continue with the same product version and source descriptions anchored to that tag.
 
-Source validation must reject backward product-version transitions, pseudo-development versions, version changes mixed with runtime/source changes, exact-tag/product-version disagreement, continuation after an untagged release-cut commit, and artifact/metadata names inconsistent with source ancestry.
+Source validation must reject backward product-version transitions, pseudo-development versions, mismatched release-request metadata, exact-tag/product-version disagreement, continuation in a later range after an untagged release integration, and artifact/metadata names inconsistent with source ancestry.
 
 ## Release authority
 
@@ -129,12 +134,12 @@ Stable and prerelease tags are real immutable compatibility states. Optional pre
 
 A release/prerelease requires:
 
-1. the release-cut source change touches only approved release metadata and moves `PRODUCT_VERSION` forward;
+1. the coherent review range moves `PRODUCT_VERSION` forward and keeps the release request synchronized;
 2. source validation passes for the exact commit;
 3. the exact payload-affecting source passes **Accept runtime** before publication;
 4. permanent release workflow creates/verifies immutable `v$PRODUCT_VERSION` at that exact source and prepares a draft Release;
 5. **Build distribution** checks out the real tag, requires source description to equal that tag, repeats full runtime acceptance, and attaches archive/checksum/`acceptance.json` before publication;
-6. when Magnet Photos is the motivating consumer, current project promotion proof passes through repository-owned interfaces;
+6. when a specific repository is the motivating consumer, current consumer promotion proof passes through repository-owned interfaces;
 7. PostgreSQL/runtime provenance boundaries remain intact.
 
 If an RC exposes a defect, its tag and published assets remain immutable. Keep the RC product version while fixing source; development descriptions attach to the RC tag. When ready, cut the next candidate with a release-metadata-only change (`rc.1` → `rc.2`). Do not increment PATCH for a defect in an unreleased target. If qualification shows the intended compatibility base is wrong, move to a new truthful base version.

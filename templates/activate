@@ -1,23 +1,24 @@
 # shellcheck shell=bash
-# Source this file:  source /path/to/magnet-agent-env/activate
+# Source this file:  source /path/to/erpi-agent-env/activate
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   echo "This file must be sourced, not executed:" >&2
   echo "  source \"$0\"" >&2
   exit 2
 fi
 
-_MAGNET_AGENT_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-export MAGNET_AGENT_ENV="$_MAGNET_AGENT_ROOT"
-export VIRTUAL_ENV="$MAGNET_AGENT_ENV/env"
-export UV_CACHE_DIR="$MAGNET_AGENT_ENV/state/uv-cache"
-export UV_PYTHON_INSTALL_DIR="$MAGNET_AGENT_ENV/state/uv-python"
-export UV_TOOL_DIR="$MAGNET_AGENT_ENV/state/uv-tools"
-export UV_TOOL_BIN_DIR="$MAGNET_AGENT_ENV/state/uv-tool-bin"
+_ERPI_AGENT_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+export ERPI_AGENT_ENV="$_ERPI_AGENT_ROOT"
+export VIRTUAL_ENV="$ERPI_AGENT_ENV/env"
+export UV_CACHE_DIR="$ERPI_AGENT_ENV/state/uv-cache"
+export UV_PYTHON_INSTALL_DIR="$ERPI_AGENT_ENV/state/uv-python"
+export UV_TOOL_DIR="$ERPI_AGENT_ENV/state/uv-tools"
+export UV_TOOL_BIN_DIR="$ERPI_AGENT_ENV/state/uv-tool-bin"
 export UV_LINK_MODE="copy"
-export PIP_CACHE_DIR="$MAGNET_AGENT_ENV/state/pip-cache"
-export NPM_CONFIG_CACHE="$MAGNET_AGENT_ENV/state/npm-cache"
-export NPM_CONFIG_PREFIX="$MAGNET_AGENT_ENV/state/npm-global"
-export PYTHONPYCACHEPREFIX="$MAGNET_AGENT_ENV/state/pycache"
-mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$PIP_CACHE_DIR" "$NPM_CONFIG_CACHE" "$NPM_CONFIG_PREFIX" "$PYTHONPYCACHEPREFIX" "$MAGNET_AGENT_ENV/state/postgres" 2>/dev/null || true
-export PATH="$MAGNET_AGENT_ENV/env/bin:$MAGNET_AGENT_ENV/bin:$UV_TOOL_BIN_DIR:$NPM_CONFIG_PREFIX/bin:$PATH"
-unset _MAGNET_AGENT_ROOT
+export PIP_CACHE_DIR="$ERPI_AGENT_ENV/state/pip-cache"
+export NPM_CONFIG_CACHE="$ERPI_AGENT_ENV/state/npm-cache"
+export NPM_CONFIG_PREFIX="$ERPI_AGENT_ENV/state/npm-global"
+export NODE_PATH="$ERPI_AGENT_ENV/runtime/node/lib/node_modules${NODE_PATH:+:$NODE_PATH}"
+export PYTHONPYCACHEPREFIX="$ERPI_AGENT_ENV/state/pycache"
+mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$PIP_CACHE_DIR" "$NPM_CONFIG_CACHE" "$NPM_CONFIG_PREFIX" "$PYTHONPYCACHEPREFIX" "$ERPI_AGENT_ENV/state/postgres" 2>/dev/null || true
+export PATH="$ERPI_AGENT_ENV/env/bin:$ERPI_AGENT_ENV/bin:$UV_TOOL_BIN_DIR:$NPM_CONFIG_PREFIX/bin:$PATH"
+unset _ERPI_AGENT_ROOT

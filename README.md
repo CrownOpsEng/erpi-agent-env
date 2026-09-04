@@ -1,8 +1,8 @@
-# Magnet Agent Environment Builder
+# ERPI Agent Environment Builder
 
-Builds a **portable Linux x86-64 AI-agent execution environment** for Magnet Photos and similar repositories when an agent has shell access but the host is missing useful tooling.
+Builds a **portable Linux x86-64 AI-agent execution environment** for repositories where an agent has shell access but the host is missing useful tooling.
 
-The bundle is deliberately external to the Magnet Photos application/dependency model. Target repositories remain authoritative for their own dependencies, safety rules, command surfaces, schemas, migrations, and application architecture.
+The bundle is deliberately external to target-project application/dependency models. Target repositories remain authoritative for their own dependencies, safety rules, command surfaces, schemas, migrations, and application architecture.
 
 The design target is high-leverage asymmetry: solve recurring execution-environment limitations once while keeping the permanent control surface small.
 
@@ -17,7 +17,7 @@ A working bundled `gh` binary does **not** imply the shell can reach GitHub. `ag
 The finished bundle pins and verifies a deliberately small generic capability layer:
 
 - uv 0.12.5 and uv-managed CPython 3.13.14 from an explicitly pinned python-build-standalone build
-- Node.js 24.19.0 LTS with npm/npx
+- Node.js 24.19.0 LTS with npm/npx and bundled `yaml` 2.9.0
 - GitHub CLI, jq, yq, ripgrep, actionlint, gitleaks, ShellCheck, and Miller
 - a bounded Git-bundle handoff restorer that turns connector-downloaded repository artifacts into verified local worktrees without shell GitHub networking or credentials
 - a locked Python analysis layer with the HTTPX CLI completed, without project-specific pytest/setuptools/wheel requirements
@@ -39,7 +39,7 @@ The supported runtime contract is GNU/Linux x86-64 with kernel >= 4.18, glibc >=
 
 ## Build
 
-Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256sum, find, sed/awk/grep, Git history containing the reachable version tags, a working Docker daemon, and internet access. Exported source trees without `.git` must provide the full `MAGNET_AGENT_SOURCE_COMMIT`, `MAGNET_AGENT_SOURCE_BASE_TAG`, `MAGNET_AGENT_SOURCE_DISTANCE`, and `MAGNET_AGENT_SOURCE_DESCRIPTION` tuple. No sudo is used. Docker is a builder capability only; it is not bundled into the runtime.
+Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256sum, find, sed/awk/grep, Git history containing the reachable version tags, a working Docker daemon, and internet access. Exported source trees without `.git` must provide the full `ERPI_AGENT_SOURCE_COMMIT`, `ERPI_AGENT_SOURCE_BASE_TAG`, `ERPI_AGENT_SOURCE_DISTANCE`, and `ERPI_AGENT_SOURCE_DESCRIPTION` tuple. No sudo is used. Docker is a builder capability only; it is not bundled into the runtime.
 
 ```bash
 ./tests/static-check.sh
@@ -49,22 +49,31 @@ Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256
 `PRODUCT_VERSION` in `versions.env` is the released compatibility identity, not a development-build counter. Ordinary source commits leave it unchanged. The builder derives the artifact identity from the nearest reachable stable/prerelease tag, commit distance, and source SHA:
 
 ```text
-stable descendant: magnet-agent-env-linux-x64-v0.1.1-17-g4c2fa17c9a1.tar.gz
-exact RC:          magnet-agent-env-linux-x64-v0.2.0-rc.1.tar.gz
-RC descendant:    magnet-agent-env-linux-x64-v0.2.0-rc.1-2-g91ab3c4d5e6f.tar.gz
-exact stable:      magnet-agent-env-linux-x64-v0.2.0.tar.gz
+stable descendant: erpi-agent-env-linux-x64-v0.1.1-17-g4c2fa17c9a1.tar.gz
+exact RC:          erpi-agent-env-linux-x64-v0.2.0-rc.1.tar.gz
+RC descendant:    erpi-agent-env-linux-x64-v0.2.0-rc.1-2-g91ab3c4d5e6f.tar.gz
+exact stable:      erpi-agent-env-linux-x64-v0.2.0.tar.gz
 ```
 
 This is Git source identity, not invented SemVer. The numeric distance makes development order visible; the full 40-character source SHA, base tag, distance and source description are recorded in `manifest/environment.json` and `acceptance.json`; the archive SHA-256 identifies the exact bytes.
 
-There is no `-dev` product version. A release/prerelease is cut by a dedicated release-metadata-only `PRODUCT_VERSION`/release-request change and immutable `v$PRODUCT_VERSION` tag. Development after an RC keeps that RC product version and naturally describes itself from the RC tag until the next candidate tag is cut.
+There is no `-dev` product version. A coherent PR may include its `PRODUCT_VERSION`/release-request cut, and the exact accepted squash integration receives immutable `v$PRODUCT_VERSION`. Development after an RC keeps that RC product version and naturally describes itself from the RC tag until the next candidate is cut.
 
 Archive creation normalizes tar ordering/metadata, gzip headers, and the relocatable `pyvenv.cfg` placeholder so repeated packaging of the same accepted payload is byte-for-byte deterministic.
 
 Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under `.download-cache/` and are never shipped. GitHub Actions derives the shared download-cache key with `scripts/download-cache-key.sh` from dependency/build-input pins plus `requirements.lock`; product-version/archive metadata such as `PRODUCT_VERSION` does not churn that cache, while every reused artifact is still verified by its own pinned hash before use.
 The PostgreSQL server is built during every full acceptance/distribution build from the exact official PostgreSQL 17.10 source tarball inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10 regenerates scanner sources during this build, so the exact qualified AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM is a pinned build-only input: its SHA-256 is verified, its package identity/signature are checked inside the pinned image, it is installed from local bytes with container networking disabled, and it is not shipped in the runtime. The builder keeps the normal installed PostgreSQL prefix and deterministic GNU `ar` mode; optional readline, zlib, and ICU integrations are disabled only to reduce external runtime dependencies. The source-controlled PostgreSQL client/plpgsql_check payloads remain separately qualified inputs and can be reproduced with `scripts/rebuild-qualified-database-assets.sh` using the same pinned/offline PostgreSQL build prerequisites.
 
-Direct third-party license/attribution texts for redistributed command/database/capsule components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. PostgreSQL server provenance terminates at the pinned official source artifact and pinned build image rather than an opaque prebuilt server bundle; the official PostgreSQL copyright notice is retained in the runtime.
+Direct third-party license/attribution texts for redistributed command/database/capsule/library components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. PostgreSQL server provenance terminates at the pinned official source artifact and pinned build image rather than an opaque prebuilt server bundle; the official PostgreSQL copyright notice is retained in the runtime.
+
+### Bundled Node libraries
+
+The portable Node runtime includes `yaml` 2.9.0 under its own `lib/node_modules`. The archive is version- and SHA-256-pinned in `versions.env`, verified during build, and available after activation through standard `NODE_PATH`; no target-repository install or Python/PyYAML detour is required.
+
+```bash
+source /path/to/erpi-agent-env/activate
+node -e 'const YAML=require("yaml"); console.log(YAML.parse("enabled: true").enabled)'
+```
 
 ## Offline Node capsule boundary
 

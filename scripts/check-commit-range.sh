@@ -70,28 +70,7 @@ source_base_tag() {
   }
 }
 
-version_change_is_release_metadata_only() {
-  local parent="$1" current="$2"
-  local changed=()
-  mapfile -t changed < <(git diff --name-only "$parent" "$current" --)
-  ((${#changed[@]} > 0)) || return 1
-
-  local path
-  for path in "${changed[@]}"; do
-    case "$path" in
-      versions.env|.github/release-request.json) ;;
-      *) return 1 ;;
-    esac
-  done
-  printf '%s\n' "${changed[@]}" | grep -Fx versions.env >/dev/null || return 1
-  printf '%s\n' "${changed[@]}" | grep -Fx .github/release-request.json >/dev/null || return 1
-
-  local parent_normalized current_normalized
-  parent_normalized="$(git show "$parent:versions.env" | sed -E 's/^PRODUCT_VERSION="[^"]*"$/PRODUCT_VERSION="<VERSION>"/')"
-  current_normalized="$(git show "$current:versions.env" | sed -E 's/^PRODUCT_VERSION="[^"]*"$/PRODUCT_VERSION="<VERSION>"/')"
-  [[ "$parent_normalized" == "$current_normalized" ]]
-}
-
+range_contains_version_change=false
 for commit in "${commits[@]}"; do
   subject="$(git show -s --format=%s "$commit")"
   echo "Checking commit ${commit:0:12}: $subject"
@@ -108,25 +87,12 @@ for commit in "${commits[@]}"; do
   [[ -n "$parent" ]] || continue
 
   if parent_version="$(product_version_from_commit "$parent" 2>/dev/null)"; then
-    metadata_only=false
-    if version_change_is_release_metadata_only "$parent" "$commit"; then
-      metadata_only=true
-    fi
     python3 "$ROOT/scripts/check-version-transition.py" \
       --parent-version "$parent_version" \
-      --current-version "$current_version" \
-      --metadata-only "$metadata_only" >/dev/null
+      --current-version "$current_version" >/dev/null
 
-    if [[ "$current_version" == "$parent_version" ]]; then
-      [[ "$current_version" == "$base_version" ]] || {
-        echo "Commit ${commit:0:12} continues source work with PRODUCT_VERSION $current_version before matching tag v$current_version exists; nearest source tag is $base_tag." >&2
-        exit 1
-      }
-    else
-      [[ "$metadata_only" == true ]] || {
-        echo "PRODUCT_VERSION changes must touch only approved release metadata." >&2
-        exit 1
-      }
+    if [[ "$current_version" != "$parent_version" ]]; then
+      range_contains_version_change=true
       request_version="$(release_request_version_from_commit "$commit")"
       [[ "$request_version" == "$current_version" ]] || {
         echo "Release request version $request_version does not match PRODUCT_VERSION $current_version at ${commit:0:12}." >&2
@@ -151,5 +117,13 @@ for commit in "${commits[@]}"; do
     echo "Accepted one-time legacy version-authority migration from $legacy_version to released product $current_version."
   fi
 done
+
+head_version="$(product_version_from_commit "$HEAD_SHA")"
+head_base_tag="$(source_base_tag "$HEAD_SHA")"
+head_base_version="${head_base_tag#v}"
+if [[ "$range_contains_version_change" != true && "$head_version" != "$head_base_version" ]]; then
+  echo "Introduced source continues with PRODUCT_VERSION $head_version before matching tag v$head_version exists; nearest source tag is $head_base_tag." >&2
+  exit 1
+fi
 
 echo "Detailed commit history check passed for ${#commits[@]} commit(s)."

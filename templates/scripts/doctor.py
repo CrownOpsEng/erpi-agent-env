@@ -30,6 +30,7 @@ def main()->int:
       'bundled':{
         'python':probe(ROOT/'env/bin/python',['--version']),
         'node':probe(ROOT/'bin/node',['--version']),
+        'node_yaml':probe(ROOT/'bin/node',['-e',"const Y=require('yaml'); if(require('yaml/package.json').version!=='2.9.0'||Y.parse('a: 1').a!==1) process.exit(1); console.log('yaml 2.9.0')"]),
         'gh':probe(ROOT/'bin/gh',['--version']),
         'shellcheck':probe(ROOT/'bin/shellcheck',['--version']),
         'mlr':probe(ROOT/'bin/mlr',['--version']),
@@ -51,7 +52,7 @@ def main()->int:
     }
     if ns.json: print(json.dumps(data,indent=2,sort_keys=True))
     else:
-        print(f"Magnet Agent Environment {data['bundle']['version']} @ {ROOT}")
+        print(f"ERPI Agent Environment {data['bundle']['version']} @ {ROOT}")
         for name,p in data['bundled'].items(): print(f"bundled {name}: {'yes' if p.get('available') else 'NO'} {p.get('output','')}")
         for name,p in data['host'].items(): print(f"host {name}: {'yes' if p.get('available') else 'no'}")
         print('repo:', ', '.join(k for k,v in data['repository'].items() if isinstance(v,bool) and v) or 'no repository markers')

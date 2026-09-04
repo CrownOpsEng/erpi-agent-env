@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-export MAGNET_AGENT_ENV="$ROOT"
+export ERPI_AGENT_ENV="$ROOT"
 export VIRTUAL_ENV="$ROOT/env"
 export UV_CACHE_DIR="$ROOT/state/uv-cache"
 export UV_PYTHON_INSTALL_DIR="$ROOT/state/uv-python"
@@ -18,7 +18,7 @@ export PATH="$ROOT/env/bin:$ROOT/bin:$UV_TOOL_BIN_DIR:$NPM_CONFIG_PREFIX/bin:$PA
 "$ROOT/scripts/repair-python.sh" --quiet
 python - <<'PY'
 import csv, pathlib, sys, sysconfig, os
-root=pathlib.Path(os.environ['MAGNET_AGENT_ENV']).resolve()
+root=pathlib.Path(os.environ['ERPI_AGENT_ENV']).resolve()
 site=pathlib.Path(sysconfig.get_path('purelib')).resolve(); assert site.is_relative_to(root/'env')
 for dist in sorted(site.glob('*.dist-info')):
     cache=dist/'uv_cache.json'; record=dist/'RECORD'; cache_record=f'{dist.name}/uv_cache.json'
@@ -32,7 +32,7 @@ assert pathlib.Path(sys.prefix).resolve()==root/'env'
 base=(root/'runtime/python/current').resolve()
 assert pathlib.Path(sysconfig.get_config_var('BINDIR')).resolve()==base/'bin'
 assert pathlib.Path(sysconfig.get_config_var('LIBDIR')).resolve()==base/'lib'
-assert '__MAGNET_AGENT_PYTHON_PREFIX__' not in repr(sysconfig.get_config_vars())
+assert '__ERPI_AGENT_PYTHON_PREFIX__' not in repr(sysconfig.get_config_vars())
 import httpx, jsonschema, packaging, yaml, tomlkit, rpds  # noqa: F401
 from yaml import CLoader
 assert CLoader is not None
@@ -44,7 +44,7 @@ case "$real_python" in "$ROOT/runtime/python/"*) ;; *) echo "Venv interpreter es
 
 python - <<'PY_META'
 import csv, hashlib, json, os, pathlib, re
-root=pathlib.Path(os.environ['MAGNET_AGENT_ENV'])
+root=pathlib.Path(os.environ['ERPI_AGENT_ENV'])
 env=json.loads((root/'manifest/environment.json').read_text(encoding='utf-8'))
 product_version=env['product_version']
 source=env['source']
@@ -110,8 +110,15 @@ httpx --help >/dev/null
 pip --version >/dev/null
 printf '{"a":1}\n' | jq -e '.a == 1' >/dev/null
 printf 'a: 1\n' | yq -e '.a == 1' >/dev/null
-printf 'magnet\n' | rg -q magnet
+printf 'agent-env\n' | rg -q agent-env
 node -e 'if (process.versions.node !== "24.19.0") process.exit(1)'
+node - <<'NODE_YAML'
+const YAML = require('yaml')
+if (require('yaml/package.json').version !== '2.9.0') process.exit(1)
+const parsed = YAML.parse('alpha: 1\nnested:\n  ok: true\n')
+if (parsed.alpha !== 1 || parsed.nested?.ok !== true) process.exit(1)
+if (YAML.parse(YAML.stringify(parsed)).nested?.ok !== true) process.exit(1)
+NODE_YAML
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-env-selftest.XXXXXX")"
 cleanup_tmp() { rm -rf "$TMP"; }
@@ -510,16 +517,16 @@ POSTGREST_HTTP_PORT="$POSTGREST_HTTP_PORT" \
 POSTGREST_SIGNAL_PORT="$POSTGREST_SIGNAL_PORT" \
 POSTGREST_SIGNAL_READY="$TMP/postgrest-signal-ready" \
 "$ROOT/bin/agent-env" postgres run --bootstrap-user agent_env_postgrest_bootstrap --port "$POSTGREST_PG_PORT" -- bash -ceu '
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -f "$POSTGREST_FIXTURE" >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -f "$POSTGREST_FIXTURE" >/dev/null
   db_uri="postgresql://authenticator@127.0.0.1:${PGPORT}/postgres"
-  "$MAGNET_AGENT_ENV/bin/agent-env" postgrest run \
+  "$ERPI_AGENT_ENV/bin/agent-env" postgrest run \
     --db-uri "$db_uri" --db-schemas api --db-anon-role anon \
     --db-pre-request api.pre_request --port "$POSTGREST_HTTP_PORT" -- \
     python "$POSTGREST_PROBE"
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -Atc "select label from core.events order by label" | grep -Fx ok >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -Atc "select label from core.events order by label" | grep -Fx ok >/dev/null
 
   POSTGREST_SIGNAL_READY="$POSTGREST_SIGNAL_READY" \
-  "$MAGNET_AGENT_ENV/bin/agent-env" postgrest run \
+  "$ERPI_AGENT_ENV/bin/agent-env" postgrest run \
     --db-uri "$db_uri" --db-schemas api --db-anon-role anon \
     --db-pre-request api.pre_request --port "$POSTGREST_SIGNAL_PORT" -- \
     python "$POSTGREST_SLEEPER" >/dev/null 2>&1 &
@@ -545,26 +552,26 @@ fi
 
 PG_PORT="$(free_port)"
 "$ROOT/bin/agent-env" postgres run --port "$PG_PORT" -- bash -ceu '
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -Atc "select version()" | grep -F "PostgreSQL 17.10" >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create extension if not exists plpgsql_check" >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create or replace function selftest_good() returns int language plpgsql as \$\$ begin return 1; end \$\$" >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -Atc "select count(*) from plpgsql_check_function_tb('"'"'selftest_good()'"'"')" | grep -Fx 0 >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pgtap '"$TMP"'/pgtap.sql >/dev/null
-  if "$MAGNET_AGENT_ENV/bin/agent-env" pgtap '"$TMP"'/pgtap-bad.sql >/dev/null 2>&1; then echo "pgTAP negative probe unexpectedly passed" >&2; exit 1; fi
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -Atc "select version()" | grep -F "PostgreSQL 17.10" >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create extension if not exists plpgsql_check" >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create or replace function selftest_good() returns int language plpgsql as \$\$ begin return 1; end \$\$" >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -Atc "select count(*) from plpgsql_check_function_tb('"'"'selftest_good()'"'"')" | grep -Fx 0 >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pgtap '"$TMP"'/pgtap.sql >/dev/null
+  if "$ERPI_AGENT_ENV/bin/agent-env" pgtap '"$TMP"'/pgtap-bad.sql >/dev/null 2>&1; then echo "pgTAP negative probe unexpectedly passed" >&2; exit 1; fi
 
   for db in pgdelta_source pgdelta_target pgdelta_clone; do
-    "$MAGNET_AGENT_ENV/bin/agent-env" pg createdb "$db"
+    "$ERPI_AGENT_ENV/bin/agent-env" pg createdb "$db"
   done
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_source -f '"$TMP"'/pgdelta-source.sql >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_target -f '"$TMP"'/pgdelta-target.sql >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner pgdelta_source \
-    | "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_clone >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_source -f '"$TMP"'/pgdelta-source.sql >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_target -f '"$TMP"'/pgdelta-target.sql >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner pgdelta_source \
+    | "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_clone >/dev/null
   source_url="postgresql://postgres@127.0.0.1:${PGPORT}/pgdelta_source"
   target_url="postgresql://postgres@127.0.0.1:${PGPORT}/pgdelta_target"
   clone_url="postgresql://postgres@127.0.0.1:${PGPORT}/pgdelta_clone"
-  before_source="$("$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=MagnetAgentEnvSelftest pgdelta_source | sha256sum | cut -d" " -f1)"
-  before_target="$("$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=MagnetAgentEnvSelftest pgdelta_target | sha256sum | cut -d" " -f1)"
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg-delta plan --source "$source_url" --target "$target_url" --out '"$TMP"'/pgdelta-plan >/dev/null
+  before_source="$("$ERPI_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=ERPIAgentEnvSelftest pgdelta_source | sha256sum | cut -d" " -f1)"
+  before_target="$("$ERPI_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=ERPIAgentEnvSelftest pgdelta_target | sha256sum | cut -d" " -f1)"
+  "$ERPI_AGENT_ENV/bin/agent-env" pg-delta plan --source "$source_url" --target "$target_url" --out '"$TMP"'/pgdelta-plan >/dev/null
   test -s '"$TMP"'/pgdelta-plan/envelope.json
   cat '"$TMP"'/pgdelta-plan/*.sql > '"$TMP"'/pgdelta-plan.sql
   grep -F "nonempty_text" '"$TMP"'/pgdelta-plan.sql >/dev/null
@@ -573,22 +580,22 @@ PG_PORT="$(free_port)"
   grep -F "notes-guard" '"$TMP"'/pgdelta-plan.sql >/dev/null
   ! grep -F "auth.managed_noise" '"$TMP"'/pgdelta-plan.sql >/dev/null
   for file in '"$TMP"'/pgdelta-plan/*.sql; do
-    "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_clone -f "$file" >/dev/null
+    "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_clone -f "$file" >/dev/null
   done
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg-delta plan --source "$clone_url" --target "$target_url" --out '"$TMP"'/pgdelta-convergence >/dev/null
-  "$MAGNET_AGENT_ENV/runtime/node/bin/node" -e "const fs=require(\"node:fs\"); const e=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\")); if(e.files.length) { console.error(e); process.exit(1) }" '"$TMP"'/pgdelta-convergence/envelope.json
-  after_source="$("$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=MagnetAgentEnvSelftest pgdelta_source | sha256sum | cut -d" " -f1)"
-  after_target="$("$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=MagnetAgentEnvSelftest pgdelta_target | sha256sum | cut -d" " -f1)"
+  "$ERPI_AGENT_ENV/bin/agent-env" pg-delta plan --source "$clone_url" --target "$target_url" --out '"$TMP"'/pgdelta-convergence >/dev/null
+  "$ERPI_AGENT_ENV/runtime/node/bin/node" -e "const fs=require(\"node:fs\"); const e=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\")); if(e.files.length) { console.error(e); process.exit(1) }" '"$TMP"'/pgdelta-convergence/envelope.json
+  after_source="$("$ERPI_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=ERPIAgentEnvSelftest pgdelta_source | sha256sum | cut -d" " -f1)"
+  after_target="$("$ERPI_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=ERPIAgentEnvSelftest pgdelta_target | sha256sum | cut -d" " -f1)"
   [[ "$before_source" == "$after_source" && "$before_target" == "$after_target" ]] || { echo "pg-delta plan mutated source or target" >&2; exit 1; }
 
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create table selftest_data(id integer primary key, note text); insert into selftest_data values (1, '"'"'ok'"'"');" >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg pg_dump -Fc -f '"$TMP"'/selftest.dump postgres
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg createdb selftest_restore
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg pg_restore -d selftest_restore '"$TMP"'/selftest.dump
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -d selftest_restore -Atc "select note from selftest_data where id=1" | grep -Fx ok >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg pg_amcheck --install-missing --database=postgres >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg pgbench -i -s 1 postgres >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg pgbench -c 2 -j 1 -t 2 postgres >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create table selftest_data(id integer primary key, note text); insert into selftest_data values (1, '"'"'ok'"'"');" >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg pg_dump -Fc -f '"$TMP"'/selftest.dump postgres
+  "$ERPI_AGENT_ENV/bin/agent-env" pg createdb selftest_restore
+  "$ERPI_AGENT_ENV/bin/agent-env" pg pg_restore -d selftest_restore '"$TMP"'/selftest.dump
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -d selftest_restore -Atc "select note from selftest_data where id=1" | grep -Fx ok >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg pg_amcheck --install-missing --database=postgres >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg pgbench -i -s 1 postgres >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg pgbench -c 2 -j 1 -t 2 postgres >/dev/null
 '
 
 # An alternate bootstrap identity allows faithful non-superuser role emulation.
@@ -596,12 +603,12 @@ BOOTSTRAP_PORT="$(free_port)"
 "$ROOT/bin/agent-env" postgres run --bootstrap-user agent_env_bootstrap --port "$BOOTSTRAP_PORT" -- bash -ceu '
   test "$PGUSER" = agent_env_bootstrap
   test "$DATABASE_URL" = "postgresql://agent_env_bootstrap:postgres@127.0.0.1:${PGPORT}/postgres"
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -At -F: -c "select current_user, rolsuper::int from pg_roles where rolname=current_user" | grep -Fx "agent_env_bootstrap:1" >/dev/null
-  "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create role postgres login nosuperuser createrole" >/dev/null
-  PGUSER=postgres "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -At -F: -c "select rolsuper::int, rolcreaterole::int from pg_roles where rolname=current_user" | grep -Fx "0:1" >/dev/null
-  PGUSER=postgres "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "alter default privileges for role postgres revoke execute on functions from public" >/dev/null
-  PGUSER=postgres "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create role agent_env_child_role" >/dev/null
-  if PGUSER=postgres "$MAGNET_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create role agent_env_forbidden_superuser superuser" >/dev/null 2>&1; then
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -At -F: -c "select current_user, rolsuper::int from pg_roles where rolname=current_user" | grep -Fx "agent_env_bootstrap:1" >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create role postgres login nosuperuser createrole" >/dev/null
+  PGUSER=postgres "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -At -F: -c "select rolsuper::int, rolcreaterole::int from pg_roles where rolname=current_user" | grep -Fx "0:1" >/dev/null
+  PGUSER=postgres "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "alter default privileges for role postgres revoke execute on functions from public" >/dev/null
+  PGUSER=postgres "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create role agent_env_child_role" >/dev/null
+  if PGUSER=postgres "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -c "create role agent_env_forbidden_superuser superuser" >/dev/null 2>&1; then
     echo "non-superuser postgres unexpectedly created a superuser" >&2
     exit 1
   fi

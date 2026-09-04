@@ -1,4 +1,4 @@
-# Magnet Agent Environment source router
+# ERPI Agent Environment source router
 
 ## Scope
 
@@ -26,7 +26,8 @@ Read only the authority needed for the current concern. If surfaces disagree, tr
 - Normal changes use a topic branch and PR, with semantic checkpoint commits and squash integration; `CONTRIBUTING.md` owns the detailed record, compatibility, version, and release rules.
 - If no usable shell checkout exists, do not claim local validation. Use the connector-backed Git handoff when coherent local Git semantics matter; otherwise keep remote operations in the connected GitHub capability and report only observed proof.
 - Preserve one logical long-running validation. Give it an adequate outer timeout or supervise/poll that same process; do not fragment a suite merely to satisfy an agent wrapper timeout.
-- Product versions belong to real tagged stable/prerelease states. Ordinary development keeps the nearest released product version and derives source identity from Git ancestry; never invent a pseudo-development SemVer.
+- Before merge, run complete local acceptance when the host has working Docker. If it does not, dispatch **Accept runtime** against the exact final PR-head SHA and require that run to pass immediately before merge; the post-merge main acceptance remains the release gate.
+- Product versions belong to real tagged stable/prerelease states. A coherent PR may include its forward version cut so normal squash integration stays one review unit; matching release metadata and exact-source acceptance remain mandatory. Ordinary development keeps the nearest released product version and derives source identity from Git ancestry; never invent a pseudo-development SemVer.
 - Never commit `dist/`, `.download-cache/`, credentials, runtime-generated mutable state, or manual copies of CI/release evidence.
 
 Keep this router small. Put detailed policy in its owner and objective rules in executable checks.

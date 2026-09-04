@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-export MAGNET_AGENT_ENV="$ROOT"
+export ERPI_AGENT_ENV="$ROOT"
 export VIRTUAL_ENV="$ROOT/env"
 export UV_CACHE_DIR="$ROOT/state/uv-cache"
 export UV_PYTHON_INSTALL_DIR="$ROOT/state/uv-python"
@@ -11,6 +11,7 @@ export UV_LINK_MODE=copy
 export PIP_CACHE_DIR="$ROOT/state/pip-cache"
 export NPM_CONFIG_CACHE="$ROOT/state/npm-cache"
 export NPM_CONFIG_PREFIX="$ROOT/state/npm-global"
+export NODE_PATH="$ROOT/runtime/node/lib/node_modules${NODE_PATH:+:$NODE_PATH}"
 export PYTHONPYCACHEPREFIX="$ROOT/state/pycache"
 mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$PIP_CACHE_DIR" "$NPM_CONFIG_CACHE" "$NPM_CONFIG_PREFIX" "$PYTHONPYCACHEPREFIX" "$ROOT/state/postgres" "$ROOT/state/postgrest" 2>/dev/null || true
 export PATH="$ROOT/env/bin:$ROOT/bin:$UV_TOOL_BIN_DIR:$NPM_CONFIG_PREFIX/bin:$PATH"

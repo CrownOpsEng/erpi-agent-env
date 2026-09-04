@@ -1,4 +1,4 @@
-# Magnet Agent Environment @PRODUCT_VERSION@
+# ERPI Agent Environment @PRODUCT_VERSION@
 
 Source: `@SOURCE_DESCRIPTION@`
 
@@ -9,7 +9,7 @@ Portable Linux x86-64 execution capability for AI-agent work. The target reposit
 ## Start
 
 ```bash
-source /path/to/magnet-agent-env/activate
+source /path/to/erpi-agent-env/activate
 agent-env doctor
 agent-env capabilities
 ```
@@ -55,6 +55,14 @@ Database URLs are restricted to numeric loopback and query parameters capable of
 `agent-env pg-delta plan --source postgresql://... --target postgresql://... --out DIR` generates numbered SQL plan files plus `envelope.json`. Both live URLs must use numeric loopback (`127.0.0.1` or `::1`); inherited PostgreSQL targeting variables are scrubbed, and remote URLs are refused before connection. The output directory must be new or empty.
 
 This is deliberately **plan-only**. The upstream pg-delta `apply` and `sync` commands are not exposed. Version 1.0.0-alpha.33 is pinned because it is the exact default used by the qualified Supabase CLI 2.114.0 baseline; useful, safe planning compatibility is the contract, not byte-for-byte parity with every Supabase CLI wrapper option. The emitted `transactionMode` metadata remains relevant to whatever repository-owned tooling reviews or applies a plan.
+
+## Bundled Node libraries
+
+The bundled Node runtime includes `yaml` 2.9.0. After activation it is available directly to Node scripts without installing anything into the target repository.
+
+```bash
+node -e 'const YAML=require("yaml"); console.log(YAML.parse("enabled: true").enabled)'
+```
 
 ## Offline repository-owned Node dependencies
 

@@ -14,8 +14,8 @@ usage() {
   cat <<USAGE
 Usage: ./build.sh [--out DIR] [--cache DIR] [--keep-work]
 
-Build Magnet Agent Environment product ${PRODUCT_VERSION} for ${TARGET}.
-Artifact identity is derived from Git release/prerelease ancestry. Exported source trees without .git must provide MAGNET_AGENT_SOURCE_COMMIT, MAGNET_AGENT_SOURCE_BASE_TAG, MAGNET_AGENT_SOURCE_DISTANCE, and MAGNET_AGENT_SOURCE_DESCRIPTION.
+Build ERPI Agent Environment product ${PRODUCT_VERSION} for ${TARGET}.
+Artifact identity is derived from Git release/prerelease ancestry. Exported source trees without .git must provide ERPI_AGENT_SOURCE_COMMIT, ERPI_AGENT_SOURCE_BASE_TAG, ERPI_AGENT_SOURCE_DISTANCE, and ERPI_AGENT_SOURCE_DESCRIPTION.
 Requires an internet-connected supported Linux x86-64 host (kernel >= ${MIN_KERNEL_VERSION}, glibc >= ${MIN_GLIBC_VERSION}) with a working Docker daemon. No sudo is used.
 USAGE
 }
@@ -30,10 +30,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SOURCE_COMMIT="${MAGNET_AGENT_SOURCE_COMMIT:-}"
-SOURCE_BASE_TAG="${MAGNET_AGENT_SOURCE_BASE_TAG:-}"
-SOURCE_DISTANCE="${MAGNET_AGENT_SOURCE_DISTANCE:-}"
-SOURCE_DESCRIPTION="${MAGNET_AGENT_SOURCE_DESCRIPTION:-}"
+SOURCE_COMMIT="${ERPI_AGENT_SOURCE_COMMIT:-}"
+SOURCE_BASE_TAG="${ERPI_AGENT_SOURCE_BASE_TAG:-}"
+SOURCE_DISTANCE="${ERPI_AGENT_SOURCE_DISTANCE:-}"
+SOURCE_DESCRIPTION="${ERPI_AGENT_SOURCE_DESCRIPTION:-}"
 
 if command -v git >/dev/null 2>&1 && git -C "$SELF_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   CHECKOUT_COMMIT="$(git -C "$SELF_DIR" rev-parse HEAD)"
@@ -63,7 +63,7 @@ if command -v git >/dev/null 2>&1 && git -C "$SELF_DIR" rev-parse --is-inside-wo
     "SOURCE_DESCRIPTION:$SOURCE_DESCRIPTION:$RESOLVED_DESCRIPTION"; do
     IFS=: read -r label supplied resolved <<<"$pair"
     if [[ -n "$supplied" && "$supplied" != "$resolved" ]]; then
-      echo "MAGNET_AGENT_${label} $supplied does not match checked-out source value $resolved." >&2
+      echo "ERPI_AGENT_${label} $supplied does not match checked-out source value $resolved." >&2
       exit 1
     fi
   done
@@ -86,10 +86,10 @@ if command -v git >/dev/null 2>&1 && git -C "$SELF_DIR" rev-parse --is-inside-wo
   fi
 else
   missing=()
-  [[ -n "$SOURCE_COMMIT" ]] || missing+=(MAGNET_AGENT_SOURCE_COMMIT)
-  [[ -n "$SOURCE_BASE_TAG" ]] || missing+=(MAGNET_AGENT_SOURCE_BASE_TAG)
-  [[ -n "$SOURCE_DISTANCE" ]] || missing+=(MAGNET_AGENT_SOURCE_DISTANCE)
-  [[ -n "$SOURCE_DESCRIPTION" ]] || missing+=(MAGNET_AGENT_SOURCE_DESCRIPTION)
+  [[ -n "$SOURCE_COMMIT" ]] || missing+=(ERPI_AGENT_SOURCE_COMMIT)
+  [[ -n "$SOURCE_BASE_TAG" ]] || missing+=(ERPI_AGENT_SOURCE_BASE_TAG)
+  [[ -n "$SOURCE_DISTANCE" ]] || missing+=(ERPI_AGENT_SOURCE_DISTANCE)
+  [[ -n "$SOURCE_DESCRIPTION" ]] || missing+=(ERPI_AGENT_SOURCE_DESCRIPTION)
   if ((${#missing[@]})); then
     printf 'Cannot determine source ancestry without Git. Missing exported-source identity:' >&2
     printf ' %s' "${missing[@]}" >&2
@@ -134,9 +134,9 @@ docker info >/dev/null 2>&1 || { echo "A working Docker daemon is required to bu
 mkdir -p "$OUT_DIR" "$CACHE_DIR"
 OUT_DIR="$(CDPATH= cd -- "$OUT_DIR" && pwd -P)"
 CACHE_DIR="$(CDPATH= cd -- "$CACHE_DIR" && pwd -P)"
-WORK_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/magnet-agent-builder.XXXXXX")"
+WORK_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/erpi-agent-builder.XXXXXX")"
 WORK="$WORK_PARENT/Build Root With Spaces [relocation source]"
-BUILD="$WORK/magnet-agent-env"
+BUILD="$WORK/erpi-agent-env"
 DL="$CACHE_DIR"
 BUILDER_UV_CACHE="$CACHE_DIR/uv-cache"
 BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"
@@ -299,6 +299,24 @@ cp "$SELF_DIR/templates/bin/npm-wrapper" "$BUILD/bin/npm"
 cp "$SELF_DIR/templates/bin/npx-wrapper" "$BUILD/bin/npx"
 chmod 0755 "$BUILD/bin/node" "$BUILD/bin/npm" "$BUILD/bin/npx"
 "$BUILD/bin/node" -e 'if (process.versions.node !== process.argv[1]) process.exit(1)' "$NODE_VERSION"
+
+log "Node yaml $NODE_YAML_VERSION"
+NODE_YAML_AR="$DL/yaml-${NODE_YAML_VERSION}.tgz"
+fetch "https://registry.npmjs.org/yaml/-/yaml-${NODE_YAML_VERSION}.tgz" "$NODE_YAML_AR"
+verify_one "$NODE_YAML_AR" "$NODE_YAML_SHA256"
+rm -rf "$BUILD/runtime/node/lib/node_modules/yaml"
+mkdir -p "$BUILD/runtime/node/lib/node_modules/yaml"
+tar -xzf "$NODE_YAML_AR" -C "$BUILD/runtime/node/lib/node_modules/yaml" --strip-components=1
+"$BUILD/env/bin/python" - "$BUILD/runtime/node/lib/node_modules/yaml/package.json" "$NODE_YAML_VERSION" <<'PY_NODE_YAML'
+import json, pathlib, sys
+package=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+expected=sys.argv[2]
+assert package.get('name') == 'yaml'
+assert package.get('version') == expected
+assert package.get('license') == 'ISC'
+assert package.get('engines', {}).get('node') == '>= 14.6'
+PY_NODE_YAML
+NODE_PATH="$BUILD/runtime/node/lib/node_modules" "$BUILD/bin/node" -e 'const Y=require("yaml"); if(require("yaml/package.json").version!==process.argv[1]||Y.parse("a: 1").a!==1) process.exit(1)' "$NODE_YAML_VERSION"
 
 log "pg-delta $PG_DELTA_VERSION plan-only runtime"
 PG_DELTA_LOCK="$SELF_DIR/vendor/pg-delta/package-lock.json"
@@ -628,13 +646,13 @@ mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools
 
 cat > "$BUILD/manifest/environment.json" <<JSON
 {
-  "bundle": "Magnet Agent Environment",
+  "bundle": "ERPI Agent Environment",
   "product_version": "$PRODUCT_VERSION",
   "source": {"commit": "$SOURCE_COMMIT", "description": "$SOURCE_DESCRIPTION", "base_tag": "$SOURCE_BASE_TAG", "distance": $SOURCE_DISTANCE},
   "target": "$TARGET",
   "python_lock_resolution_cutoff": "$BUILD_CUTOFF",
   "python_lock_sha256": "$PYTHON_LOCK_SHA256",
-  "purpose": "Portable AI-agent execution capability layer; external to Magnet Photos project architecture",
+  "purpose": "Portable AI-agent execution capability layer; target repositories retain project architecture and dependency authority",
   "runtimes": {"python": "$PYTHON_VERSION", "python_distribution": "$PYTHON_DIST_ID", "node": "$NODE_VERSION"},
   "tools": {
     "uv": "$UV_VERSION",
@@ -672,6 +690,7 @@ source_row component version url sha256
 source_row uv "$UV_VERSION" "https://releases.astral.sh/github/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256"
 source_row python-build-standalone "${PYTHON_VERSION}+${PYTHON_DISTRIBUTION_BUILD}" "$PYTHON_DISTRIBUTION_URL" "$PYTHON_DISTRIBUTION_SHA256"
 source_row node "$NODE_VERSION" "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" "$NODE_SHA256"
+source_row node-yaml "$NODE_YAML_VERSION" "https://registry.npmjs.org/yaml/-/yaml-$NODE_YAML_VERSION.tgz" "$NODE_YAML_SHA256"
 source_row gh "$GH_VERSION" "https://github.com/cli/cli/releases/download/v$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz" "$GH_SHA256"
 source_row jq "$JQ_VERSION" "https://github.com/jqlang/jq/releases/download/jq-$JQ_VERSION/jq-linux-amd64" "$JQ_SHA256"
 source_row yq "$YQ_VERSION" "https://github.com/mikefarah/yq/releases/download/v$YQ_VERSION/yq_linux_amd64" "$YQ_SHA256"
@@ -745,7 +764,7 @@ done < <(find "$BUILD" -type l -print0)
 (( absolute_links == 0 )) || { echo "Absolute symlink(s) found." >&2; exit 1; }
 
 log "Relocation torture test"
-MOVED="$WORK_PARENT/Second Location – spaces and unicode/deep/nested/relocation/target/magnet-agent-env"
+MOVED="$WORK_PARENT/Second Location – spaces and unicode/deep/nested/relocation/target/erpi-agent-env"
 mkdir -p "$(dirname -- "$MOVED")"
 mv "$BUILD" "$MOVED"
 BUILD="$MOVED"
@@ -791,7 +810,7 @@ fi
 # sentinel instead of leaking the random builder path into the archive.
 PYVENV_CFG="$BUILD/env/pyvenv.cfg"
 awk '
-  /^home = / { print "home = __MAGNET_AGENT_RELOCATE__/runtime/python/current/bin"; next }
+  /^home = / { print "home = __ERPI_AGENT_RELOCATE__/runtime/python/current/bin"; next }
   { print }
 ' "$PYVENV_CFG" > "$PYVENV_CFG.tmp"
 mv "$PYVENV_CFG.tmp" "$PYVENV_CFG"
@@ -837,7 +856,7 @@ mv "$TMP_ART" "$ARTIFACT"
 EXTRACT_TEST="$WORK_PARENT/final extraction proof"
 mkdir -p "$EXTRACT_TEST"
 tar -xzf "$ARTIFACT" -C "$EXTRACT_TEST"
-EXTRACTED="$EXTRACT_TEST/magnet-agent-env"
+EXTRACTED="$EXTRACT_TEST/erpi-agent-env"
 "$EXTRACTED/bin/agent-env" selftest >/dev/null
 # The archive was created from $BUILD. First-use repair in the extracted copy
 # must remove that former absolute location everywhere, including pyvenv.cfg.
