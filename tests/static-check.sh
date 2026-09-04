@@ -32,6 +32,7 @@ assert 'pytest' not in locked and 'setuptools' not in locked and 'wheel' not in 
 checks={
  'vendor/database/postgresql-client-17.10-linux-x64-gnu.tar.gz':'POSTGRES_CLIENT_SHA256',
  'vendor/database/plpgsql-check-2.8.11-pg17-linux-x64-gnu.tar.gz':'PLPGSQL_CHECK_SHA256',
+ 'vendor/node-capsules/yaml-2.9.0.tgz':'YAML_SHA256',
  'vendor/node-capsules/postgres-3.4.7.tgz':'POSTGRES_JS_SHA256',
  'vendor/node-capsules/postgres-language-server-wasm-0.25.7.tgz':'PGLS_WASM_SHA256',
  'vendor/node-capsules/fast-check-4.9.0.tgz':'FAST_CHECK_SHA256',
@@ -42,6 +43,7 @@ for rel,key in checks.items():
 manifest_path=root/'vendor/node-capsules/manifest.json'
 manifest=json.loads(manifest_path.read_text(encoding='utf-8'))
 expected={
+    'yaml': (vals['YAML_VERSION'], f"yaml-{vals['YAML_VERSION']}.tgz", vals['YAML_SHA256']),
     'postgres': (vals['POSTGRES_JS_VERSION'], f"postgres-{vals['POSTGRES_JS_VERSION']}.tgz", vals['POSTGRES_JS_SHA256']),
     '@postgres-language-server/wasm': (vals['PGLS_WASM_VERSION'], f"postgres-language-server-wasm-{vals['PGLS_WASM_VERSION']}.tgz", vals['PGLS_WASM_SHA256']),
     'fast-check': (vals['FAST_CHECK_VERSION'], f"fast-check-{vals['FAST_CHECK_VERSION']}.tgz", vals['FAST_CHECK_SHA256']),
@@ -206,7 +208,7 @@ text=open(sys.argv[1],encoding='utf-8').read()
 matches=re.findall(r'^PRODUCT_VERSION="([^"]+)"$',text,re.M)
 assert len(matches)==1,matches
 version=matches[0]
-assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:alpha|beta|rc)\.[1-9][0-9]*)?',version),version
+assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:alpha|beta|rc)\.[1-9][0-9]*(?:-[1-9][0-9]*)?)?',version),version
 assert '+g' not in version and not version.endswith('-dev'),version
 assert 'BUNDLE_VERSION=' not in text
 PY_VERSION
@@ -307,14 +309,15 @@ grep -F -- '--- PostgreSQL startup log ---' "$ROOT/templates/scripts/postgres.py
 ! grep -F 'cluster / "socket"' "$ROOT/templates/scripts/postgres.py" >/dev/null
 grep -F 'package-lock.json is required' "$ROOT/templates/scripts/node-deps.py" >/dev/null
 ! grep -R -nE 'anon|authenticated|service_role' "$ROOT/templates/scripts/postgres.py" "$ROOT/templates/scripts/pgtap.py" "$ROOT/templates/scripts/node-deps.py"
+# Repository-locked Node dependencies are immutable offline capsules; no package gets a bespoke global install path.
+grep -F 'YAML_VERSION="2.9.0"' "$ROOT/versions.env" >/dev/null
+grep -F 'YAML_SHA256="008fa204cb1ba700e0272ba045abbf09a6ffe63456e8146ba97cac6c2ad1ef91"' "$ROOT/versions.env" >/dev/null
+grep -F '"yaml": {"version": "2.9.0", "file": "yaml-2.9.0.tgz"' "$ROOT/vendor/node-capsules/manifest.json" >/dev/null
+grep -F '"yaml-${YAML_VERSION}.tgz:${YAML_SHA256}"' "$ROOT/build.sh" >/dev/null
+grep -F 'source_row yaml "$YAML_VERSION" "vendor/node-capsules/yaml-$YAML_VERSION.tgz" "$YAML_SHA256"' "$ROOT/build.sh" >/dev/null
+! grep -R -nF 'runtime/node/lib/node_modules/yaml' "$ROOT/build.sh" "$ROOT/templates" "$ROOT/README.md" "$ROOT/VALIDATION.md"
+! grep -R -nF 'NODE_PATH=' "$ROOT/templates/activate" "$ROOT/templates/bin/node-wrapper" "$ROOT/templates/bin/agent-env"
 # pg-delta is runtime-owned, exactly locked, plan-only, and restricted to numeric loopback.
-grep -F 'NODE_YAML_VERSION="2.9.0"' "$ROOT/versions.env" >/dev/null
-grep -F 'NODE_YAML_SHA256="008fa204cb1ba700e0272ba045abbf09a6ffe63456e8146ba97cac6c2ad1ef91"' "$ROOT/versions.env" >/dev/null
-grep -F 'fetch "https://registry.npmjs.org/yaml/-/yaml-${NODE_YAML_VERSION}.tgz" "$NODE_YAML_AR"' "$ROOT/build.sh" >/dev/null
-grep -F 'verify_one "$NODE_YAML_AR" "$NODE_YAML_SHA256"' "$ROOT/build.sh" >/dev/null
-grep -F 'runtime/node/lib/node_modules/yaml' "$ROOT/build.sh" >/dev/null
-grep -F 'NODE_PATH="$ROOT/runtime/node/lib/node_modules${NODE_PATH:+:$NODE_PATH}"' "$ROOT/templates/bin/node-wrapper" >/dev/null
-grep -F 'require("yaml")' "$ROOT/README.md" >/dev/null
 grep -F 'PG_DELTA_VERSION="1.0.0-alpha.33"' "$ROOT/versions.env" >/dev/null
 grep -F 'PG_DELTA_LOCK_SHA256="fa6659239ce4e70738b5936f5690c2fdcf6bf2ef09e7c13a58c0009c8401bccf"' "$ROOT/versions.env" >/dev/null
 grep -F 'PG_DELTA_SUPABASE_CLI_BASELINE="2.114.0"' "$ROOT/versions.env" >/dev/null
@@ -370,6 +373,8 @@ require_contains 'for (( attempt=0; attempt<100; attempt++ )); do' "$ROOT/templa
 "$ROOT/tests/git-handoff-check.sh"
 node_fetch_count="$(grep -Fc 'fetch "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" "$NODE_AR"' "$ROOT/build.sh")"
 [[ "$node_fetch_count" == 1 ]] || { echo "Expected exactly one Node fetch call, found $node_fetch_count" >&2; exit 1; }
-node_yaml_fetch_count="$(grep -Fc 'fetch "https://registry.npmjs.org/yaml/-/yaml-${NODE_YAML_VERSION}.tgz" "$NODE_YAML_AR"' "$ROOT/build.sh")"
-[[ "$node_yaml_fetch_count" == 1 ]] || { echo "Expected exactly one Node yaml fetch call, found $node_yaml_fetch_count" >&2; exit 1; }
+if grep -F 'registry.npmjs.org/yaml' "$ROOT/build.sh" >/dev/null; then
+  echo 'yaml must be supplied through the immutable Node capsule path, not a bespoke build-time fetch.' >&2
+  exit 1
+fi
 echo "Builder static checks passed."

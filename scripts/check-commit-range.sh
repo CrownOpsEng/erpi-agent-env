@@ -70,7 +70,38 @@ source_base_tag() {
   }
 }
 
-range_contains_version_change=false
+
+candidate_base_version() {
+  local version="$1"
+  if [[ "$version" =~ ^([0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[1-9][0-9]*)-([1-9][0-9]*)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+version_change_is_release_metadata_only() {
+  local parent="$1" current="$2"
+  local changed=()
+  mapfile -t changed < <(git diff --name-only "$parent" "$current" --)
+  ((${#changed[@]} > 0)) || return 1
+
+  local path
+  for path in "${changed[@]}"; do
+    case "$path" in
+      versions.env|.github/release-request.json) ;;
+      *) return 1 ;;
+    esac
+  done
+  printf '%s\n' "${changed[@]}" | grep -Fx versions.env >/dev/null || return 1
+  printf '%s\n' "${changed[@]}" | grep -Fx .github/release-request.json >/dev/null || return 1
+
+  local parent_normalized current_normalized
+  parent_normalized="$(git show "$parent:versions.env" | sed -E 's/^PRODUCT_VERSION="[^"]*"$/PRODUCT_VERSION="<VERSION>"/')"
+  current_normalized="$(git show "$current:versions.env" | sed -E 's/^PRODUCT_VERSION="[^"]*"$/PRODUCT_VERSION="<VERSION>"/')"
+  [[ "$parent_normalized" == "$current_normalized" ]]
+}
+
 for commit in "${commits[@]}"; do
   subject="$(git show -s --format=%s "$commit")"
   echo "Checking commit ${commit:0:12}: $subject"
@@ -87,15 +118,46 @@ for commit in "${commits[@]}"; do
   [[ -n "$parent" ]] || continue
 
   if parent_version="$(product_version_from_commit "$parent" 2>/dev/null)"; then
+    metadata_only=false
+    if version_change_is_release_metadata_only "$parent" "$commit"; then
+      metadata_only=true
+    fi
     python3 "$ROOT/scripts/check-version-transition.py" \
       --parent-version "$parent_version" \
-      --current-version "$current_version" >/dev/null
+      --current-version "$current_version" \
+      --metadata-only "$metadata_only" >/dev/null
 
-    if [[ "$current_version" != "$parent_version" ]]; then
-      range_contains_version_change=true
+    current_candidate_base="$(candidate_base_version "$current_version" 2>/dev/null || true)"
+    if [[ "$current_version" == "$parent_version" ]]; then
+      if [[ -n "$current_candidate_base" ]]; then
+        [[ "$current_candidate_base" == "$base_version" ]] || {
+          echo "Candidate build $current_version must remain attached to published prerelease $base_version; nearest source tag is $base_tag." >&2
+          exit 1
+        }
+      else
+        [[ "$current_version" == "$base_version" ]] || {
+          echo "Commit ${commit:0:12} continues source work with clean PRODUCT_VERSION $current_version before matching tag v$current_version exists; nearest source tag is $base_tag." >&2
+          exit 1
+        }
+      fi
+    elif [[ -n "$current_candidate_base" ]]; then
+      [[ "$current_candidate_base" == "$base_version" ]] || {
+        echo "Candidate build $current_version must revise nearest published prerelease $base_version, not another release line." >&2
+        exit 1
+      }
+      request_version="$(release_request_version_from_commit "$commit")"
+      [[ "$request_version" == "$base_version" ]] || {
+        echo "Candidate build $current_version must leave release request at published prerelease $base_version, not $request_version." >&2
+        exit 1
+      }
+    else
+      [[ "$metadata_only" == true ]] || {
+        echo "Clean release/prerelease PRODUCT_VERSION changes must touch only approved release metadata." >&2
+        exit 1
+      }
       request_version="$(release_request_version_from_commit "$commit")"
       [[ "$request_version" == "$current_version" ]] || {
-        echo "Release request version $request_version does not match PRODUCT_VERSION $current_version at ${commit:0:12}." >&2
+        echo "Release request version $request_version does not match promoted PRODUCT_VERSION $current_version at ${commit:0:12}." >&2
         exit 1
       }
     fi
@@ -117,13 +179,5 @@ for commit in "${commits[@]}"; do
     echo "Accepted one-time legacy version-authority migration from $legacy_version to released product $current_version."
   fi
 done
-
-head_version="$(product_version_from_commit "$HEAD_SHA")"
-head_base_tag="$(source_base_tag "$HEAD_SHA")"
-head_base_version="${head_base_tag#v}"
-if [[ "$range_contains_version_change" != true && "$head_version" != "$head_base_version" ]]; then
-  echo "Introduced source continues with PRODUCT_VERSION $head_version before matching tag v$head_version exists; nearest source tag is $head_base_tag." >&2
-  exit 1
-fi
 
 echo "Detailed commit history check passed for ${#commits[@]} commit(s)."

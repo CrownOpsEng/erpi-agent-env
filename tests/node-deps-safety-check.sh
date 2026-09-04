@@ -33,7 +33,7 @@ run_deps "$repo" hydrate >/dev/null
 python3 - <<'PY' "$repo/node_modules/.agent-env-node-deps.json"
 import json,re,sys
 marker=json.load(open(sys.argv[1],encoding='utf-8'))
-assert marker['schema']==2 and len(marker['packages'])==4
+assert marker['schema']==2 and len(marker['packages'])==5
 for record in marker['packages'].values():
     assert re.fullmatch(r'[0-9a-f]{64}',record['tree_sha256'])
 PY
@@ -84,7 +84,7 @@ run_deps "$repo" hydrate >/dev/null
 python3 - <<'PY' "$repo/node_modules/.agent-env-node-deps.json"
 import json,sys
 marker=json.load(open(sys.argv[1],encoding='utf-8'))
-assert 'postgres' not in marker['packages'] and len(marker['packages'])==3
+assert 'postgres' not in marker['packages'] and len(marker['packages'])==4
 PY
 run_deps "$repo" clean >/dev/null
 [[ -f "$repo/node_modules/postgres/KEEP" ]]

@@ -8,9 +8,14 @@ cp "$ROOT/versions.env" "$TMP/versions.env"
 product_version="$(sed -n 's/^PRODUCT_VERSION="\([^"]*\)"$/\1/p' "$TMP/versions.env")"
 [[ -n "$product_version" ]] || { echo 'Fixture versions.env is missing PRODUCT_VERSION.' >&2; exit 1; }
 source_sha=0123456789abcdef0123456789abcdef01234567
-base_tag=v0.1.1
-distance=40
-description=v0.1.1-40-g0123456789ab
+if [[ "$product_version" =~ ^([0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[1-9][0-9]*)-([1-9][0-9]*)$ ]]; then
+  base_tag="v${BASH_REMATCH[1]}"
+  distance=1
+else
+  base_tag=v0.1.1
+  distance=40
+fi
+description="${base_tag}-${distance}-g0123456789ab"
 artifact="erpi-agent-env-linux-x64-${description}.tar.gz"
 printf 'payload\n' > "$TMP/$artifact"
 digest="$(sha256sum "$TMP/$artifact" | awk '{print $1}')"
@@ -30,7 +35,7 @@ python3 "$ROOT/scripts/write-acceptance-metadata.py" \
   --run-attempt 2 \
   --event push
 
-python3 - <<'PY' "$TMP/acceptance.json" "$digest" "$artifact" "$source_sha" "$product_version"
+python3 - <<'PY' "$TMP/acceptance.json" "$digest" "$artifact" "$source_sha" "$product_version" "$base_tag" "$distance" "$description"
 import json, pathlib, sys
 record = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
 assert record['schema_version'] == 2
@@ -39,9 +44,9 @@ assert record['product_version'] == sys.argv[5]
 assert record['target'] == 'linux-x86_64-gnu'
 assert record['source'] == {
     'commit': sys.argv[4],
-    'description': 'v0.1.1-40-g0123456789ab',
-    'base_tag': 'v0.1.1',
-    'distance': 40,
+    'description': sys.argv[8],
+    'base_tag': sys.argv[6],
+    'distance': int(sys.argv[7]),
 }
 assert record['repository'] == 'CrownOpsEng/erpi-agent-env'
 assert record['workflow'] == {'name': 'Accept runtime', 'run_id': 123, 'run_attempt': 2, 'event': 'push'}
@@ -93,5 +98,32 @@ python3 "$ROOT/scripts/write-acceptance-metadata.py" \
   --run-attempt 1 \
   --event workflow_dispatch \
   --release-tag v0.2.0-rc.1
+
+# Revisioned candidate builds are valid acceptance inputs but never release tags.
+cat > "$TMP/candidate.env" <<'ENV'
+PRODUCT_VERSION="0.2.0-rc.1-1"
+TARGET="linux-x86_64-gnu"
+ENV
+candidate_artifact='erpi-agent-env-linux-x64-v0.2.0-rc.1-1-g0123456789ab.tar.gz'
+printf 'candidate\n' > "$TMP/$candidate_artifact"
+candidate_digest="$(sha256sum "$TMP/$candidate_artifact" | awk '{print $1}')"
+printf '%s  %s\n' "$candidate_digest" "$candidate_artifact" > "$TMP/candidate.sha256"
+if python3 "$ROOT/scripts/write-acceptance-metadata.py" \
+  --versions "$TMP/candidate.env" \
+  --sidecar "$TMP/candidate.sha256" \
+  --output "$TMP/candidate-release.json" \
+  --source-sha "$source_sha" \
+  --source-base-tag v0.2.0-rc.1 \
+  --source-distance 1 \
+  --source-description v0.2.0-rc.1-1-g0123456789ab \
+  --repository CrownOpsEng/erpi-agent-env \
+  --workflow 'Build distribution' \
+  --run-id 126 \
+  --run-attempt 1 \
+  --event workflow_dispatch \
+  --release-tag v0.2.0-rc.1-1 >/dev/null 2>&1; then
+  echo 'Acceptance metadata allowed a revisioned candidate build to masquerade as a release tag.' >&2
+  exit 1
+fi
 
 echo 'Acceptance metadata check passed.'

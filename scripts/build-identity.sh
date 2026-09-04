@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION_ERE='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.[1-9][0-9]*)?'
+RELEASE_VERSION_ERE='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.[1-9][0-9]*)?'
+PRODUCT_VERSION_ERE='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.[1-9][0-9]*(-[1-9][0-9]*)?)?'
 
 compute_build_identity() {
   local product_version="${1:-}"
@@ -11,7 +12,7 @@ compute_build_identity() {
   local source_description="${5:-}"
   local target="${6:-}"
 
-  [[ "$product_version" =~ ^${VERSION_ERE}$ ]] || {
+  [[ "$product_version" =~ ^${PRODUCT_VERSION_ERE}$ ]] || {
     echo "Unsupported PRODUCT_VERSION: $product_version" >&2
     return 2
   }
@@ -19,8 +20,8 @@ compute_build_identity() {
     echo "Source commit must be an exact 40-character lowercase Git SHA." >&2
     return 2
   }
-  [[ "$source_base_tag" =~ ^v${VERSION_ERE}$ ]] || {
-    echo "Source base tag must be v<SemVer> using optional alpha.N, beta.N, or rc.N prerelease syntax." >&2
+  [[ "$source_base_tag" =~ ^v${RELEASE_VERSION_ERE}$ ]] || {
+    echo "Source base tag must be a released v<SemVer> using optional alpha.N, beta.N, or rc.N prerelease syntax." >&2
     return 2
   }
   [[ "$source_distance" =~ ^(0|[1-9][0-9]*)$ ]] || {
@@ -29,6 +30,14 @@ compute_build_identity() {
   }
 
   local tag_version="${source_base_tag#v}"
+  if [[ "$product_version" =~ ^([0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[1-9][0-9]*)-([1-9][0-9]*)$ ]]; then
+    local candidate_base="${BASH_REMATCH[1]}"
+    [[ "$candidate_base" == "$tag_version" ]] || {
+      echo "Candidate build $product_version must remain attached to source base tag $source_base_tag." >&2
+      return 2
+    }
+  fi
+
   local expected_description
   if [[ "$source_distance" == 0 ]]; then
     expected_description="$source_base_tag"

@@ -52,7 +52,7 @@ source_commit=source['commit']
 source_description=source['description']
 source_base_tag=source['base_tag']
 source_distance=source['distance']
-assert re.fullmatch(r'\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?',product_version),product_version
+assert re.fullmatch(r'\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*(?:-[1-9]\d*)?)?',product_version),product_version
 assert re.fullmatch(r'[0-9a-f]{40}',source_commit),source_commit
 assert re.fullmatch(r'v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?',source_base_tag),source_base_tag
 assert isinstance(source_distance,int) and source_distance >= 0,source_distance
@@ -61,6 +61,9 @@ if source_distance == 0:
     assert product_version == source_base_tag[1:],(product_version,source_base_tag)
 else:
     assert source_description == f'{source_base_tag}-{source_distance}-g{source_commit[:12]}',source_description
+    candidate=re.fullmatch(r'(\d+\.\d+\.\d+-(?:alpha|beta|rc)\.[1-9]\d*)-[1-9]\d*',product_version)
+    if candidate:
+        assert candidate.group(1) == source_base_tag[1:],(product_version,source_base_tag)
 python_meta=env['python_provenance']
 assert python_meta['version']=='3.13.14'
 assert python_meta['build']=='20260805'
@@ -112,14 +115,6 @@ printf '{"a":1}\n' | jq -e '.a == 1' >/dev/null
 printf 'a: 1\n' | yq -e '.a == 1' >/dev/null
 printf 'agent-env\n' | rg -q agent-env
 node -e 'if (process.versions.node !== "24.19.0") process.exit(1)'
-node - <<'NODE_YAML'
-const YAML = require('yaml')
-if (require('yaml/package.json').version !== '2.9.0') process.exit(1)
-const parsed = YAML.parse('alpha: 1\nnested:\n  ok: true\n')
-if (parsed.alpha !== 1 || parsed.nested?.ok !== true) process.exit(1)
-if (YAML.parse(YAML.stringify(parsed)).nested?.ok !== true) process.exit(1)
-NODE_YAML
-
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-env-selftest.XXXXXX")"
 cleanup_tmp() { rm -rf "$TMP"; }
 trap cleanup_tmp EXIT
@@ -257,12 +252,12 @@ PY
 "$ROOT/bin/agent-env" node-deps --repo "$NODE_FIXTURE" hydrate >/dev/null
 (
   cd "$NODE_FIXTURE"
-  node --input-type=module -e 'import postgres from "postgres"; import * as pgls from "@postgres-language-server/wasm"; import * as fc from "fast-check"; import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus"; if(typeof postgres!=="function"||typeof pgls!=="object"||typeof fc.assert!=="function"||typeof xoroshiro128plus!=="function") process.exit(1)'
+  node --input-type=module -e 'import { parse as parseYaml, stringify as stringifyYaml } from "yaml"; import postgres from "postgres"; import * as pgls from "@postgres-language-server/wasm"; import * as fc from "fast-check"; import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus"; const parsed=parseYaml("enabled: true\n"); if(parsed.enabled!==true||parseYaml(stringifyYaml(parsed)).enabled!==true||typeof postgres!=="function"||typeof pgls!=="object"||typeof fc.assert!=="function"||typeof xoroshiro128plus!=="function") process.exit(1)'
 )
 python - <<'PY' "$NODE_FIXTURE/node_modules/.agent-env-node-deps.json"
 import json,re,sys
 marker=json.load(open(sys.argv[1],encoding='utf-8'))
-assert marker['schema']==2 and len(marker['packages'])==4
+assert marker['schema']==2 and len(marker['packages'])==5
 for record in marker['packages'].values(): assert re.fullmatch(r'[0-9a-f]{64}',record['tree_sha256'])
 PY
 "$ROOT/bin/agent-env" node-deps --repo "$NODE_FIXTURE" clean >/dev/null

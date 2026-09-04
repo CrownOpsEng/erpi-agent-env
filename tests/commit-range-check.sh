@@ -37,7 +37,7 @@ write_request() {
   printf '{\n  "version": "%s"\n}\n' "$version" > .github/release-request.json
 }
 
-# Normal release -> development -> RC cut -> RC-attached development -> next RC.
+# Normal release -> development -> RC cut -> revisioned candidate builds -> verified next-RC promotion.
 REPO="$TMP/lifecycle"
 new_repo "$REPO"
 cd "$REPO"
@@ -78,51 +78,54 @@ fi
 git reset -q --hard "$rc1_cut"
 
 git tag v0.2.0-rc.1
+printf 'PRODUCT_VERSION="0.2.0-rc.1-1"\nTARGET="linux-x86_64-gnu"\n' > versions.env
 echo fix1 >> file.txt
-git add file.txt
-good_message 'fix(runtime): correct candidate defect' 'A first development correction after the tagged candidate' > "$TMP/message"
+git add versions.env file.txt
+good_message 'fix(runtime): correct candidate defect' 'A first revisioned build after the tagged candidate' > "$TMP/message"
 git commit -q -F "$TMP/message"
+rc1_build1="$(git rev-parse HEAD)"
+./scripts/check-commit-range.sh "$rc1_cut" "$rc1_build1" >/dev/null
+
+printf 'PRODUCT_VERSION="0.2.0-rc.1-2"\nTARGET="linux-x86_64-gnu"\n' > versions.env
 echo fix2 >> file.txt
-git add file.txt
-good_message 'fix(runtime): complete candidate correction' 'A second development correction after the tagged candidate' > "$TMP/message"
+git add versions.env file.txt
+good_message 'fix(runtime): complete candidate correction' 'A second revisioned build after the tagged candidate' > "$TMP/message"
 git commit -q -F "$TMP/message"
-rc1_dev2="$(git rev-parse HEAD)"
-./scripts/check-commit-range.sh "$rc1_cut" "$rc1_dev2" >/dev/null
+rc1_build2="$(git rev-parse HEAD)"
+./scripts/check-commit-range.sh "$rc1_build1" "$rc1_build2" >/dev/null
 base_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 --first-parent HEAD)"
 distance="$(git rev-list --count --first-parent "${base_tag}..HEAD")"
 [[ "$base_tag" == v0.2.0-rc.1 && "$distance" == 2 ]] || {
-  echo "RC descendant did not remain attached to v0.2.0-rc.1: $base_tag distance $distance" >&2
+  echo "Candidate builds did not remain attached to v0.2.0-rc.1: $base_tag distance $distance" >&2
+  exit 1
+}
+[[ "$(cat .github/release-request.json)" == *'0.2.0-rc.1'* ]] || {
+  echo 'Candidate-build corrections changed the release request before promotion.' >&2
   exit 1
 }
 
 printf 'PRODUCT_VERSION="0.2.0-rc.2"\nTARGET="linux-x86_64-gnu"\n' > versions.env
 write_request 0.2.0-rc.2
 git add versions.env .github/release-request.json
-good_message 'chore(release): cut 0.2.0-rc.2' 'The next immutable candidate metadata checkpoint' > "$TMP/message"
+good_message 'chore(release): promote 0.2.0-rc.2' 'The next immutable candidate is promoted only after revisioned qualification' > "$TMP/message"
 git commit -q -F "$TMP/message"
 rc2_cut="$(git rev-parse HEAD)"
-./scripts/check-commit-range.sh "$rc1_dev2" "$rc2_cut" >/dev/null
+./scripts/check-commit-range.sh "$rc1_build2" "$rc2_cut" >/dev/null
+# The same introduced range may contain the revisioned fixes and the later
+# metadata-only promotion; policy must not force a separate release PR.
+./scripts/check-commit-range.sh "$rc1_cut" "$rc2_cut" >/dev/null
 
-# A coherent review range may combine runtime work and its version cut so the
-# normal squash merge remains one productive integration unit.
+# Version changes mixed with runtime/source changes are rejected.
 git tag v0.2.0-rc.2
 printf 'PRODUCT_VERSION="0.2.0"\nTARGET="linux-x86_64-gnu"\n' > versions.env
 write_request 0.2.0
 echo mixed >> file.txt
 git add versions.env .github/release-request.json file.txt
-good_message 'feat(runtime): finalize the accepted runtime' 'A coherent mixed release review range' > "$TMP/message"
+good_message 'chore(release): mix finalization with runtime source' 'An invalid mixed finalization checkpoint' > "$TMP/message"
 git commit -q -F "$TMP/message"
 mixed="$(git rev-parse HEAD)"
-./scripts/check-commit-range.sh "$rc2_cut" "$mixed" >/dev/null
-
-# A later push may not continue source work under an untagged product version.
-echo too-late >> file.txt
-git add file.txt
-good_message 'fix(runtime): continue after untagged release integration' 'An invalid post-integration source checkpoint' > "$TMP/message"
-git commit -q -F "$TMP/message"
-post_release_source="$(git rev-parse HEAD)"
-if ./scripts/check-commit-range.sh "$mixed" "$post_release_source" >/dev/null 2>&1; then
-  echo 'Commit-range checker allowed a later range to continue before the release tag existed.' >&2
+if ./scripts/check-commit-range.sh "$rc2_cut" "$mixed" >/dev/null 2>&1; then
+  echo 'Commit-range checker allowed PRODUCT_VERSION to change with runtime source.' >&2
   exit 1
 fi
 

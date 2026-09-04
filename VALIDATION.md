@@ -45,13 +45,9 @@ The source-controlled PostgreSQL client and plpgsql_check payloads are qualified
 
 Any future server source, configure, build-image, Flex build-input, client, or extension-native change requires full source validation and runtime acceptance. A harness defect is fixed and the complete relevant qualification is rerun; partial progress is not promoted as success.
 
-## Bundled Node library boundary
-
-`yaml` 2.9.0 is part of the portable Node runtime. The npm archive version and SHA-256 are pinned, the builder installs its package payload directly under the bundled Node `lib/node_modules`, and runtime self-test must import, parse, and stringify YAML without modifying the target repository.
-
 ## Node capsule boundary
 
-Offline Node capsules supply immutable bytes only when a target repository's lock requests the exact pinned version and npm integrity. They never become dependency authority.
+Offline Node capsules supply immutable bytes only when a target repository's lock requests the exact pinned version and npm integrity. This includes `yaml` 2.9.0; consumer proof must demonstrate that a repository locking that exact dependency can hydrate it and execute its normal Node-side YAML path without Python/PyYAML substitution. Capsules never become dependency authority.
 
 Hydration must remain repository-contained and transactional: validate every destination and capsule before writing; reject symlink/path escapes; stage all missing packages before any commit; never claim matching packages that already belong to the repository; and write content-bound ownership only after successful commit. Cleanup must verify all recorded ownership before deleting anything and fail closed if the package contents or marker cannot be trusted.
 
@@ -90,6 +86,7 @@ Acceptance must exercise the real PostgREST process rather than replacing it wit
 
 This capability is a discriminator for ordinary PostgREST semantics, not a claim of managed Supabase parity. Kong routing, Supabase Auth/API keys, Storage, Realtime and other provider topology remain outside the bundle. A PostgREST version or compatibility-baseline change requires fresh upstream-asset and runtime qualification before promotion.
 
+
 ## Supabase CLI compatibility boundary
 
 Supabase CLI 2.114.0 is redistributed from the exact official Linux amd64 release archive as a paired runtime: the TypeScript/Bun `supabase` executable plus its matched `supabase-go` companion. The user-facing `supabase` wrapper resolves the bundle root at invocation time and exports only `SUPABASE_GO_BINARY` to the private companion path; `supabase-go` is not added to ambient `PATH`. `HOME`, XDG state, access tokens, database passwords, project links, and other credentials remain host/session state and are never redirected into immutable payload paths or bundled.
@@ -114,36 +111,39 @@ That consumer proof should use the repository's real pinned client dependency an
 
 ## Source identity and release boundary
 
-`PRODUCT_VERSION` is released compatibility identity. It contains only stable SemVer or an intentional `alpha.N` / `beta.N` / `rc.N` prerelease. There is no pseudo-development version.
+`PRODUCT_VERSION` is the product/build SemVer authority. Published states are stable SemVer or intentional `alpha.N` / `beta.N` / `rc.N` prereleases. Development after a published prerelease uses a numeric candidate-build revision such as `0.2.0-rc.1-1`; revisioned forms are not releasable/taggable states. `-dev` remains invalid.
 
-Git owns development source identity. For a clean committed source, the builder resolves the nearest reachable `v<SemVer>` tag, counts commits from that tag, and combines that ancestry with the exact source SHA. Exact tags produce the tag itself; descendants produce the Git-describe shape `vX.Y.Z[-prerelease]-N-g<abbrev>`.
+Git independently owns exact source identity. For a clean committed source, the builder resolves the nearest reachable immutable `v<release-version>` tag, counts commits from that tag, and records that ancestry with the exact source SHA. Exact tags produce the tag itself; descendants produce the Git-describe shape `vX.Y.Z[-prerelease]-N-g<abbrev>`.
 
-This boundary is mechanical and must prove both stable and prerelease ancestry. In particular, source after `v0.2.0-rc.1` must describe from that RC (`v0.2.0-rc.1-1-g0123456789ab`, `v0.2.0-rc.1-2-g123456789abc`) rather than from the prior stable release or an invented `-dev` identity.
-
-Runtime `manifest/environment.json` and generated `acceptance.json` record product version, full source commit, source description, base tag, and numeric distance separately. The archive filename uses the source description directly; the SHA-256 sidecar remains authority for exact archive bytes.
+Runtime `manifest/environment.json` and generated `acceptance.json` record product/build version, full source commit, source description, base tag, and numeric distance separately. The archive filename uses the exact source description; the SHA-256 sidecar remains authority for exact archive bytes.
 
 The builder refuses dirty worktrees. Exported source without `.git` must provide the complete source tuple (`ERPI_AGENT_SOURCE_COMMIT`, `ERPI_AGENT_SOURCE_BASE_TAG`, `ERPI_AGENT_SOURCE_DISTANCE`, and `ERPI_AGENT_SOURCE_DESCRIPTION`) because a SHA alone cannot reconstruct tag ancestry.
 
-A coherent review range may combine its implementation and forward `PRODUCT_VERSION` change: `versions.env` and `.github/release-request.json` move together in the final state. This preserves one normal squash-merged review unit. No later source range may retain that ahead-of-tag product version; once the matching tag is created, ordinary development may continue with the same product version and source descriptions anchored to that tag.
+A candidate-build revision may advance with the source correction it identifies and must remain attached to the same published prerelease line. The release request remains at that published prerelease, and release automation must treat every revisioned `PRODUCT_VERSION` as development only.
 
-Source validation must reject backward product-version transitions, pseudo-development versions, mismatched release-request metadata, exact-tag/product-version disagreement, continuation in a later range after an untagged release integration, and artifact/metadata names inconsistent with source ancestry.
+A clean release/prerelease version change is different: it is a release-metadata-only promotion change, and `versions.env` plus `.github/release-request.json` move together. The release cut is not a separate review unit and does not require its own PR. No later source work may continue under an untagged clean release version.
+
+Source validation must reject backward transitions, `-dev`, candidate revisions that jump prerelease lines, attempts to collapse a revision back onto an already-published prerelease, clean release-version changes mixed with runtime/source changes, exact-tag/product disagreement, and release automation that treats a revisioned build as publishable.
 
 ## Release authority
 
-Stable and prerelease tags are real immutable compatibility states. Optional prerelease stages mean `alpha.N` (materially incomplete target), `beta.N` (scope substantially complete while compatibility/qualification settles), and `rc.N` (intended release scope/contract frozen except release-blocking corrections). Stages are used only when they provide qualification value.
+Stable and clean prerelease tags are real immutable compatibility states. Optional prerelease stages mean `alpha.N` (materially incomplete target), `beta.N` (scope substantially complete while compatibility/qualification settles), and `rc.N` (intended release scope/contract frozen except release-blocking corrections). Stages are used only when they provide qualification value.
+
+Candidate-build revisions (`alpha.1-1`, `beta.2-3`, `rc.1-4`) are explicitly **not** releases. They exist so corrections can be built, accepted, and exercised in the real world without falsely advancing the release-candidate number.
 
 A release/prerelease requires:
 
-1. the coherent review range moves `PRODUCT_VERSION` forward and keeps the release request synchronized;
-2. source validation passes for the exact commit;
-3. the exact payload-affecting source passes **Accept runtime** before publication;
-4. permanent release workflow creates/verifies immutable `v$PRODUCT_VERSION` at that exact source and prepares a draft Release;
-5. **Build distribution** checks out the real tag, requires source description to equal that tag, repeats full runtime acceptance, and attaches archive/checksum/`acceptance.json` before publication;
-6. when a specific repository is the motivating consumer, current consumer promotion proof passes through repository-owned interfaces;
-7. PostgreSQL/runtime provenance boundaries remain intact.
+1. the exact revisioned candidate, when applicable, has completed the required source/runtime and motivating-consumer qualification;
+2. real-world qualification supports promotion rather than merely another fix attempt;
+3. the promotion change touches only approved release metadata and moves `PRODUCT_VERSION` to a clean release/prerelease version while matching `.github/release-request.json`;
+4. source validation passes for the exact promotion commit;
+5. **Accept runtime** passes for that exact commit before publication;
+6. the permanent release workflow creates/verifies immutable `v$PRODUCT_VERSION` at that exact source and prepares a draft Release;
+7. **Build distribution** checks out the real tag, requires source description to equal that tag, repeats full runtime acceptance, and attaches archive/checksum/`acceptance.json` before publication;
+8. PostgreSQL/runtime provenance boundaries remain intact.
 
-If an RC exposes a defect, its tag and published assets remain immutable. Keep the RC product version while fixing source; development descriptions attach to the RC tag. When ready, cut the next candidate with a release-metadata-only change (`rc.1` → `rc.2`). Do not increment PATCH for a defect in an unreleased target. If qualification shows the intended compatibility base is wrong, move to a new truthful base version.
+If an RC exposes a defect, keep its tag/assets immutable and advance candidate-build revisions on that RC line (`rc.1-1`, `rc.1-2`, ...). Do not cut `rc.2` until a corrected build has actually earned promotion through the required real-world qualification. A failed or incomplete fix attempt consumes only another build revision, not another RC number.
 
-Finalization from the accepted RC to stable is release-metadata-only and receives full proof again. Any runtime behavior change requires another RC.
+Finalization to stable is likewise a promotion after qualification, not a guess made before it. Runtime behavior changes occur in revisioned candidate builds; the final release-metadata-only promotion contains no behavior change.
 
 No manual tag/upload path is authoritative. Temporary qualification workflows must not become an alternate release system.

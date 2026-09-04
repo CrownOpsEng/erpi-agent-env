@@ -65,12 +65,29 @@ jobs:
           distance="$(git rev-list --count --first-parent "${base_tag}..${target_sha}")"
           base_version="${base_tag#v}"
           request_version="$(jq -er 'if (keys == ["version"] and (.version | type) == "string") then .version else error("invalid release request") end' .github/release-request.json)"
+
+          # Revisioned prerelease builds are qualification inputs, never release cuts.
+          if [[ "$PRODUCT_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[1-9][0-9]*)-([1-9][0-9]*)$ ]]; then
+            candidate_base="${BASH_REMATCH[1]}"
+            [[ "$candidate_base" == "$base_version" ]] || {
+              echo "Candidate build $PRODUCT_VERSION is not attached to nearest published prerelease $base_version." >&2
+              exit 1
+            }
+            [[ "$request_version" == "$base_version" ]] || {
+              echo "Candidate build $PRODUCT_VERSION must leave release request at $base_version, not $request_version." >&2
+              exit 1
+            }
+            echo "Source $target_sha is candidate build $PRODUCT_VERSION from $base_tag; no release/prerelease will be published."
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           [[ "$request_version" == "$PRODUCT_VERSION" ]] || {
-            echo "Release request version $request_version does not match PRODUCT_VERSION $PRODUCT_VERSION." >&2
+            echo "Release request version $request_version does not match promoted PRODUCT_VERSION $PRODUCT_VERSION." >&2
             exit 1
           }
 
-          # A normal development descendant already attached to the matching tag is not a release request.
+          # A normal stable-development descendant already attached to the matching tag is not a release request.
           if [[ "$PRODUCT_VERSION" == "$base_version" && "$distance" != 0 ]]; then
             echo "Source $target_sha is ordinary development from $base_tag; no release/prerelease will be published."
             echo 'publish=false' >> "$GITHUB_OUTPUT"

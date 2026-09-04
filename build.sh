@@ -74,12 +74,19 @@ if command -v git >/dev/null 2>&1 && git -C "$SELF_DIR" rev-parse --is-inside-wo
   SOURCE_DESCRIPTION="$RESOLVED_DESCRIPTION"
 
   BASE_PRODUCT_VERSION="${SOURCE_BASE_TAG#v}"
-  if [[ "$PRODUCT_VERSION" != "$BASE_PRODUCT_VERSION" ]]; then
+  CANDIDATE_BASE_VERSION=""
+  if [[ "$PRODUCT_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[1-9][0-9]*)-([1-9][0-9]*)$ ]]; then
+    CANDIDATE_BASE_VERSION="${BASH_REMATCH[1]}"
+    [[ "$CANDIDATE_BASE_VERSION" == "$BASE_PRODUCT_VERSION" ]] || {
+      echo "Candidate build $PRODUCT_VERSION must remain attached to source tag $SOURCE_BASE_TAG." >&2
+      exit 1
+    }
+  elif [[ "$PRODUCT_VERSION" != "$BASE_PRODUCT_VERSION" ]]; then
     PARENT_COMMIT="$(git -C "$SELF_DIR" rev-parse "${CHECKOUT_COMMIT}^1" 2>/dev/null || true)"
     if [[ -n "$PARENT_COMMIT" ]]; then
       PARENT_PRODUCT_VERSION="$(git -C "$SELF_DIR" show "$PARENT_COMMIT:versions.env" 2>/dev/null | sed -n 's/^PRODUCT_VERSION="\([^"]*\)"$/\1/p')"
       if [[ -n "$PARENT_PRODUCT_VERSION" && "$PARENT_PRODUCT_VERSION" == "$PRODUCT_VERSION" ]]; then
-        echo "PRODUCT_VERSION $PRODUCT_VERSION is ahead of source tag $SOURCE_BASE_TAG on more than the release-cut commit; create the matching tag before further source work." >&2
+        echo "Clean PRODUCT_VERSION $PRODUCT_VERSION is ahead of source tag $SOURCE_BASE_TAG on more than the promotion commit; create the matching tag before further source work." >&2
         exit 1
       fi
     fi
@@ -300,24 +307,6 @@ cp "$SELF_DIR/templates/bin/npx-wrapper" "$BUILD/bin/npx"
 chmod 0755 "$BUILD/bin/node" "$BUILD/bin/npm" "$BUILD/bin/npx"
 "$BUILD/bin/node" -e 'if (process.versions.node !== process.argv[1]) process.exit(1)' "$NODE_VERSION"
 
-log "Node yaml $NODE_YAML_VERSION"
-NODE_YAML_AR="$DL/yaml-${NODE_YAML_VERSION}.tgz"
-fetch "https://registry.npmjs.org/yaml/-/yaml-${NODE_YAML_VERSION}.tgz" "$NODE_YAML_AR"
-verify_one "$NODE_YAML_AR" "$NODE_YAML_SHA256"
-rm -rf "$BUILD/runtime/node/lib/node_modules/yaml"
-mkdir -p "$BUILD/runtime/node/lib/node_modules/yaml"
-tar -xzf "$NODE_YAML_AR" -C "$BUILD/runtime/node/lib/node_modules/yaml" --strip-components=1
-"$BUILD/env/bin/python" - "$BUILD/runtime/node/lib/node_modules/yaml/package.json" "$NODE_YAML_VERSION" <<'PY_NODE_YAML'
-import json, pathlib, sys
-package=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
-expected=sys.argv[2]
-assert package.get('name') == 'yaml'
-assert package.get('version') == expected
-assert package.get('license') == 'ISC'
-assert package.get('engines', {}).get('node') == '>= 14.6'
-PY_NODE_YAML
-NODE_PATH="$BUILD/runtime/node/lib/node_modules" "$BUILD/bin/node" -e 'const Y=require("yaml"); if(require("yaml/package.json").version!==process.argv[1]||Y.parse("a: 1").a!==1) process.exit(1)' "$NODE_YAML_VERSION"
-
 log "pg-delta $PG_DELTA_VERSION plan-only runtime"
 PG_DELTA_LOCK="$SELF_DIR/vendor/pg-delta/package-lock.json"
 verify_one "$PG_DELTA_LOCK" "$PG_DELTA_LOCK_SHA256"
@@ -387,6 +376,7 @@ PY_PG_DELTA_PROVENANCE
 log "Offline Node capability capsules"
 mkdir -p "$BUILD/runtime/node-capsules"
 for spec in \
+  "yaml-${YAML_VERSION}.tgz:${YAML_SHA256}" \
   "postgres-${POSTGRES_JS_VERSION}.tgz:${POSTGRES_JS_SHA256}" \
   "postgres-language-server-wasm-${PGLS_WASM_VERSION}.tgz:${PGLS_WASM_SHA256}" \
   "fast-check-${FAST_CHECK_VERSION}.tgz:${FAST_CHECK_SHA256}" \
@@ -397,6 +387,7 @@ for spec in \
 done
 NODE_CAPSULE_MANIFEST="$SELF_DIR/vendor/node-capsules/manifest.json"
 "$BUILD/env/bin/python" - "$NODE_CAPSULE_MANIFEST" \
+  "$YAML_VERSION" "$YAML_SHA256" \
   "$POSTGRES_JS_VERSION" "$POSTGRES_JS_SHA256" \
   "$PGLS_WASM_VERSION" "$PGLS_WASM_SHA256" \
   "$FAST_CHECK_VERSION" "$FAST_CHECK_SHA256" \
@@ -405,10 +396,11 @@ import json, pathlib, re, sys
 path=pathlib.Path(sys.argv[1])
 values=sys.argv[2:]
 expected={
-    'postgres': (values[0], f'postgres-{values[0]}.tgz', values[1]),
-    '@postgres-language-server/wasm': (values[2], f'postgres-language-server-wasm-{values[2]}.tgz', values[3]),
-    'fast-check': (values[4], f'fast-check-{values[4]}.tgz', values[5]),
-    'pure-rand': (values[6], f'pure-rand-{values[6]}.tgz', values[7]),
+    'yaml': (values[0], f'yaml-{values[0]}.tgz', values[1]),
+    'postgres': (values[2], f'postgres-{values[2]}.tgz', values[3]),
+    '@postgres-language-server/wasm': (values[4], f'postgres-language-server-wasm-{values[4]}.tgz', values[5]),
+    'fast-check': (values[6], f'fast-check-{values[6]}.tgz', values[7]),
+    'pure-rand': (values[8], f'pure-rand-{values[8]}.tgz', values[9]),
 }
 data=json.loads(path.read_text(encoding='utf-8'))
 assert data.get('schema') == 1, data.get('schema')
@@ -671,7 +663,7 @@ cat > "$BUILD/manifest/environment.json" <<JSON
     "postgrest": {"version": "$POSTGREST_VERSION", "supabase_cli_baseline": "$POSTGREST_SUPABASE_CLI_BASELINE", "database_targets": "numeric-loopback-only", "http_listener": "loopback-only"},
     "supabase_cli": {"version": "$SUPABASE_CLI_VERSION", "distribution": "official-linux-amd64", "companion": "bundled-supabase-go", "credentials": "host/session", "container_runtime": "host-required-for-stack-commands"},
     "git_handoff": {"artifact_format": "git-bundle-zip-v1", "requires_host_git": true, "network": "not-required"},
-    "node_capsules": {"postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION"},
+    "node_capsules": {"yaml": "$YAML_VERSION", "postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION"},
     "utilities": {"shellcheck": "$SHELLCHECK_VERSION", "miller": "$MILLER_VERSION", "httpx_cli": true}
   },
   "runtime_contract": {"os": "Linux", "architecture": "x86_64", "kernel_min": "$MIN_KERNEL_VERSION", "glibc_min": "$MIN_GLIBC_VERSION", "libstdcxx_symbol_min": "$MIN_GLIBCXX_SYMBOL"},
@@ -690,7 +682,6 @@ source_row component version url sha256
 source_row uv "$UV_VERSION" "https://releases.astral.sh/github/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256"
 source_row python-build-standalone "${PYTHON_VERSION}+${PYTHON_DISTRIBUTION_BUILD}" "$PYTHON_DISTRIBUTION_URL" "$PYTHON_DISTRIBUTION_SHA256"
 source_row node "$NODE_VERSION" "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" "$NODE_SHA256"
-source_row node-yaml "$NODE_YAML_VERSION" "https://registry.npmjs.org/yaml/-/yaml-$NODE_YAML_VERSION.tgz" "$NODE_YAML_SHA256"
 source_row gh "$GH_VERSION" "https://github.com/cli/cli/releases/download/v$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz" "$GH_SHA256"
 source_row jq "$JQ_VERSION" "https://github.com/jqlang/jq/releases/download/jq-$JQ_VERSION/jq-linux-amd64" "$JQ_SHA256"
 source_row yq "$YQ_VERSION" "https://github.com/mikefarah/yq/releases/download/v$YQ_VERSION/yq_linux_amd64" "$YQ_SHA256"
@@ -709,6 +700,7 @@ source_row postgres-server-build-flex "$POSTGRES_FLEX_RPM_NEVRA" "$POSTGRES_FLEX
 source_row postgres-client "$POSTGRES_VERSION" "vendor/database/postgresql-client-$POSTGRES_VERSION-linux-x64-gnu.tar.gz" "$POSTGRES_CLIENT_SHA256"
 source_row pgtap "$PGTAP_VERSION" "vendor/pgtap/pgtap--$PGTAP_VERSION.sql" "generated-from-$PGTAP_SOURCE_SHA256"
 source_row plpgsql-check "$PLPGSQL_CHECK_VERSION" "vendor/database/plpgsql-check-$PLPGSQL_CHECK_VERSION-pg17-linux-x64-gnu.tar.gz" "$PLPGSQL_CHECK_SHA256"
+source_row yaml "$YAML_VERSION" "vendor/node-capsules/yaml-$YAML_VERSION.tgz" "$YAML_SHA256"
 source_row node-postgres "$POSTGRES_JS_VERSION" "vendor/node-capsules/postgres-$POSTGRES_JS_VERSION.tgz" "$POSTGRES_JS_SHA256"
 source_row pgls-wasm "$PGLS_WASM_VERSION" "vendor/node-capsules/postgres-language-server-wasm-$PGLS_WASM_VERSION.tgz" "$PGLS_WASM_SHA256"
 source_row fast-check "$FAST_CHECK_VERSION" "vendor/node-capsules/fast-check-$FAST_CHECK_VERSION.tgz" "$FAST_CHECK_SHA256"

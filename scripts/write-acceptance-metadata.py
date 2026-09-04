@@ -108,6 +108,8 @@ def main() -> None:
         raise SystemExit(f"Artifact named by sidecar does not exist: {artifact_path}")
 
     if args.release_tag:
+        if re.fullmatch(r"\d+\.\d+\.\d+-(?:alpha|beta|rc)\.[1-9]\d*-[1-9]\d*", product_version):
+            raise SystemExit("Candidate-build revisions are qualification artifacts, not release tags")
         expected_tag = f"v{product_version}"
         if args.release_tag != expected_tag:
             raise SystemExit(

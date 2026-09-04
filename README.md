@@ -17,7 +17,7 @@ A working bundled `gh` binary does **not** imply the shell can reach GitHub. `ag
 The finished bundle pins and verifies a deliberately small generic capability layer:
 
 - uv 0.12.5 and uv-managed CPython 3.13.14 from an explicitly pinned python-build-standalone build
-- Node.js 24.19.0 LTS with npm/npx and bundled `yaml` 2.9.0
+- Node.js 24.19.0 LTS with npm/npx
 - GitHub CLI, jq, yq, ripgrep, actionlint, gitleaks, ShellCheck, and Miller
 - a bounded Git-bundle handoff restorer that turns connector-downloaded repository artifacts into verified local worktrees without shell GitHub networking or credentials
 - a locked Python analysis layer with the HTTPX CLI completed, without project-specific pytest/setuptools/wheel requirements
@@ -46,7 +46,7 @@ Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256
 ./build.sh
 ```
 
-`PRODUCT_VERSION` in `versions.env` is the released compatibility identity, not a development-build counter. Ordinary source commits leave it unchanged. The builder derives the artifact identity from the nearest reachable stable/prerelease tag, commit distance, and source SHA:
+`PRODUCT_VERSION` in `versions.env` is the product/build SemVer authority. Stable development may retain the released version, while corrections after a published prerelease use a numeric candidate-build revision such as `0.3.0-rc.1-1`. Git ancestry remains the exact source authority, and the builder derives artifact identity from the nearest reachable stable/prerelease tag, commit distance, and source SHA:
 
 ```text
 stable descendant: erpi-agent-env-linux-x64-v0.1.1-17-g4c2fa17c9a1.tar.gz
@@ -57,7 +57,7 @@ exact stable:      erpi-agent-env-linux-x64-v0.2.0.tar.gz
 
 This is Git source identity, not invented SemVer. The numeric distance makes development order visible; the full 40-character source SHA, base tag, distance and source description are recorded in `manifest/environment.json` and `acceptance.json`; the archive SHA-256 identifies the exact bytes.
 
-There is no `-dev` product version. A coherent PR may include its `PRODUCT_VERSION`/release-request cut, and the exact accepted squash integration receives immutable `v$PRODUCT_VERSION`. Development after an RC keeps that RC product version and naturally describes itself from the RC tag until the next candidate is cut.
+There is no `-dev` product version. After a published prerelease, corrections use numeric candidate-build revisions such as `0.3.0-rc.1-1`; those builds are development only and never trigger a tag or Release. The clean next RC is cut only after a revisioned build has passed the required real-world qualification, using a release-metadata-only `PRODUCT_VERSION`/release-request promotion change and immutable `v$PRODUCT_VERSION` tag. The release cut itself does not require a dedicated PR.
 
 Archive creation normalizes tar ordering/metadata, gzip headers, and the relocatable `pyvenv.cfg` placeholder so repeated packaging of the same accepted payload is byte-for-byte deterministic.
 
@@ -66,18 +66,10 @@ The PostgreSQL server is built during every full acceptance/distribution build f
 
 Direct third-party license/attribution texts for redistributed command/database/capsule/library components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. PostgreSQL server provenance terminates at the pinned official source artifact and pinned build image rather than an opaque prebuilt server bundle; the official PostgreSQL copyright notice is retained in the runtime.
 
-### Bundled Node libraries
-
-The portable Node runtime includes `yaml` 2.9.0 under its own `lib/node_modules`. The archive is version- and SHA-256-pinned in `versions.env`, verified during build, and available after activation through standard `NODE_PATH`; no target-repository install or Python/PyYAML detour is required.
-
-```bash
-source /path/to/erpi-agent-env/activate
-node -e 'const YAML=require("yaml"); console.log(YAML.parse("enabled: true").enabled)'
-```
 
 ## Offline Node capsule boundary
 
-The target repository's `package-lock.json` remains authority. `versions.env` pins the immutable capsule hashes and package versions used by the generic runtime; `vendor/node-capsules/manifest.json` is the source-controlled package/integrity manifest, the builder validates it against those pins before copying it to `manifest/node-capsules.json`, and source validation verifies the pins against both that manifest and the actual capsule bytes.
+The target repository's `package-lock.json` remains authority. The capsule set includes `yaml` 2.9.0 for repositories that lock that exact package, alongside the existing database and test-library capsules. `versions.env` pins the immutable capsule hashes and package versions used by the generic runtime; `vendor/node-capsules/manifest.json` is the source-controlled package/integrity manifest, the builder validates it against those pins before copying it to `manifest/node-capsules.json`, and source validation verifies the pins against both that manifest and the actual capsule bytes.
 
 Hydration is deliberately transactional and repository-contained. It validates all destinations before writing, rejects symlinked `node_modules` or scope parents and any resolved target outside the repository, stages every missing package before committing any of them, runs no lifecycle scripts, and does not claim packages already owned by the project. Agent-owned packages are recorded with deterministic content hashes; cleanup first verifies every record and refuses the entire operation if any owned package was replaced or modified. Dedicated negative tests preserve these invariants.
 

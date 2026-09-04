@@ -84,9 +84,11 @@ The supported contract includes documented `agent-env` commands/options and inte
 
 ## Product version and source identity
 
-`PRODUCT_VERSION` in `versions.env` is the single product compatibility-version authority. It is ordinary SemVer or a real prerelease such as `0.2.0-rc.1`; **there is no `-dev` product version**.
+`PRODUCT_VERSION` in `versions.env` is the product/build SemVer authority.
 
-Git owns exact source identity. Between release/prerelease tags, `PRODUCT_VERSION` remains the nearest released product identity and source state is described from Git ancestry using the nearest reachable version tag, commit distance, and abbreviated SHA.
+Published compatibility states use ordinary SemVer or a deliberate prerelease such as `0.2.0-rc.1`. Development iterations after a published prerelease use an additional numeric revision on that same line, for example `0.2.0-rc.1-1`, `0.2.0-rc.1-2`, and so on. These revisioned versions are build identities, not release candidates and not Git tags.
+
+Git remains the exact source authority. The nearest reachable immutable `v<release-version>` tag, first-parent distance, and exact SHA are recorded separately so two source states can never be confused merely because their product/build version is similar.
 
 Examples:
 
@@ -95,7 +97,7 @@ exact stable release:
   product 0.1.1
   source  v0.1.1
 
-ordinary development after it:
+ordinary development after stable:
   product 0.1.1
   source  v0.1.1-17-g4c2fa17c9a1
 
@@ -103,32 +105,16 @@ exact release candidate:
   product 0.2.0-rc.1
   source  v0.2.0-rc.1
 
-second development commit after that candidate:
-  product 0.2.0-rc.1
-  source  v0.2.0-rc.1-2-g91ab3c4d5e6f
+first corrected build after that candidate:
+  product 0.2.0-rc.1-1
+  source  v0.2.0-rc.1-1-g0123456789ab
 ```
 
-The numeric distance makes development ordering visible; the Git SHA identifies the exact source; the tag identifies the compatibility state the development source descends from. Full source SHA remains in machine-readable provenance.
-
-A development artifact therefore uses its source description directly:
-
-```text
-erpi-agent-env-linux-x64-v0.1.1-17-g4c2fa17c9a1.tar.gz
-erpi-agent-env-linux-x64-v0.2.0-rc.1-2-g91ab3c4d5e6f.tar.gz
-```
-
-At an exact tag the same rule naturally produces the release/prerelease name:
-
-```text
-erpi-agent-env-linux-x64-v0.2.0-rc.1.tar.gz
-erpi-agent-env-linux-x64-v0.2.0.tar.gz
-```
-
-Do not invent another build version or manually copy commit metadata into `versions.env`.
+The revision suffix answers "which candidate build is this?"; Git provenance answers "which exact source produced it?". Do not use `-dev` or pretend an unverified correction is a new RC.
 
 ## Source identity and release lifecycle
 
-A release/prerelease is a deliberate tagged compatibility state. Ordinary source commits do not change `PRODUCT_VERSION`.
+A release/prerelease is a deliberate, verified, immutable tagged compatibility state. A candidate-build revision is ordinary development and must never trigger tag/release publication.
 
 Supported optional prerelease meanings are:
 
@@ -139,55 +125,45 @@ Supported optional prerelease meanings are:
 
 Do not manufacture stages that do not provide qualification value.
 
-### Cutting a release or prerelease
+### Candidate builds after a prerelease
 
-The final state of a coherent PR may include its release/prerelease cut. The new `PRODUCT_VERSION` must move forward, and `.github/release-request.json` is updated to the same version in that review unit. This lets the normal squash merge integrate implementation and its release intent as one commit instead of requiring a ceremonial metadata-only PR. After integration, no later source range may continue under the new product version until the matching tag exists.
-
-For example, a capability PR based on `v0.1.1` may finish with:
+If `0.2.0-rc.1` exposes a defect, keep tag `v0.2.0-rc.1` immutable and advance the build revision while correcting it:
 
 ```text
-PRODUCT_VERSION="0.2.0-rc.1"
-.github/release-request.json → {"version":"0.2.0-rc.1"}
+0.2.0-rc.1-1
+0.2.0-rc.1-2
 ```
 
-After squash integration, **Accept runtime** proves the exact mainline source—including both the implementation and version cut. Successful acceptance triggers the permanent publisher, which creates immutable tag:
+The revision change may accompany the source correction it identifies. `.github/release-request.json` stays at the last published prerelease (`0.2.0-rc.1` here), so normal acceptance of `rc.1-1` or `rc.1-2` cannot accidentally publish a release.
+
+Run source validation, runtime acceptance, and motivating-consumer proof on the revisioned build. Real-world qualification may iterate through as many candidate builds as necessary. **Do not cut `rc.2` merely because `rc.1` needed a fix.**
+
+### Promoting a verified release or prerelease
+
+Only after the candidate has passed the required real-world qualification should the next immutable release/prerelease be cut. Promotion is a **release-metadata-only** source change: set `PRODUCT_VERSION` to the clean release version and update `.github/release-request.json` to the same value. The release cut is not a separate review unit and **does not require its own PR**; it may be the final metadata-only checkpoint in an already-active change range or a direct metadata-only promotion after the qualified candidate has been integrated, subject to repository branch permissions.
+
+For example, after `0.2.0-rc.1-3` is actually proven ready for promotion:
 
 ```text
-v0.2.0-rc.1
+PRODUCT_VERSION="0.2.0-rc.2"
+.github/release-request.json → {"version":"0.2.0-rc.2"}
 ```
 
-The exact tagged distribution is then built and accepted from that tag.
+After squash integration, **Accept runtime** proves that exact promotion commit. The permanent publisher may then create immutable tag `v0.2.0-rc.2`, build the exact tagged distribution, and publish only after the release checks complete.
 
-### Debugging a release candidate
+A clean `alpha.N`, `beta.N`, `rc.N`, or final version is therefore a release assertion. A revisioned form such as `rc.1-4` is explicitly not one.
 
-If `0.2.0-rc.1` exposes a defect, **do not** change the product version back to a pseudo-development value and do not move/reuse the tag.
-
-Commit the correction normally while `PRODUCT_VERSION` remains `0.2.0-rc.1`. Development artifacts naturally become:
-
-```text
-v0.2.0-rc.1-1-g0123456789ab
-v0.2.0-rc.1-2-g123456789abc
-```
-
-When the source is again candidate-ready, make a release-metadata-only change to:
-
-```text
-0.2.0-rc.2
-```
-
-then tag/publish `v0.2.0-rc.2` after qualification. A defect in an unreleased `0.2.0` target therefore advances the RC number, not the patch number.
-
-If qualification proves the intended compatibility target itself is wrong, choose a new truthful base version; for example `1.8.0-rc.1` may legitimately lead to `2.0.0-rc.1` when a breaking contract change is required.
+If qualification proves the intended compatibility target itself is wrong, choose a new truthful base version. Do not increment PATCH merely because an unreleased target needed another candidate build.
 
 ### Finalizing
 
-Finalization moves the accepted candidate to the final version, for example:
+Finalization changes only approved release metadata from the accepted candidate line to the final version, for example:
 
 ```text
-0.2.0-rc.3 → 0.2.0
+0.2.0-rc.3-2 → 0.2.0
 ```
 
-The final integrated source must receive full proof again because its bytes differ. No runtime behavior changes are permitted between the accepted final RC and final release; behavior changes require another candidate.
+The final promotion receives full proof again. No runtime behavior change is smuggled into the promotion commit; behavior changes go through another revisioned candidate build first.
 
 ### Published immutability
 
@@ -213,7 +189,7 @@ A connector-only session must not claim local checks it did not run. Obtain a co
 
 ## Release automation
 
-A coherent PR may update `PRODUCT_VERSION` and `.github/release-request.json` to the same intended stable/prerelease version alongside the implementation it releases. After squash integration, **Accept runtime** runs on the exact mainline commit. A successful mainline acceptance triggers `Publish release`, which verifies the release-cut record, creates/verifies immutable `v$PRODUCT_VERSION`, prepares/reuses a matching draft Release, and dispatches `Build distribution` against the real tag. Prerelease versions are published as GitHub prereleases.
+Revisioned candidate builds leave `.github/release-request.json` at the last published prerelease; `Publish release` must classify them as development and exit without tagging or publishing. Once qualification earns promotion, a metadata-only release cut updates `PRODUCT_VERSION` and `.github/release-request.json` to the same clean stable/prerelease version. That cut does not require a dedicated PR. After the promotion reaches `main`, **Accept runtime** runs on the exact mainline commit. A successful mainline acceptance triggers `Publish release`, which verifies the promotion record, creates/verifies immutable `v$PRODUCT_VERSION`, prepares/reuses a matching draft Release, and dispatches `Build distribution` against the real tag. Prerelease versions are published as GitHub prereleases.
 
 `Build distribution` checks out the tag, verifies tag/SHA/product-version/source-description agreement, repeats the complete runtime build, writes `acceptance.json`, attaches archive/checksum/metadata to the draft, and only then publishes it.
 

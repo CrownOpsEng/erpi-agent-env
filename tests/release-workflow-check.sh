@@ -28,7 +28,10 @@ grep -F 'scripts/check-pr-record.py --title "$PR_TITLE"' "$VALIDATE" >/dev/null
 grep -F './tests/pr-record-check.sh' "$VALIDATE" >/dev/null
 grep -F 'Normal repository work uses a topic branch and pull request.' "$CONTRIBUTING" >/dev/null
 grep -F 'squash merge' "$CONTRIBUTING" >/dev/null
-grep -F 'instead of requiring a ceremonial metadata-only PR' "$CONTRIBUTING" >/dev/null
+grep -F 'Development iterations after a published prerelease use an additional numeric revision' "$CONTRIBUTING" >/dev/null
+grep -F 'Only after the candidate has passed the required real-world qualification' "$CONTRIBUTING" >/dev/null
+grep -F 'does not require its own PR' "$CONTRIBUTING" >/dev/null
+grep -F 'Corrections after a published prerelease use revisioned candidate builds' "$AGENTS" >/dev/null
 grep -F 'manually dispatch **Accept runtime** with that exact 40-character SHA as `target_ref`' "$CONTRIBUTING" >/dev/null
 grep -F 'target_ref:' "$ACCEPT" >/dev/null
 grep -F 'ref: ${{ inputs.target_ref || github.sha }}' "$ACCEPT" >/dev/null
@@ -41,6 +44,8 @@ grep -F "github.event.workflow_run.head_branch == 'main'" "$PUBLISH" >/dev/null
 grep -F 'workflow_dispatch:' "$PUBLISH" >/dev/null
 grep -F 'release-request.json' "$PUBLISH" >/dev/null
 grep -F 'ordinary development from $base_tag; no release/prerelease will be published' "$PUBLISH" >/dev/null
+grep -F 'candidate build $PRODUCT_VERSION from $base_tag; no release/prerelease will be published' "$PUBLISH" >/dev/null
+grep -F 'Candidate build $PRODUCT_VERSION must leave release request at $base_version' "$PUBLISH" >/dev/null
 
 # Exact tag creation precedes draft creation; tags and published assets are never repointed/replaced.
 grep -F 'git/ref/tags/$release_tag' "$PUBLISH" >/dev/null
