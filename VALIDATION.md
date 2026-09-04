@@ -35,6 +35,8 @@ A payload-affecting source commit is releasable only after **Accept runtime** bu
 
 The accepted archive hash and exact source SHA belong in machine-generated `acceptance.json` and the archive sidecar, not copied into narrative docs.
 
+Before merge, prefer a complete local `./build.sh` run on the clean, committed final PR head whenever the host has working Docker. If local Docker is unavailable, manually dispatch **Accept runtime** with the exact final PR-head SHA as `target_ref` and require that run to succeed immediately before merge. The automatic post-merge run on the exact `main` SHA remains mandatory before release publication.
+
 ## PostgreSQL source/native qualification
 
 The PostgreSQL server is not accepted from a prebuilt third-party binary bundle. Every full runtime build fetches the exact pinned official PostgreSQL source tarball, verifies its SHA-256, and builds the normal install prefix inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10's normal build regenerates scanner sources, so its Flex prerequisite is also immutable: the builder verifies the exact pinned AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM SHA-256 and package identity/signature, installs that local RPM without dependency resolution or package scripts, and disables container networking for the PostgreSQL compilation. Flex is a build input recorded in provenance, not redistributed runtime payload. Deterministic GNU `ar` mode (`AROPT=crsD`) is required for PostgreSQL static archives. Optional readline, zlib, and ICU integrations are disabled to avoid unnecessary external runtime-library dependencies; the resulting ELF symbol floor and dynamic dependencies are checked before runtime acceptance.
@@ -88,7 +90,6 @@ Acceptance must exercise the real PostgREST process rather than replacing it wit
 
 This capability is a discriminator for ordinary PostgREST semantics, not a claim of managed Supabase parity. Kong routing, Supabase Auth/API keys, Storage, Realtime and other provider topology remain outside the bundle. A PostgREST version or compatibility-baseline change requires fresh upstream-asset and runtime qualification before promotion.
 
-
 ## Supabase CLI compatibility boundary
 
 Supabase CLI 2.114.0 is redistributed from the exact official Linux amd64 release archive as a paired runtime: the TypeScript/Bun `supabase` executable plus its matched `supabase-go` companion. The user-facing `supabase` wrapper resolves the bundle root at invocation time and exports only `SUPABASE_GO_BINARY` to the private companion path; `supabase-go` is not added to ambient `PATH`. `HOME`, XDG state, access tokens, database passwords, project links, and other credentials remain host/session state and are never redirected into immutable payload paths or bundled.
@@ -123,9 +124,9 @@ Runtime `manifest/environment.json` and generated `acceptance.json` record produ
 
 The builder refuses dirty worktrees. Exported source without `.git` must provide the complete source tuple (`ERPI_AGENT_SOURCE_COMMIT`, `ERPI_AGENT_SOURCE_BASE_TAG`, `ERPI_AGENT_SOURCE_DISTANCE`, and `ERPI_AGENT_SOURCE_DESCRIPTION`) because a SHA alone cannot reconstruct tag ancestry.
 
-A `PRODUCT_VERSION` change is a dedicated release-metadata-only source change: `versions.env` and `.github/release-request.json` move together. It may be the single untagged release-cut commit ahead of the nearest existing tag; no later source commit may retain that ahead-of-tag product version. Once the matching tag is created, ordinary development may continue with the same product version and source descriptions anchored to that tag.
+A coherent review range may combine its implementation and forward `PRODUCT_VERSION` change: `versions.env` and `.github/release-request.json` move together in the final state. This preserves one normal squash-merged review unit. No later source range may retain that ahead-of-tag product version; once the matching tag is created, ordinary development may continue with the same product version and source descriptions anchored to that tag.
 
-Source validation must reject backward product-version transitions, pseudo-development versions, version changes mixed with runtime/source changes, exact-tag/product-version disagreement, continuation after an untagged release-cut commit, and artifact/metadata names inconsistent with source ancestry.
+Source validation must reject backward product-version transitions, pseudo-development versions, mismatched release-request metadata, exact-tag/product-version disagreement, continuation in a later range after an untagged release integration, and artifact/metadata names inconsistent with source ancestry.
 
 ## Release authority
 
@@ -133,7 +134,7 @@ Stable and prerelease tags are real immutable compatibility states. Optional pre
 
 A release/prerelease requires:
 
-1. the release-cut source change touches only approved release metadata and moves `PRODUCT_VERSION` forward;
+1. the coherent review range moves `PRODUCT_VERSION` forward and keeps the release request synchronized;
 2. source validation passes for the exact commit;
 3. the exact payload-affecting source passes **Accept runtime** before publication;
 4. permanent release workflow creates/verifies immutable `v$PRODUCT_VERSION` at that exact source and prepares a draft Release;

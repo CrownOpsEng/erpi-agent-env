@@ -16,6 +16,12 @@ on:
       - vendor/**
       - .github/workflows/accept-runtime.yml
   workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Exact final PR-head SHA or ref to accept
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -36,7 +42,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.target_ref || github.sha }}
 
       - name: Record exact source identity
         id: source

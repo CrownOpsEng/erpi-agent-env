@@ -141,16 +141,16 @@ Do not manufacture stages that do not provide qualification value.
 
 ### Cutting a release or prerelease
 
-Changing `PRODUCT_VERSION` is a dedicated **release-metadata-only** source change. The new value must move forward, and `.github/release-request.json` is updated to the same version in that change. That commit may temporarily be one commit ahead of its nearest existing tag; no further source work is allowed under the new product version until the matching tag exists.
+The final state of a coherent PR may include its release/prerelease cut. The new `PRODUCT_VERSION` must move forward, and `.github/release-request.json` is updated to the same version in that review unit. This lets the normal squash merge integrate implementation and its release intent as one commit instead of requiring a ceremonial metadata-only PR. After integration, no later source range may continue under the new product version until the matching tag exists.
 
-For example, after development based on `v0.1.1`, a release-cut PR changes only approved release metadata:
+For example, a capability PR based on `v0.1.1` may finish with:
 
 ```text
 PRODUCT_VERSION="0.2.0-rc.1"
 .github/release-request.json → {"version":"0.2.0-rc.1"}
 ```
 
-After squash integration, **Accept runtime** proves the exact mainline source. Successful acceptance triggers the permanent publisher, which creates immutable tag:
+After squash integration, **Accept runtime** proves the exact mainline source—including both the implementation and version cut. Successful acceptance triggers the permanent publisher, which creates immutable tag:
 
 ```text
 v0.2.0-rc.1
@@ -181,13 +181,13 @@ If qualification proves the intended compatibility target itself is wrong, choos
 
 ### Finalizing
 
-Finalization changes only approved release metadata from the accepted candidate to the final version, for example:
+Finalization moves the accepted candidate to the final version, for example:
 
 ```text
 0.2.0-rc.3 → 0.2.0
 ```
 
-The final commit must receive full proof again because its bytes differ. No runtime behavior changes are permitted between the accepted final RC and final release; behavior changes require another candidate.
+The final integrated source must receive full proof again because its bytes differ. No runtime behavior changes are permitted between the accepted final RC and final release; behavior changes require another candidate.
 
 ### Published immutability
 
@@ -195,13 +195,17 @@ Published stable releases and prereleases are immutable. Never move/reuse a vers
 
 ## Validation
 
-With a local checkout, run the smallest relevant checks while developing and the repository source gate before proposing integration:
+With a local checkout, run the smallest relevant checks while developing and every repository test script before proposing integration:
 
 ```bash
-./tests/static-check.sh
+for test_script in tests/*.sh; do
+  GIT_CONFIG_GLOBAL=/dev/null "$test_script"
+done
 ```
 
-Runtime/payload changes additionally earn a complete `./build.sh` acceptance run when practical; the permanent **Accept runtime** workflow provides the canonical hosted acceptance path for `main` and deliberate runtime proof.
+Runtime/payload changes require complete pre-merge acceptance. When the local host has working Docker, run `./build.sh` locally on the clean, committed final PR head. When local Docker is unavailable, push the final PR head, manually dispatch **Accept runtime** with that exact 40-character SHA as `target_ref`, and require the run to succeed immediately before merge. Do not substitute fragmented checks or an older branch run.
+
+The post-merge **Accept runtime** run on the exact `main` SHA remains the release gate even when local or PR-head acceptance already passed. This ensures the squash-integrated bytes, immutable tag, and published artifacts all share one accepted source identity.
 
 Do not fragment a long-running gate merely to satisfy a wrapper timeout. Keep one logical process and give it adequate time or supervise/poll that same process.
 
@@ -209,7 +213,7 @@ A connector-only session must not claim local checks it did not run. Obtain a co
 
 ## Release automation
 
-A release-cut PR updates `PRODUCT_VERSION` and `.github/release-request.json` to the same intended stable/prerelease version. After squash integration, **Accept runtime** runs on the exact mainline commit. A successful mainline acceptance triggers `Publish release`, which verifies the release-cut record, creates/verifies immutable `v$PRODUCT_VERSION`, prepares/reuses a matching draft Release, and dispatches `Build distribution` against the real tag. Prerelease versions are published as GitHub prereleases.
+A coherent PR may update `PRODUCT_VERSION` and `.github/release-request.json` to the same intended stable/prerelease version alongside the implementation it releases. After squash integration, **Accept runtime** runs on the exact mainline commit. A successful mainline acceptance triggers `Publish release`, which verifies the release-cut record, creates/verifies immutable `v$PRODUCT_VERSION`, prepares/reuses a matching draft Release, and dispatches `Build distribution` against the real tag. Prerelease versions are published as GitHub prereleases.
 
 `Build distribution` checks out the tag, verifies tag/SHA/product-version/source-description agreement, repeats the complete runtime build, writes `acceptance.json`, attaches archive/checksum/metadata to the draft, and only then publishes it.
 

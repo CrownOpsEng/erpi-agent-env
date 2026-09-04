@@ -103,17 +103,26 @@ git commit -q -F "$TMP/message"
 rc2_cut="$(git rev-parse HEAD)"
 ./scripts/check-commit-range.sh "$rc1_dev2" "$rc2_cut" >/dev/null
 
-# Version changes mixed with runtime/source changes are rejected.
+# A coherent review range may combine runtime work and its version cut so the
+# normal squash merge remains one productive integration unit.
 git tag v0.2.0-rc.2
 printf 'PRODUCT_VERSION="0.2.0"\nTARGET="linux-x86_64-gnu"\n' > versions.env
 write_request 0.2.0
 echo mixed >> file.txt
 git add versions.env .github/release-request.json file.txt
-good_message 'chore(release): mix finalization with runtime source' 'An invalid mixed finalization checkpoint' > "$TMP/message"
+good_message 'feat(runtime): finalize the accepted runtime' 'A coherent mixed release review range' > "$TMP/message"
 git commit -q -F "$TMP/message"
 mixed="$(git rev-parse HEAD)"
-if ./scripts/check-commit-range.sh "$rc2_cut" "$mixed" >/dev/null 2>&1; then
-  echo 'Commit-range checker allowed PRODUCT_VERSION to change with runtime source.' >&2
+./scripts/check-commit-range.sh "$rc2_cut" "$mixed" >/dev/null
+
+# A later push may not continue source work under an untagged product version.
+echo too-late >> file.txt
+git add file.txt
+good_message 'fix(runtime): continue after untagged release integration' 'An invalid post-integration source checkpoint' > "$TMP/message"
+git commit -q -F "$TMP/message"
+post_release_source="$(git rev-parse HEAD)"
+if ./scripts/check-commit-range.sh "$mixed" "$post_release_source" >/dev/null 2>&1; then
+  echo 'Commit-range checker allowed a later range to continue before the release tag existed.' >&2
   exit 1
 fi
 
