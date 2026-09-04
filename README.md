@@ -17,7 +17,7 @@ A working bundled `gh` binary does **not** imply the shell can reach GitHub. `ag
 The finished bundle pins and verifies a deliberately small generic capability layer:
 
 - uv 0.12.5 and uv-managed CPython 3.13.14 from an explicitly pinned python-build-standalone build
-- Node.js 24.19.0 LTS with npm/npx
+- Node.js 24.19.0 LTS with npm/npx and bundled `yaml` 2.9.0
 - GitHub CLI, jq, yq, ripgrep, actionlint, gitleaks, ShellCheck, and Miller
 - a bounded Git-bundle handoff restorer that turns connector-downloaded repository artifacts into verified local worktrees without shell GitHub networking or credentials
 - a locked Python analysis layer with the HTTPX CLI completed, without project-specific pytest/setuptools/wheel requirements
@@ -64,7 +64,17 @@ Archive creation normalizes tar ordering/metadata, gzip headers, and the relocat
 Use `./build.sh --help` for output/cache options. Direct downloads, uv's managed-Python archive cache, uv's build cache, and pip's download cache are kept under `.download-cache/` and are never shipped. GitHub Actions derives the shared download-cache key with `scripts/download-cache-key.sh` from dependency/build-input pins plus `requirements.lock`; product-version/archive metadata such as `PRODUCT_VERSION` does not churn that cache, while every reused artifact is still verified by its own pinned hash before use.
 The PostgreSQL server is built during every full acceptance/distribution build from the exact official PostgreSQL 17.10 source tarball inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10 regenerates scanner sources during this build, so the exact qualified AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM is a pinned build-only input: its SHA-256 is verified, its package identity/signature are checked inside the pinned image, it is installed from local bytes with container networking disabled, and it is not shipped in the runtime. The builder keeps the normal installed PostgreSQL prefix and deterministic GNU `ar` mode; optional readline, zlib, and ICU integrations are disabled only to reduce external runtime dependencies. The source-controlled PostgreSQL client/plpgsql_check payloads remain separately qualified inputs and can be reproduced with `scripts/rebuild-qualified-database-assets.sh` using the same pinned/offline PostgreSQL build prerequisites.
 
-Direct third-party license/attribution texts for redistributed command/database/capsule components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. PostgreSQL server provenance terminates at the pinned official source artifact and pinned build image rather than an opaque prebuilt server bundle; the official PostgreSQL copyright notice is retained in the runtime.
+Direct third-party license/attribution texts for redistributed command/database/capsule/library components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. PostgreSQL server provenance terminates at the pinned official source artifact and pinned build image rather than an opaque prebuilt server bundle; the official PostgreSQL copyright notice is retained in the runtime.
+
+
+### Bundled Node libraries
+
+The portable Node runtime includes `yaml` 2.9.0 under its own `lib/node_modules`. The archive is version- and SHA-256-pinned in `versions.env`, verified during build, and available after activation through standard `NODE_PATH`; no target-repository install or Python/PyYAML detour is required.
+
+```bash
+source /path/to/erpi-agent-env/activate
+node -e 'const YAML=require("yaml"); console.log(YAML.parse("enabled: true").enabled)'
+```
 
 ## Offline Node capsule boundary
 

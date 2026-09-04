@@ -308,6 +308,13 @@ grep -F -- '--- PostgreSQL startup log ---' "$ROOT/templates/scripts/postgres.py
 grep -F 'package-lock.json is required' "$ROOT/templates/scripts/node-deps.py" >/dev/null
 ! grep -R -nE 'anon|authenticated|service_role' "$ROOT/templates/scripts/postgres.py" "$ROOT/templates/scripts/pgtap.py" "$ROOT/templates/scripts/node-deps.py"
 # pg-delta is runtime-owned, exactly locked, plan-only, and restricted to numeric loopback.
+grep -F 'NODE_YAML_VERSION="2.9.0"' "$ROOT/versions.env" >/dev/null
+grep -F 'NODE_YAML_SHA256="008fa204cb1ba700e0272ba045abbf09a6ffe63456e8146ba97cac6c2ad1ef91"' "$ROOT/versions.env" >/dev/null
+grep -F 'fetch "https://registry.npmjs.org/yaml/-/yaml-${NODE_YAML_VERSION}.tgz" "$NODE_YAML_AR"' "$ROOT/build.sh" >/dev/null
+grep -F 'verify_one "$NODE_YAML_AR" "$NODE_YAML_SHA256"' "$ROOT/build.sh" >/dev/null
+grep -F 'runtime/node/lib/node_modules/yaml' "$ROOT/build.sh" >/dev/null
+grep -F 'NODE_PATH="$ROOT/runtime/node/lib/node_modules${NODE_PATH:+:$NODE_PATH}"' "$ROOT/templates/bin/node-wrapper" >/dev/null
+grep -F 'require("yaml")' "$ROOT/README.md" >/dev/null
 grep -F 'PG_DELTA_VERSION="1.0.0-alpha.33"' "$ROOT/versions.env" >/dev/null
 grep -F 'PG_DELTA_LOCK_SHA256="fa6659239ce4e70738b5936f5690c2fdcf6bf2ef09e7c13a58c0009c8401bccf"' "$ROOT/versions.env" >/dev/null
 grep -F 'PG_DELTA_SUPABASE_CLI_BASELINE="2.114.0"' "$ROOT/versions.env" >/dev/null
@@ -363,4 +370,6 @@ require_contains 'for (( attempt=0; attempt<100; attempt++ )); do' "$ROOT/templa
 "$ROOT/tests/git-handoff-check.sh"
 node_fetch_count="$(grep -Fc 'fetch "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" "$NODE_AR"' "$ROOT/build.sh")"
 [[ "$node_fetch_count" == 1 ]] || { echo "Expected exactly one Node fetch call, found $node_fetch_count" >&2; exit 1; }
+node_yaml_fetch_count="$(grep -Fc 'fetch "https://registry.npmjs.org/yaml/-/yaml-${NODE_YAML_VERSION}.tgz" "$NODE_YAML_AR"' "$ROOT/build.sh")"
+[[ "$node_yaml_fetch_count" == 1 ]] || { echo "Expected exactly one Node yaml fetch call, found $node_yaml_fetch_count" >&2; exit 1; }
 echo "Builder static checks passed."

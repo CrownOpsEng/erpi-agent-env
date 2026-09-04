@@ -112,6 +112,13 @@ printf '{"a":1}\n' | jq -e '.a == 1' >/dev/null
 printf 'a: 1\n' | yq -e '.a == 1' >/dev/null
 printf 'agent-env\n' | rg -q agent-env
 node -e 'if (process.versions.node !== "24.19.0") process.exit(1)'
+node - <<'NODE_YAML'
+const YAML = require('yaml')
+if (require('yaml/package.json').version !== '2.9.0') process.exit(1)
+const parsed = YAML.parse('alpha: 1\nnested:\n  ok: true\n')
+if (parsed.alpha !== 1 || parsed.nested?.ok !== true) process.exit(1)
+if (YAML.parse(YAML.stringify(parsed)).nested?.ok !== true) process.exit(1)
+NODE_YAML
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-env-selftest.XXXXXX")"
 cleanup_tmp() { rm -rf "$TMP"; }

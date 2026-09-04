@@ -30,6 +30,7 @@ def main()->int:
       'bundled':{
         'python':probe(ROOT/'env/bin/python',['--version']),
         'node':probe(ROOT/'bin/node',['--version']),
+        'node_yaml':probe(ROOT/'bin/node',['-e',"const Y=require('yaml'); if(require('yaml/package.json').version!=='2.9.0'||Y.parse('a: 1').a!==1) process.exit(1); console.log('yaml 2.9.0')"]),
         'gh':probe(ROOT/'bin/gh',['--version']),
         'shellcheck':probe(ROOT/'bin/shellcheck',['--version']),
         'mlr':probe(ROOT/'bin/mlr',['--version']),

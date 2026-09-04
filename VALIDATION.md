@@ -43,6 +43,10 @@ The source-controlled PostgreSQL client and plpgsql_check payloads are qualified
 
 Any future server source, configure, build-image, Flex build-input, client, or extension-native change requires full source validation and runtime acceptance. A harness defect is fixed and the complete relevant qualification is rerun; partial progress is not promoted as success.
 
+## Bundled Node library boundary
+
+`yaml` 2.9.0 is part of the portable Node runtime. The npm archive version and SHA-256 are pinned, the builder installs its package payload directly under the bundled Node `lib/node_modules`, and runtime self-test must import, parse, and stringify YAML without modifying the target repository.
+
 ## Node capsule boundary
 
 Offline Node capsules supply immutable bytes only when a target repository's lock requests the exact pinned version and npm integrity. They never become dependency authority.

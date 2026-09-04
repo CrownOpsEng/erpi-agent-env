@@ -300,6 +300,24 @@ cp "$SELF_DIR/templates/bin/npx-wrapper" "$BUILD/bin/npx"
 chmod 0755 "$BUILD/bin/node" "$BUILD/bin/npm" "$BUILD/bin/npx"
 "$BUILD/bin/node" -e 'if (process.versions.node !== process.argv[1]) process.exit(1)' "$NODE_VERSION"
 
+log "Node yaml $NODE_YAML_VERSION"
+NODE_YAML_AR="$DL/yaml-${NODE_YAML_VERSION}.tgz"
+fetch "https://registry.npmjs.org/yaml/-/yaml-${NODE_YAML_VERSION}.tgz" "$NODE_YAML_AR"
+verify_one "$NODE_YAML_AR" "$NODE_YAML_SHA256"
+rm -rf "$BUILD/runtime/node/lib/node_modules/yaml"
+mkdir -p "$BUILD/runtime/node/lib/node_modules/yaml"
+tar -xzf "$NODE_YAML_AR" -C "$BUILD/runtime/node/lib/node_modules/yaml" --strip-components=1
+"$BUILD/env/bin/python" - "$BUILD/runtime/node/lib/node_modules/yaml/package.json" "$NODE_YAML_VERSION" <<'PY_NODE_YAML'
+import json, pathlib, sys
+package=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+expected=sys.argv[2]
+assert package.get('name') == 'yaml'
+assert package.get('version') == expected
+assert package.get('license') == 'ISC'
+assert package.get('engines', {}).get('node') == '>= 14.6'
+PY_NODE_YAML
+NODE_PATH="$BUILD/runtime/node/lib/node_modules" "$BUILD/bin/node" -e 'const Y=require("yaml"); if(require("yaml/package.json").version!==process.argv[1]||Y.parse("a: 1").a!==1) process.exit(1)' "$NODE_YAML_VERSION"
+
 log "pg-delta $PG_DELTA_VERSION plan-only runtime"
 PG_DELTA_LOCK="$SELF_DIR/vendor/pg-delta/package-lock.json"
 verify_one "$PG_DELTA_LOCK" "$PG_DELTA_LOCK_SHA256"
@@ -672,6 +690,7 @@ source_row component version url sha256
 source_row uv "$UV_VERSION" "https://releases.astral.sh/github/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256"
 source_row python-build-standalone "${PYTHON_VERSION}+${PYTHON_DISTRIBUTION_BUILD}" "$PYTHON_DISTRIBUTION_URL" "$PYTHON_DISTRIBUTION_SHA256"
 source_row node "$NODE_VERSION" "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" "$NODE_SHA256"
+source_row node-yaml "$NODE_YAML_VERSION" "https://registry.npmjs.org/yaml/-/yaml-$NODE_YAML_VERSION.tgz" "$NODE_YAML_SHA256"
 source_row gh "$GH_VERSION" "https://github.com/cli/cli/releases/download/v$GH_VERSION/gh_${GH_VERSION}_linux_amd64.tar.gz" "$GH_SHA256"
 source_row jq "$JQ_VERSION" "https://github.com/jqlang/jq/releases/download/jq-$JQ_VERSION/jq-linux-amd64" "$JQ_SHA256"
 source_row yq "$YQ_VERSION" "https://github.com/mikefarah/yq/releases/download/v$YQ_VERSION/yq_linux_amd64" "$YQ_SHA256"

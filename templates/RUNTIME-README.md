@@ -56,6 +56,14 @@ Database URLs are restricted to numeric loopback and query parameters capable of
 
 This is deliberately **plan-only**. The upstream pg-delta `apply` and `sync` commands are not exposed. Version 1.0.0-alpha.33 is pinned because it is the exact default used by the qualified Supabase CLI 2.114.0 baseline; useful, safe planning compatibility is the contract, not byte-for-byte parity with every Supabase CLI wrapper option. The emitted `transactionMode` metadata remains relevant to whatever repository-owned tooling reviews or applies a plan.
 
+## Bundled Node libraries
+
+The bundled Node runtime includes `yaml` 2.9.0. After activation it is available directly to Node scripts without installing anything into the target repository.
+
+```bash
+node -e 'const YAML=require("yaml"); console.log(YAML.parse("enabled: true").enabled)'
+```
+
 ## Offline repository-owned Node dependencies
 
 The immutable capsule store currently contains exact bytes for postgres 3.4.7, `@postgres-language-server/wasm` 0.25.7, fast-check 4.9.0 and pure-rand 8.4.2.

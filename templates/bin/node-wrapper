@@ -2,4 +2,5 @@
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 ROOT=$(CDPATH= cd -- "$HERE/.." && pwd -P)
+export NODE_PATH="$ROOT/runtime/node/lib/node_modules${NODE_PATH:+:$NODE_PATH}"
 exec "$ROOT/runtime/node/bin/node" "$@"
