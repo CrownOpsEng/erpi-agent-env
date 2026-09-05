@@ -40,6 +40,14 @@
       "sha256": "3ce449c758cb2ea0db7ff30a1b378d381d9e74681acec74e1e2591ea6aa381ca",
       "integrity": "sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==",
       "url": "https://registry.npmjs.org/pure-rand/-/pure-rand-8.4.2.tgz"
+    },
+    "commander": {
+      "component": "commander",
+      "version": "15.0.0",
+      "file": "commander-15.0.0.tgz",
+      "sha256": "632c1e039b31e98fa79c4fae5b10a5ffbbf9df0f21c9ffb3d74e95734b30696f",
+      "integrity": "sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==",
+      "url": "https://registry.npmjs.org/commander/-/commander-15.0.0.tgz"
     }
   }
 }

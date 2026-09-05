@@ -225,12 +225,12 @@ PY
 "$ROOT/bin/agent-env" node-deps --repo "$NODE_FIXTURE" hydrate >/dev/null
 (
   cd "$NODE_FIXTURE"
-  node --input-type=module -e 'import { parse as parseYaml, stringify as stringifyYaml } from "yaml"; import postgres from "postgres"; import * as pgls from "@postgres-language-server/wasm"; import * as fc from "fast-check"; import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus"; const parsed=parseYaml("enabled: true\n"); if(parsed.enabled!==true||parseYaml(stringifyYaml(parsed)).enabled!==true||typeof postgres!=="function"||typeof pgls!=="object"||typeof fc.assert!=="function"||typeof xoroshiro128plus!=="function") process.exit(1)'
+  node --input-type=module -e 'import { parse as parseYaml, stringify as stringifyYaml } from "yaml"; import postgres from "postgres"; import * as pgls from "@postgres-language-server/wasm"; import * as fc from "fast-check"; import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus"; import { Command } from "commander"; const parsed=parseYaml("enabled: true\n"); if(parsed.enabled!==true||parseYaml(stringifyYaml(parsed)).enabled!==true||typeof postgres!=="function"||typeof pgls!=="object"||typeof fc.assert!=="function"||typeof xoroshiro128plus!=="function"||typeof Command!=="function") process.exit(1)'
 )
 python - <<'PY' "$NODE_FIXTURE/node_modules/.agent-env-node-deps.json"
 import json,re,sys
 marker=json.load(open(sys.argv[1],encoding='utf-8'))
-assert marker['schema']==2 and len(marker['packages'])==5
+assert marker['schema']==2 and len(marker['packages'])==6
 for record in marker['packages'].values(): assert re.fullmatch(r'[0-9a-f]{64}',record['tree_sha256'])
 PY
 "$ROOT/bin/agent-env" node-deps --repo "$NODE_FIXTURE" clean >/dev/null

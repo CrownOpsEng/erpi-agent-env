@@ -58,7 +58,7 @@ This is deliberately **plan-only**. The upstream pg-delta `apply` and `sync` com
 
 ## Offline repository-owned Node dependencies
 
-The immutable capsule store currently contains exact bytes for `yaml` 2.9.0, postgres 3.4.7, `@postgres-language-server/wasm` 0.25.7, fast-check 4.9.0 and pure-rand 8.4.2.
+The immutable capsule store currently contains exact bytes for `yaml` 2.9.0, postgres 3.4.7, `@postgres-language-server/wasm` 0.25.7, fast-check 4.9.0, pure-rand 8.4.2 and `commander` 15.0.0.
 
 ```bash
 agent-env node-deps status
