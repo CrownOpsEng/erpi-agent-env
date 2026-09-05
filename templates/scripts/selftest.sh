@@ -15,32 +15,7 @@ export PYTHONPYCACHEPREFIX="$ROOT/state/pycache"
 mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$PIP_CACHE_DIR" "$NPM_CONFIG_CACHE" "$NPM_CONFIG_PREFIX" "$PYTHONPYCACHEPREFIX" "$ROOT/state/postgres"
 export PATH="$ROOT/env/bin:$ROOT/bin:$UV_TOOL_BIN_DIR:$NPM_CONFIG_PREFIX/bin:$PATH"
 
-"$ROOT/scripts/repair-python.sh" --quiet
-python - <<'PY'
-import csv, pathlib, sys, sysconfig, os
-root=pathlib.Path(os.environ['ERPI_AGENT_ENV']).resolve()
-site=pathlib.Path(sysconfig.get_path('purelib')).resolve(); assert site.is_relative_to(root/'env')
-for dist in sorted(site.glob('*.dist-info')):
-    cache=dist/'uv_cache.json'; record=dist/'RECORD'; cache_record=f'{dist.name}/uv_cache.json'
-    if cache.exists() or cache.is_symlink(): cache.unlink()
-    if record.is_file():
-        with record.open('r',encoding='utf-8',newline='') as h: rows=list(csv.reader(h))
-        kept=[r for r in rows if not (r and r[0]==cache_record)]
-        if len(kept)!=len(rows):
-            with record.open('w',encoding='utf-8',newline='') as h: csv.writer(h,lineterminator='\n').writerows(kept)
-assert pathlib.Path(sys.prefix).resolve()==root/'env'
-base=(root/'runtime/python/current').resolve()
-assert pathlib.Path(sysconfig.get_config_var('BINDIR')).resolve()==base/'bin'
-assert pathlib.Path(sysconfig.get_config_var('LIBDIR')).resolve()==base/'lib'
-assert '__ERPI_AGENT_PYTHON_PREFIX__' not in repr(sysconfig.get_config_vars())
-import httpx, jsonschema, packaging, yaml, tomlkit, rpds  # noqa: F401
-from yaml import CLoader
-assert CLoader is not None
-print('python-ok',sys.version.split()[0])
-PY
-
-real_python="$(readlink -f "$ROOT/env/bin/.python-real")"
-case "$real_python" in "$ROOT/runtime/python/"*) ;; *) echo "Venv interpreter escapes bundled runtime: $real_python" >&2; exit 1;; esac
+"$ROOT/scripts/python-smoke.sh"
 
 python - <<'PY_META'
 import csv, hashlib, json, os, pathlib, re
@@ -109,8 +84,6 @@ mlr --version | grep -F '6.20.2' >/dev/null
 "$ROOT/runtime/postgrest/postgrest" --version | grep -Fx 'PostgREST 14.16' >/dev/null
 supabase --version | grep -Fx '2.114.0' >/dev/null
 "$ROOT/runtime/supabase/supabase-go" --version | grep -Fx '2.114.0' >/dev/null
-httpx --help >/dev/null
-pip --version >/dev/null
 printf '{"a":1}\n' | jq -e '.a == 1' >/dev/null
 printf 'a: 1\n' | yq -e '.a == 1' >/dev/null
 printf 'agent-env\n' | rg -q agent-env

@@ -39,30 +39,35 @@ The supported runtime contract is GNU/Linux x86-64 with kernel >= 4.18, glibc >=
 
 ## Build
 
-Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256sum, find, sed/awk/grep, Git history containing the reachable version tags, a working Docker daemon, and internet access. Exported source trees without `.git` must provide the full `ERPI_AGENT_SOURCE_COMMIT`, `ERPI_AGENT_SOURCE_BASE_TAG`, `ERPI_AGENT_SOURCE_DISTANCE`, and `ERPI_AGENT_SOURCE_DESCRIPTION` tuple. No sudo is used. Docker is a builder capability only; it is not bundled into the runtime.
+Prerequisites: supported GNU/Linux x86-64, Bash, curl, GNU tar, xz/bzip2, sha256sum, find, sed/awk/grep, Git history containing the reachable version tags, internet access, and a working Docker daemon only when the derived PostgreSQL server cache is missing. Exported source trees without `.git` must provide the full `ERPI_AGENT_SOURCE_COMMIT`, `ERPI_AGENT_SOURCE_BASE_TAG`, `ERPI_AGENT_SOURCE_DISTANCE`, and `ERPI_AGENT_SOURCE_DESCRIPTION` tuple. No sudo is used. Docker is a builder capability only; it is not bundled into the runtime.
 
 ```bash
-./tests/static-check.sh
-./build.sh
+./tests/static-check.sh   # fast, network-free source/invariant gate
+./build.sh                # construct one distributable artifact
+./accept.sh               # deliberately run full runtime qualification
 ```
 
-`PRODUCT_VERSION` in `versions.env` is the product/build SemVer authority. Stable development may retain the released version, while corrections after a published prerelease use a numeric candidate-build revision such as `0.3.0-rc.1-1`. Git ancestry remains the exact source authority, and the builder derives artifact identity from the nearest reachable stable/prerelease tag, commit distance, and source SHA:
+`PRODUCT_VERSION` in `versions.env` is the product/build SemVer authority and owns the archive filename. Corrections after a published prerelease use a numeric candidate-build revision such as `0.3.0-rc.1-1`; clean release/prerelease promotions use that promoted version immediately, even before the matching tag exists. Git ancestry remains the independent exact source authority and is recorded in metadata rather than encoded into archive filenames:
 
 ```text
-stable descendant: erpi-agent-env-linux-x64-v0.1.1-17-g4c2fa17c9a1.tar.gz
-exact RC:          erpi-agent-env-linux-x64-v0.2.0-rc.1.tar.gz
-RC descendant:    erpi-agent-env-linux-x64-v0.2.0-rc.1-2-g91ab3c4d5e6f.tar.gz
-exact stable:      erpi-agent-env-linux-x64-v0.2.0.tar.gz
+stable development: erpi-agent-env-linux-x64-v0.1.1-17.tar.gz
+exact RC:           erpi-agent-env-linux-x64-v0.2.0-rc.1.tar.gz
+RC candidate build: erpi-agent-env-linux-x64-v0.2.0-rc.1-2.tar.gz
+next RC promotion:  erpi-agent-env-linux-x64-v0.2.0-rc.2.tar.gz
+exact stable:       erpi-agent-env-linux-x64-v0.2.0.tar.gz
 ```
 
-This is Git source identity, not invented SemVer. The numeric distance makes development order visible; the full 40-character source SHA, base tag, distance and source description are recorded in `manifest/environment.json` and `acceptance.json`; the archive SHA-256 identifies the exact bytes.
+Only ordinary development that deliberately retains an already-published product version adds the first-parent commit distance to avoid local filename collisions. Commit hashes never appear in archive filenames. The full 40-character source SHA, base tag, distance and source description remain recorded in `manifest/environment.json` and `acceptance.json`; the archive SHA-256 identifies the exact bytes.
 
 There is no `-dev` product version. After a published prerelease, corrections use numeric candidate-build revisions such as `0.3.0-rc.1-1`; those builds are development only and never trigger a tag or Release. The clean next RC is cut only after a revisioned build has passed the required real-world qualification, using a release-metadata-only `PRODUCT_VERSION`/release-request promotion change and immutable `v$PRODUCT_VERSION` tag. The release cut itself does not require a dedicated PR.
 
-Archive creation normalizes tar ordering/metadata, gzip headers, and the relocatable `pyvenv.cfg` placeholder so repeated packaging of the same accepted payload is byte-for-byte deterministic.
+Archive creation normalizes tar ordering/metadata, gzip headers, and the relocatable `pyvenv.cfg` placeholder. A normal build packages once; `accept.sh` independently reconstructs the archive from its untouched extraction and requires byte-for-byte equality.
 
-Use `./build.sh --help` for output/cache options. The connected builder uses one shared acquisition path for pinned direct artifacts: a valid cached artifact is reused, an invalid cache entry is discarded, and a missing artifact is downloaded from its pinned URL and SHA-256 verified before it becomes cache input. The exact python-build-standalone archive is acquired this way and handed to uv through a local mirror, preserving uv-managed Python installation while enforcing the recorded bytes. uv build cache plus pip/npm download caches are also kept under `.download-cache/` and are never shipped. Lock-driven pip/npm resolution remains connected during the build; inherited offline-only selectors are neutralized without discarding normal registry/index, proxy, CA, or authentication configuration. GitHub Actions derives the shared download-cache key with `scripts/download-cache-key.sh` from dependency/build-input pins plus `requirements.lock`; product-version/archive metadata such as `PRODUCT_VERSION` does not churn that cache.
-The PostgreSQL server is built during every full acceptance/distribution build from the exact official PostgreSQL 17.10 source tarball inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10 regenerates scanner sources during this build, so the exact qualified AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM is a pinned build-only input: its SHA-256 is verified, its package identity/signature are checked inside the pinned image, it is installed from local bytes with container networking disabled, and it is not shipped in the runtime. The builder keeps the normal installed PostgreSQL prefix and deterministic GNU `ar` mode; optional readline, zlib, and ICU integrations are disabled only to reduce external runtime dependencies. The source-controlled PostgreSQL client/plpgsql_check payloads remain separately qualified generated inputs because there is no canonical upstream binary artifact for them; `scripts/rebuild-qualified-database-assets.sh` reproduces them from pinned upstream sources using the same shared acquisition and digest-pinned Docker primitives.
+Use `./build.sh --help` for output/cache options. The connected builder uses one shared acquisition path for pinned direct artifacts: a valid cached artifact is reused, an invalid cache entry is discarded, and a missing artifact is downloaded from its pinned URL and SHA-256 verified before it becomes cache input. The exact python-build-standalone archive is acquired this way and handed to uv through a local mirror, preserving uv-managed Python installation while enforcing the recorded bytes. uv build cache plus pip/npm download caches are also kept under `.download-cache/` and are never shipped. Lock-driven pip/npm resolution remains connected during the build; inherited offline-only selectors are neutralized without discarding normal registry/index, proxy, CA, or authentication configuration. GitHub Actions derives the shared download-cache key from dependency/build inputs, locks, and the PostgreSQL build recipe; product-version/archive metadata such as `PRODUCT_VERSION` does not churn that cache.
+
+The PostgreSQL server remains derived from the exact official PostgreSQL 17.10 source tarball inside a digest-pinned manylinux 2.28 image. Cold builds compile it using the available host CPU count (override with `ERPI_BUILD_JOBS`); warm builds restore a self-contained derived server cache keyed by the PostgreSQL source SHA, Flex SHA, build-image digest, and exact build-recipe SHA, without reacquiring those source bytes or requiring Docker, then repeat the runtime ELF/dependency checks before inclusion. The exact qualified AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM remains a pinned build-only input and container networking stays disabled during compilation. The source-controlled PostgreSQL client/plpgsql_check payloads remain separately qualified generated inputs because there is no canonical upstream binary artifact for them; `scripts/rebuild-qualified-database-assets.sh` reproduces them from pinned upstream sources using the same shared acquisition, build recipe, parallelism, and progress-reporting primitives.
+
+Long operations use one shared status runner. The default heartbeat is every 15 seconds (`ERPI_PROGRESS_INTERVAL` may override it), failures print the captured log tail, and both `build.sh` and `accept.sh` print elapsed timing summaries so a slow phase is visible instead of appearing idle.
 
 Direct third-party license/attribution texts for redistributed command/database/capsule/library components are source-controlled under `vendor/licenses/` and copied into the runtime. ShellCheck is handled additionally under its GPL corresponding-source obligations: the runtime carries its license and exact pinned upstream source archive under `licenses/`. PostgreSQL server provenance terminates at the pinned official source artifact and pinned build image rather than an opaque prebuilt server bundle; the official PostgreSQL copyright notice is retained in the runtime.
 
@@ -75,7 +80,9 @@ Hydration is deliberately transactional and repository-contained. It validates a
 
 ## Acceptance
 
-The builder does not report success unless it verifies native assets, acquired capsule bytes, and source-controlled license inputs; creates the environment under hostile pathnames; builds the venv with uv relocation support; uses the source-frozen hashed Python lock; asserts exact managed-Python provenance; rejects absolute symlinks and old build-root residue; relocates to a deep Unicode/spaces path; exercises compiled Python code, HTTPX/ShellCheck/Miller, real offline Node capsule hydration/import/cleanup, and the PostgreSQL capability; destroys/rebuilds Python offline; exercises pgTAP failure handling, plpgsql_check, pg-delta source→target→clone convergence and remote-target refusal, real PostgREST role impersonation/pre-request/RPC privilege behavior plus remote-target refusal and signal cleanup, Supabase CLI relocation/version/init/migration behavior with its pinned Go companion, dump/restore, pg_amcheck, pgbench, child-exit propagation and signal cleanup; canonicalizes uv's optional timestamp metadata; verifies immutable files and symlink topology; validates the source TSV and third-party material; resets mutable state; archives; freshly extracts; and verifies again.
+`build.sh` constructs one artifact and performs construction-time integrity checks only. It does **not** run the complete integration suite, relocation torture, offline Python destruction/rebuild, or a second archive/extraction cycle.
+
+`accept.sh` owns those expensive proofs. It verifies the archive sidecar, extracts the exact artifact, reproduces the archive byte-for-byte from the untouched payload, checks embedded source identity, relocates it to a deep Unicode/spaces path, runs the complete runtime integration self-test exactly once, performs a Python-only offline destruction/rebuild proof, rejects stale relocation paths, and verifies the immutable payload again. The complete self-test covers compiled Python code, HTTPX/ShellCheck/Miller, real offline Node capsule hydration/import/cleanup, PostgreSQL/pgTAP/plpgsql_check, pg-delta convergence and remote-target refusal, PostgREST request semantics and process cleanup, Supabase CLI behavior, dump/restore, pg_amcheck, pgbench, child-exit propagation, signal cleanup, and the remaining runtime capability boundaries.
 
 `VALIDATION.md` defines the current evidence/authority model. It is intentionally **not** a per-build ledger. Successful **Accept runtime** runs generate machine-readable `acceptance.json` evidence; published GitHub Releases carry the authoritative archive, checksum sidecar, and acceptance metadata. Change rationale remains in Git history, execution evidence remains in GitHub Actions, and superseded narrative records are removed from the live tree once they stop serving current operation.
 
@@ -85,7 +92,7 @@ The builder does not report success unless it verifies native assets, acquired c
 
 Builder/recovery uv invocations ignore project/user uv configuration and Python artifact-selection overrides while preserving ordinary proxy and CA/system-certificate transport settings. The exact pinned python-build-standalone archive is downloaded and SHA-256 verified by the shared acquisition layer, then supplied to uv through its supported local mirror path. The temporary pip bootstrap wheel follows the same verified acquisition rule before execution.
 
-uv writes optional `*.dist-info/uv_cache.json` metadata containing installation time. Runtime self-test removes that nonfunctional cache record and its corresponding `RECORD` row so an offline rebuild restores the same checksum-covered venv.
+uv writes optional `*.dist-info/uv_cache.json` metadata containing installation time. Construction normalizes that nonfunctional cache record and its corresponding `RECORD` row before checksumming; the offline rebuild applies the same normalizer before its Python-only smoke and immutable verification.
 
 ## GitHub authentication
 
@@ -115,8 +122,8 @@ Normal changes use topic branches and pull requests. Branch commits are detailed
 The permanent workflows are:
 
 - **Validate** — source/static checks plus commit-history and PR-description policy on pull requests and `main`.
-- **Accept runtime** — full hydration/relocation/offline-rebuild/archive acceptance for payload-affecting `main` changes and deliberate runtime proof.
-- **Publish release** — stable/prerelease gate for an exact accepted source. It creates/verifies immutable `v$PRODUCT_VERSION`, prepares/reuses the matching draft Release, and marks prerelease versions as GitHub prereleases.
-- **Build distribution** — full tagged build. It verifies tag/SHA/product-version agreement, attaches archive/checksum/`acceptance.json`, then publishes the draft.
+- **Accept runtime** — builds one archive, runs `accept.sh`, writes `acceptance.json`, and retains the exact accepted archive/checksum/metadata as workflow evidence.
+- **Publish release** — stable/prerelease gate for an exact accepted source. It downloads and verifies the exact artifact retained by **Accept runtime**, creates/verifies immutable `v$PRODUCT_VERSION`, attaches those already-accepted bytes to the draft, and publishes without rebuilding them.
+- **Reproduce distribution** — optional manual audit path for independently rebuilding and accepting an existing immutable stable/prerelease tag. It never mutates or publishes a Release.
 
 For connector-only AI sessions, `.github/release-request.json` remains the auditable release command. `CONTRIBUTING.md` owns the exact record/version/release procedure. Enabling GitHub release immutability is recommended so published tags/assets cannot be altered.

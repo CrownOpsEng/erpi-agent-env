@@ -149,7 +149,7 @@ PRODUCT_VERSION="0.2.0-rc.2"
 .github/release-request.json → {"version":"0.2.0-rc.2"}
 ```
 
-After squash integration, **Accept runtime** proves that exact promotion commit. The permanent publisher may then create immutable tag `v0.2.0-rc.2`, build the exact tagged distribution, and publish only after the release checks complete.
+After squash integration, **Accept runtime** builds and qualifies that exact promotion commit and retains the accepted archive, checksum, and machine-generated acceptance metadata. The permanent publisher may then create immutable tag `v0.2.0-rc.2` at the accepted SHA and publish those exact accepted bytes after the release checks complete.
 
 A clean `alpha.N`, `beta.N`, `rc.N`, or final version is therefore a release assertion. A revisioned form such as `rc.1-4` is explicitly not one.
 
@@ -167,7 +167,7 @@ The final promotion receives full proof again. No runtime behavior change is smu
 
 ### Published immutability
 
-Published stable releases and prereleases are immutable. Never move/reuse a version tag or replace assets after publication. The release workflow is tag-first/draft-first: establish the exact tag, prepare the draft, build/attach/verify all artifacts, then publish. Enable GitHub release immutability administratively when available.
+Published stable releases and prereleases are immutable. Never move/reuse a version tag or replace assets after publication. The release workflow is tag-first/draft-first: establish the exact tag, prepare the draft, verify and attach the exact already-accepted artifacts, then publish. Enable GitHub release immutability administratively when available.
 
 ## Validation
 
@@ -179,7 +179,7 @@ for test_script in tests/*.sh; do
 done
 ```
 
-Runtime/payload changes require complete pre-merge acceptance. When the local host has working Docker, run `./build.sh` locally on the clean, committed final PR head. When local Docker is unavailable, push the final PR head, manually dispatch **Accept runtime** with that exact 40-character SHA as `target_ref`, and require the run to succeed immediately before merge. Do not substitute fragmented checks or an older branch run.
+Runtime/payload changes require complete pre-merge acceptance. When local build prerequisites are available, run `./build.sh` on the clean, committed final PR head and then run `./accept.sh` against the produced archive. `build.sh` constructs the artifact; `accept.sh` owns the expensive behavioral, relocation, offline-recovery, and reproducibility proofs. A verified warm PostgreSQL derived-cache hit does not require Docker; a cold miss does. If the local builder cannot complete, push the final PR head, manually dispatch **Accept runtime** with that exact 40-character SHA as `target_ref`, and require the run to succeed immediately before merge. Do not substitute fragmented checks or an older branch run.
 
 The post-merge **Accept runtime** run on the exact `main` SHA remains the release gate even when local or PR-head acceptance already passed. This ensures the squash-integrated bytes, immutable tag, and published artifacts all share one accepted source identity.
 
@@ -189,9 +189,11 @@ A connector-only session must not claim local checks it did not run. Obtain a co
 
 ## Release automation
 
-Revisioned candidate builds leave `.github/release-request.json` at the last published prerelease; `Publish release` must classify them as development and exit without tagging or publishing. Once qualification earns promotion, a metadata-only release cut updates `PRODUCT_VERSION` and `.github/release-request.json` to the same clean stable/prerelease version. That cut does not require a dedicated PR. After the promotion reaches `main`, **Accept runtime** runs on the exact mainline commit. A successful mainline acceptance triggers `Publish release`, which verifies the promotion record, creates/verifies immutable `v$PRODUCT_VERSION`, prepares/reuses a matching draft Release, and dispatches `Build distribution` against the real tag. Prerelease versions are published as GitHub prereleases.
+Revisioned candidate builds leave `.github/release-request.json` at the last published prerelease; `Publish release` must classify them as development and exit without tagging or publishing. Once qualification earns promotion, a metadata-only release cut updates `PRODUCT_VERSION` and `.github/release-request.json` to the same clean stable/prerelease version. That cut does not require a dedicated PR. After the promotion reaches `main`, **Accept runtime** builds and qualifies the exact mainline source, writes `acceptance.json`, and retains the accepted archive/checksum/metadata as workflow evidence.
 
-`Build distribution` checks out the tag, verifies tag/SHA/product-version/source-description agreement, repeats the complete runtime build, writes `acceptance.json`, attaches archive/checksum/metadata to the draft, and only then publishes it.
+A successful mainline acceptance triggers `Publish release`. Publication verifies that exact successful acceptance run and retained artifact, creates/verifies immutable `v$PRODUCT_VERSION` at the accepted SHA, attaches the already-accepted bytes to the matching draft Release, and publishes without rebuilding them. Prerelease versions are published as GitHub prereleases.
+
+**Reproduce distribution** remains available as an explicit manual audit path. It checks out an existing immutable release/prerelease tag, independently rebuilds and accepts it, and uploads reproduction evidence only. It does not attach or publish release assets and is not part of the normal release path.
 
 Manual `Publish release` dispatch exists for idempotent recovery of an already accepted release source. `.github/release-request.json` contains only the requested version and is an auditable release command, not a second version authority.
 

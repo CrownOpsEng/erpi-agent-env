@@ -13,7 +13,7 @@ on:
         type: string
 
 permissions:
-  actions: write
+  actions: read
   contents: write
 
 concurrency:
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Prepare accepted release
+    name: Publish exact accepted distribution
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
@@ -39,15 +39,15 @@ jobs:
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
             target_ref="${{ github.event.workflow_run.head_sha }}"
-            accepted_by_trigger=true
+            trigger_run_id="${{ github.event.workflow_run.id }}"
           else
             target_ref="$MANUAL_TARGET"
-            accepted_by_trigger=false
+            trigger_run_id=""
           fi
           printf 'target_ref=%s\n' "$target_ref" >> "$GITHUB_OUTPUT"
-          printf 'accepted_by_trigger=%s\n' "$accepted_by_trigger" >> "$GITHUB_OUTPUT"
+          printf 'trigger_run_id=%s\n' "$trigger_run_id" >> "$GITHUB_OUTPUT"
 
-      - name: Check out target
+      - name: Check out accepted target
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -66,7 +66,6 @@ jobs:
           base_version="${base_tag#v}"
           request_version="$(jq -er 'if (keys == ["version"] and (.version | type) == "string") then .version else error("invalid release request") end' .github/release-request.json)"
 
-          # Revisioned prerelease builds are qualification inputs, never release cuts.
           if [[ "$PRODUCT_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[1-9][0-9]*)-([1-9][0-9]*)$ ]]; then
             candidate_base="${BASH_REMATCH[1]}"
             [[ "$candidate_base" == "$base_version" ]] || {
@@ -86,8 +85,6 @@ jobs:
             echo "Release request version $request_version does not match promoted PRODUCT_VERSION $PRODUCT_VERSION." >&2
             exit 1
           }
-
-          # A normal stable-development descendant already attached to the matching tag is not a release request.
           if [[ "$PRODUCT_VERSION" == "$base_version" && "$distance" != 0 ]]; then
             echo "Source $target_sha is ordinary development from $base_tag; no release/prerelease will be published."
             echo 'publish=false' >> "$GITHUB_OUTPUT"
@@ -102,43 +99,72 @@ jobs:
           echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
           echo "version=$PRODUCT_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Verify acceptance and prepare release tag/draft
+      - name: Retrieve and verify exact acceptance evidence
+        if: steps.gate.outputs.publish == 'true'
+        id: evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.gate.outputs.target_sha }}
+          PRODUCT_VERSION: ${{ steps.gate.outputs.version }}
+          TRIGGER_RUN_ID: ${{ steps.request.outputs.trigger_run_id }}
+        run: |
+          set -euo pipefail
+          run_id="$TRIGGER_RUN_ID"
+          if [[ -z "$run_id" ]]; then
+            run_id="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&per_page=100" \
+              --jq '[.workflow_runs[] | select(.name == "Accept runtime" and .status == "completed" and .conclusion == "success")] | sort_by(.run_number) | last | .id // empty')"
+          fi
+          [[ -n "$run_id" ]] || { echo "No successful Accept runtime run found for $TARGET_SHA." >&2; exit 1; }
+
+          run_record="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+          [[ "$(jq -r '.name' <<<"$run_record")" == 'Accept runtime' ]] || { echo "Run $run_id is not Accept runtime." >&2; exit 1; }
+          [[ "$(jq -r '.head_sha' <<<"$run_record")" == "$TARGET_SHA" ]] || { echo "Acceptance run $run_id targets a different SHA." >&2; exit 1; }
+          [[ "$(jq -r '.status + ":" + .conclusion' <<<"$run_record")" == 'completed:success' ]] || { echo "Acceptance run $run_id is not successfully completed." >&2; exit 1; }
+
+          rm -rf accepted
+          mkdir accepted
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name "acceptance-$TARGET_SHA" --dir accepted
+          metadata="accepted/acceptance.json"
+          [[ -f "$metadata" ]] || { echo 'Acceptance metadata missing from retained artifact.' >&2; exit 1; }
+          [[ "$(jq -r '.status' "$metadata")" == accepted ]] || { echo 'Acceptance metadata is not accepted.' >&2; exit 1; }
+          [[ "$(jq -r '.source.commit' "$metadata")" == "$TARGET_SHA" ]] || { echo 'Acceptance metadata source SHA mismatch.' >&2; exit 1; }
+          [[ "$(jq -r '.product_version' "$metadata")" == "$PRODUCT_VERSION" ]] || { echo 'Acceptance metadata product version mismatch.' >&2; exit 1; }
+          [[ "$(jq -r '.workflow.run_id' "$metadata")" == "$run_id" ]] || { echo 'Acceptance metadata run ID mismatch.' >&2; exit 1; }
+
+          archive_name="$(jq -er '.artifact.filename' "$metadata")"
+          expected_digest="$(jq -er '.artifact.sha256' "$metadata")"
+          archive="accepted/$archive_name"
+          sidecar="$archive.sha256"
+          [[ -f "$archive" && -f "$sidecar" ]] || { echo 'Retained archive or checksum sidecar missing.' >&2; exit 1; }
+          (cd accepted && sha256sum -c "$(basename -- "$sidecar")") >/dev/null
+          actual_digest="$(sha256sum "$archive" | awk '{print $1}')"
+          [[ "$actual_digest" == "$expected_digest" ]] || { echo 'Retained archive digest disagrees with acceptance metadata.' >&2; exit 1; }
+
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "sidecar=$sidecar" >> "$GITHUB_OUTPUT"
+          echo "metadata=$metadata" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare immutable tag and draft release
         if: steps.gate.outputs.publish == 'true'
         id: release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          ACCEPTED_BY_TRIGGER: ${{ steps.request.outputs.accepted_by_trigger }}
           TARGET_SHA: ${{ steps.gate.outputs.target_sha }}
           PRODUCT_VERSION: ${{ steps.gate.outputs.version }}
         run: |
           set -euo pipefail
           release_tag="v${PRODUCT_VERSION}"
           published=false
-
-          if [[ "$ACCEPTED_BY_TRIGGER" != true ]]; then
-            accepted="$(gh api \
-              -H 'Accept: application/vnd.github+json' \
-              "/repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&per_page=100" \
-              --jq 'any(.workflow_runs[]; .name == "Accept runtime" and .status == "completed" and .conclusion == "success")')"
-            [[ "$accepted" == true ]] || {
-              echo "Target $TARGET_SHA has no successful completed Accept runtime run." >&2
-              exit 1
-            }
-          fi
-
           if tag_sha="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" --jq .object.sha 2>/dev/null)"; then
             [[ "$tag_sha" == "$TARGET_SHA" ]] || {
               echo "Immutable tag $release_tag already points to $tag_sha, not accepted target $TARGET_SHA." >&2
               exit 1
             }
-            echo "Release tag $release_tag already points to accepted target $TARGET_SHA."
           else
-            gh api --method POST \
-              "/repos/$GITHUB_REPOSITORY/git/refs" \
-              -f "ref=refs/tags/$release_tag" \
-              -f "sha=$TARGET_SHA" >/dev/null
-            echo "Created release tag $release_tag at accepted target $TARGET_SHA."
+            gh api --method POST "/repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$release_tag" -f "sha=$TARGET_SHA" >/dev/null
           fi
 
           expected_prerelease=false
@@ -147,39 +173,32 @@ jobs:
             --jq ".[] | select(.tag_name == \"$release_tag\") | [.draft,.prerelease,.target_commitish] | @tsv" | sed -n '1p')"
           if [[ -n "$existing" ]]; then
             IFS=$'\t' read -r is_draft is_prerelease release_target <<<"$existing"
-            [[ "$is_prerelease" == "$expected_prerelease" ]] || {
-              echo "Existing release prerelease flag $is_prerelease disagrees with PRODUCT_VERSION $PRODUCT_VERSION." >&2
-              exit 1
-            }
+            [[ "$is_prerelease" == "$expected_prerelease" ]] || { echo 'Existing Release prerelease flag disagrees with product version.' >&2; exit 1; }
             if [[ "$is_draft" == true ]]; then
-              if [[ "$release_target" != "$TARGET_SHA" ]]; then
-                gh release edit "$release_tag" --repo "$GITHUB_REPOSITORY" --target "$TARGET_SHA" --draft=true >/dev/null
-              fi
-              echo "Reusing matching draft release $release_tag."
+              [[ "$release_target" == "$TARGET_SHA" ]] || gh release edit "$release_tag" --repo "$GITHUB_REPOSITORY" --target "$TARGET_SHA" --draft=true >/dev/null
             else
               published=true
-              echo "Release $release_tag is already published at the accepted immutable tag/SHA."
             fi
           else
             args=(release create "$release_tag" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$release_tag" --generate-notes --draft)
             [[ "$expected_prerelease" == true ]] && args+=(--prerelease)
             gh "${args[@]}"
-            echo "Prepared draft release $release_tag for $TARGET_SHA."
           fi
-
           echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
           echo "published=$published" >> "$GITHUB_OUTPUT"
 
-      - name: Dispatch release distribution build
+      - name: Attach exact accepted distribution
         if: steps.gate.outputs.publish == 'true' && steps.release.outputs.published != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          ARCHIVE: ${{ steps.evidence.outputs.archive }}
+          SIDECAR: ${{ steps.evidence.outputs.sidecar }}
+          METADATA: ${{ steps.evidence.outputs.metadata }}
         run: |
           set -euo pipefail
-          gh workflow run build-dist.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f release_tag="$RELEASE_TAG"
-          echo "Dispatched Build distribution for draft $RELEASE_TAG."
+          is_draft="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .draft" | sed -n '1p')"
+          [[ "$is_draft" == true ]] || { echo "Release $RELEASE_TAG is no longer a draft; refusing to alter immutable assets." >&2; exit 1; }
+          gh release upload "$RELEASE_TAG" "$ARCHIVE" "$SIDECAR" "$METADATA" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false

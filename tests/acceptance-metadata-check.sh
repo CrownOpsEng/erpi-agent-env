@@ -16,7 +16,7 @@ else
   distance=40
 fi
 description="${base_tag}-${distance}-g0123456789ab"
-artifact="erpi-agent-env-linux-x64-${description}.tar.gz"
+artifact="erpi-agent-env-linux-x64-v${product_version}.tar.gz"
 printf 'payload\n' > "$TMP/$artifact"
 digest="$(sha256sum "$TMP/$artifact" | awk '{print $1}')"
 printf '%s  %s\n' "$digest" "$artifact" > "$TMP/test.sha256"
@@ -71,7 +71,7 @@ if python3 "$ROOT/scripts/write-acceptance-metadata.py" \
   --run-id 124 \
   --run-attempt 1 \
   --event push >/dev/null 2>&1; then
-  echo 'Acceptance metadata accepted an artifact name that did not match source identity.' >&2
+  echo 'Acceptance metadata accepted an artifact name that did not match product/build identity.' >&2
   exit 1
 fi
 
@@ -104,7 +104,7 @@ cat > "$TMP/candidate.env" <<'ENV'
 PRODUCT_VERSION="0.2.0-rc.1-1"
 TARGET="linux-x86_64-gnu"
 ENV
-candidate_artifact='erpi-agent-env-linux-x64-v0.2.0-rc.1-1-g0123456789ab.tar.gz'
+candidate_artifact='erpi-agent-env-linux-x64-v0.2.0-rc.1-1.tar.gz'
 printf 'candidate\n' > "$TMP/$candidate_artifact"
 candidate_digest="$(sha256sum "$TMP/$candidate_artifact" | awk '{print $1}')"
 printf '%s  %s\n' "$candidate_digest" "$candidate_artifact" > "$TMP/candidate.sha256"

@@ -64,7 +64,15 @@ compute_build_identity() {
   SOURCE_BASE_TAG_ID="$source_base_tag"
   SOURCE_DISTANCE_ID="$source_distance"
   SOURCE_DESCRIPTION_ID="$source_description"
-  ARTIFACT_STEM="erpi-agent-env-${artifact_platform}-${source_description}"
+  local artifact_version="v${product_version}"
+  # Product/build version owns the archive name. Ordinary development that
+  # deliberately retains an already-published stable/prerelease version adds
+  # only the first-parent distance to avoid local filename collisions. Exact
+  # source SHA/ancestry remain metadata and never leak into the filename.
+  if [[ "$source_distance" != 0 && "$product_version" == "$tag_version" ]]; then
+    artifact_version="${artifact_version}-${source_distance}"
+  fi
+  ARTIFACT_STEM="erpi-agent-env-${artifact_platform}-${artifact_version}"
   export PRODUCT_VERSION_ID SOURCE_COMMIT_ID SOURCE_BASE_TAG_ID SOURCE_DISTANCE_ID SOURCE_DESCRIPTION_ID ARTIFACT_STEM
 }
 

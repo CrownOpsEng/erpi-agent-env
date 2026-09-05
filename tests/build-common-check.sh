@@ -48,4 +48,23 @@ PIP_INDEX_URL='https://mirror.example/simple' PIP_NO_INDEX=1 build_connected_pip
 NPM_CONFIG_REGISTRY='https://registry.example/' NPM_CONFIG_OFFLINE=true NPM_CONFIG_PREFER_OFFLINE=true build_connected_npm \
   bash -ceu '[[ "$NPM_CONFIG_OFFLINE" == false && "$NPM_CONFIG_PREFER_OFFLINE" == false && "$NPM_CONFIG_REGISTRY" == https://registry.example/ ]]'
 
+# Long-running execution reports progress without delaying completion and records timing.
+BUILD_PROGRESS_INTERVAL_SECONDS=1
+build_run_logged 'heartbeat probe' "$TMP/heartbeat.log" bash -ceu 'sleep 2; echo done'
+grep -Fx 'done' "$TMP/heartbeat.log" >/dev/null
+[[ ${#BUILD_TIMING_NAMES[@]} -ge 1 ]]
+[[ "${BUILD_TIMING_NAMES[-1]}" == 'heartbeat probe' ]]
+
+# Build parallelism is centrally resolved and overrideable.
+ERPI_BUILD_JOBS=7
+[[ "$(build_jobs)" == 7 ]]
+unset ERPI_BUILD_JOBS
+
+# Archive construction is deterministic for the same tree and timestamp.
+mkdir -p "$TMP/archive-root/root"
+printf 'x\n' > "$TMP/archive-root/root/file"
+build_write_archive "$TMP/archive-root/root" "$TMP/a.tar.gz" '2026-08-20T04:30:00Z'
+build_write_archive "$TMP/archive-root/root" "$TMP/b.tar.gz" '2026-08-20T04:30:00Z'
+cmp -s "$TMP/a.tar.gz" "$TMP/b.tar.gz"
+
 echo 'Shared build acquisition checks passed.'

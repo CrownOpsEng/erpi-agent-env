@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PUBLISH="$ROOT/.github/workflows/publish-release.yml"
-BUILD="$ROOT/.github/workflows/build-dist.yml"
+REPRO="$ROOT/.github/workflows/reproduce-distribution.yml"
 ACCEPT="$ROOT/.github/workflows/accept-runtime.yml"
 VALIDATE="$ROOT/.github/workflows/validate.yml"
 REQUEST="$ROOT/.github/release-request.json"
@@ -11,9 +11,10 @@ VALIDATION="$ROOT/VALIDATION.md"
 AGENTS="$ROOT/AGENTS.md"
 CONTRIBUTING="$ROOT/CONTRIBUTING.md"
 
-for file in "$PUBLISH" "$BUILD" "$ACCEPT" "$VALIDATE" "$REQUEST" "$README" "$VALIDATION" "$AGENTS" "$CONTRIBUTING"; do
+for file in "$PUBLISH" "$REPRO" "$ACCEPT" "$VALIDATE" "$REQUEST" "$README" "$VALIDATION" "$AGENTS" "$CONTRIBUTING"; do
   [[ -s "$file" ]] || { echo "Required release/routing source missing: $file" >&2; exit 1; }
 done
+[[ ! -e "$ROOT/.github/workflows/build-dist.yml" ]] || { echo 'Legacy publication rebuild workflow must not remain.' >&2; exit 1; }
 
 python3 - <<'PY' "$REQUEST"
 import json, pathlib, re, sys
@@ -36,6 +37,10 @@ grep -F 'manually dispatch **Accept runtime** with that exact 40-character SHA a
 grep -F 'target_ref:' "$ACCEPT" >/dev/null
 grep -F 'ref: ${{ inputs.target_ref || github.sha }}' "$ACCEPT" >/dev/null
 grep -F 'automatic post-merge run on the exact `main` SHA remains mandatory' "$VALIDATION" >/dev/null
+grep -F 'run: ./build.sh' "$ACCEPT" >/dev/null
+grep -F 'run: ./accept.sh' "$ACCEPT" >/dev/null
+grep -F 'name: Retain exact accepted distribution' "$ACCEPT" >/dev/null
+grep -F 'dist/*.tar.gz' "$ACCEPT" >/dev/null
 
 # Successful main acceptance is the automatic release handoff; manual dispatch is recovery/idempotent.
 grep -F 'workflow_run:' "$PUBLISH" >/dev/null
@@ -47,49 +52,41 @@ grep -F 'ordinary development from $base_tag; no release/prerelease will be publ
 grep -F 'candidate build $PRODUCT_VERSION from $base_tag; no release/prerelease will be published' "$PUBLISH" >/dev/null
 grep -F 'Candidate build $PRODUCT_VERSION must leave release request at $base_version' "$PUBLISH" >/dev/null
 
-# Exact tag creation precedes draft creation; tags and published assets are never repointed/replaced.
+# Publisher verifies and consumes exact acceptance evidence instead of rebuilding.
+grep -F 'gh run download "$run_id"' "$PUBLISH" >/dev/null
+grep -F 'acceptance-$TARGET_SHA' "$PUBLISH" >/dev/null
+grep -F "'.source.commit'" "$PUBLISH" >/dev/null
+grep -F "'.artifact.sha256'" "$PUBLISH" >/dev/null
+grep -F 'sha256sum -c' "$PUBLISH" >/dev/null
+! grep -F './build.sh' "$PUBLISH" >/dev/null
+! grep -F 'gh workflow run' "$PUBLISH" >/dev/null
+
+# Immutable tag/draft semantics remain intact and accepted bytes attach before publication.
 grep -F 'git/ref/tags/$release_tag' "$PUBLISH" >/dev/null
-grep -F '"ref=refs/tags/$release_tag"' "$PUBLISH" >/dev/null
-grep -F '"sha=$TARGET_SHA"' "$PUBLISH" >/dev/null
+grep -F 'ref=refs/tags/$release_tag' "$PUBLISH" >/dev/null
+grep -F 'sha=$TARGET_SHA' "$PUBLISH" >/dev/null
 grep -F 'Immutable tag $release_tag already points to' "$PUBLISH" >/dev/null
 grep -F -- '--verify-tag' "$PUBLISH" >/dev/null
 grep -F -- '--draft' "$PUBLISH" >/dev/null
 grep -F 'args+=(--prerelease)' "$PUBLISH" >/dev/null
-grep -F 'gh workflow run build-dist.yml' "$PUBLISH" >/dev/null
+grep -F 'gh release upload "$RELEASE_TAG" "$ARCHIVE" "$SIDECAR" "$METADATA"' "$PUBLISH" >/dev/null
+grep -F 'gh release edit "$RELEASE_TAG"' "$PUBLISH" >/dev/null
 
-if grep -nE 'git/ref/tags/.*\|\|[[:space:]]*true' "$PUBLISH" "$BUILD"; then
-  echo "Do not suppress tag-ref lookup failures into nonempty JSON values." >&2
-  exit 1
-fi
-grep -F 'if tag_sha="$(gh api' "$PUBLISH" >/dev/null
-grep -F 'if ! tag_sha="$(gh api' "$BUILD" >/dev/null
-
-tag_line="$(grep -nF '"ref=refs/tags/$release_tag"' "$PUBLISH" | cut -d: -f1)"
-create_line="$(grep -nF 'args=(release create "$release_tag"' "$PUBLISH" | cut -d: -f1)"
-[[ -n "$tag_line" && -n "$create_line" && "$tag_line" -lt "$create_line" ]] || {
-  echo "Release tag must be created/verified before draft Release creation." >&2
-  exit 1
-}
-
-# Distribution builds are exact-tag builds with complete source ancestry provenance.
-grep -F 'expected="v${PRODUCT_VERSION}"' "$BUILD" >/dev/null
-grep -F 'steps.source.outputs.distance' "$BUILD" >/dev/null
-grep -F 'steps.source.outputs.description' "$BUILD" >/dev/null
-grep -F 'Tagged distribution must build from exact tag' "$BUILD" >/dev/null
-grep -F 'ERPI_AGENT_SOURCE_BASE_TAG: ${{ steps.source.outputs.base_tag }}' "$BUILD" >/dev/null
-grep -F 'ERPI_AGENT_SOURCE_DISTANCE: ${{ steps.source.outputs.distance }}' "$BUILD" >/dev/null
-grep -F 'ERPI_AGENT_SOURCE_DESCRIPTION: ${{ steps.source.outputs.description }}' "$BUILD" >/dev/null
-grep -F 'prerelease flag' "$BUILD" >/dev/null
-grep -F 'refusing to replace immutable assets' "$BUILD" >/dev/null
-grep -F 'gh release upload "$RELEASE_TAG"' "$BUILD" >/dev/null
-grep -F 'gh release edit "$RELEASE_TAG" --draft=false' "$BUILD" >/dev/null
-
-attach_line="$(grep -nF 'gh release upload "$RELEASE_TAG"' "$BUILD" | cut -d: -f1)"
-publish_line="$(grep -nF 'gh release edit "$RELEASE_TAG" --draft=false' "$BUILD" | cut -d: -f1)"
+attach_line="$(grep -nF 'gh release upload "$RELEASE_TAG"' "$PUBLISH" | cut -d: -f1)"
+publish_line="$(grep -nF 'gh release edit "$RELEASE_TAG"' "$PUBLISH" | tail -1 | cut -d: -f1)"
 [[ -n "$attach_line" && -n "$publish_line" && "$attach_line" -lt "$publish_line" ]] || {
-  echo "Release assets must be attached before the draft is published." >&2
+  echo 'Accepted assets must attach before the draft is published.' >&2
   exit 1
 }
+
+# Independent reproduction is audit-only and never mutates a Release.
+grep -F 'name: Reproduce distribution' "$REPRO" >/dev/null
+grep -F 'required: true' "$REPRO" >/dev/null
+grep -F 'run: ./build.sh' "$REPRO" >/dev/null
+grep -F 'run: ./accept.sh' "$REPRO" >/dev/null
+grep -F -- '--release-tag "$RELEASE_TAG"' "$REPRO" >/dev/null
+! grep -F 'gh release upload' "$REPRO" >/dev/null
+! grep -F 'gh release edit' "$REPRO" >/dev/null
 
 # Current-state authority remains version-neutral and routes rather than duplicating procedure.
 ! grep -F 'v1.0.0' "$README"

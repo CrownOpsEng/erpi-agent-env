@@ -159,26 +159,20 @@ grep -F 'PIP_CACHE_DIR="$BUILDER_PIP_CACHE"' "$ROOT/build.sh" >/dev/null
 grep -F 'normalize-python-links.sh" "$BUILD/runtime/python"' "$ROOT/build.sh" >/dev/null
 # uv-managed Python sysconfig is normalized into a location-neutral, immutable file.
 grep -F '__ERPI_AGENT_PYTHON_PREFIX__' "$ROOT/scripts/normalize-python-sysconfig.py" >/dev/null
-grep -F "sysconfig.get_config_var('BINDIR')" "$ROOT/templates/scripts/selftest.sh" >/dev/null
-# Native/compiled Python and uv-generated console entrypoints are exercised after each relocation/rebuild.
-grep -F 'import httpx, jsonschema, packaging, yaml, tomlkit, rpds' "$ROOT/templates/scripts/selftest.sh" >/dev/null
-grep -F 'from yaml import CLoader' "$ROOT/templates/scripts/selftest.sh" >/dev/null
-! grep -F 'pytest --version' "$ROOT/templates/scripts/selftest.sh"
-grep -Fx 'pip --version >/dev/null' "$ROOT/templates/scripts/selftest.sh" >/dev/null
-# Offline rebuilds must canonicalize uv's timestamp-bearing installer metadata before integrity verification.
-grep -F "cache=dist/'uv_cache.json'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
-grep -F "cache_record=f'{dist.name}/uv_cache.json'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
-grep -F "csv.writer(h,lineterminator='\\n').writerows(kept)" "$ROOT/templates/scripts/selftest.sh" >/dev/null
-selftest_line="$(grep -nF '"$ROOT/scripts/selftest.sh"' "$ROOT/templates/scripts/rebuild-python.sh" | cut -d: -f1)"
-verify_line="$(grep -nF '"$ROOT/scripts/verify.sh"' "$ROOT/templates/scripts/rebuild-python.sh" | cut -d: -f1)"
-[[ -n "$selftest_line" && -n "$verify_line" && "$selftest_line" -lt "$verify_line" ]] || {
-  echo "Offline rebuild must canonicalize through selftest before immutable verification." >&2
-  exit 1
-}
-# pyvenv.cfg is the sole relocation-mutable venv file: preserve uv metadata and patch only `home`.
-grep -F -- "--exclude='pyvenv.cfg' \"\$ORIGINAL_BUILD_ROOT\"" "$ROOT/build.sh" >/dev/null
+grep -F "sysconfig.get_config_var('BINDIR')" "$ROOT/templates/scripts/python-smoke.sh" >/dev/null
+# Native/compiled Python and console entrypoints have a bounded subsystem smoke check.
+grep -F 'import httpx, jsonschema, packaging, yaml, tomlkit, rpds' "$ROOT/templates/scripts/python-smoke.sh" >/dev/null
+grep -F 'from yaml import CLoader' "$ROOT/templates/scripts/python-smoke.sh" >/dev/null
+! grep -F 'pytest --version' "$ROOT/templates/scripts/python-smoke.sh"
+grep -Fx 'pip --version >/dev/null' "$ROOT/templates/scripts/python-smoke.sh" >/dev/null
+# Timestamp-bearing uv metadata is normalized during construction and offline rebuild, not behavioral self-test.
+grep -F 'normalize-python-metadata.py" "$BUILD/env"' "$ROOT/build.sh" >/dev/null
+grep -F 'normalize-python-metadata.py" "$ROOT/env"' "$ROOT/templates/scripts/rebuild-python.sh" >/dev/null
+grep -F 'python-smoke.sh' "$ROOT/templates/scripts/rebuild-python.sh" >/dev/null
+! grep -F 'selftest.sh' "$ROOT/templates/scripts/rebuild-python.sh"
+# pyvenv.cfg is the sole declared relocation-mutable venv file.
 ! grep -F 'executable = $PYROOT_LINK' "$ROOT/templates/scripts/repair-python.sh"
-grep -F 'Fresh extraction retained its archive-build location' "$ROOT/build.sh" >/dev/null
+grep -F 'Hostile relocation retained the original extraction path' "$ROOT/accept.sh" >/dev/null
 # GitHub OAuth must not persist a relocatable gh path into host-global Git config.
 grep -F 'GH_PROMPT_DISABLED=1 gh auth login --hostname "$HOST" --git-protocol https --web' "$ROOT/templates/scripts/github.sh" >/dev/null
 grep -F "git config --local --add credential.https://github.com.helper '!gh auth git-credential'" "$ROOT/templates/scripts/github.sh" >/dev/null
@@ -230,9 +224,9 @@ grep -F '@SOURCE_COMMIT@' "$ROOT/templates/RUNTIME-README.md" >/dev/null
 grep -F 'shellcheck-v${SHELLCHECK_VERSION}-source.tar.gz' "$ROOT/build.sh" >/dev/null
 grep -F 'SHELLCHECK_SOURCE_SHA256' "$ROOT/build.sh" >/dev/null
 grep -F '__ERPI_AGENT_RELOCATE__/runtime/python/current/bin' "$ROOT/build.sh" >/dev/null
-grep -F -- '--sort=name --format=gnu --numeric-owner --owner=0 --group=0' "$ROOT/build.sh" >/dev/null
-grep -F 'gzip -n > "$dest"' "$ROOT/build.sh" >/dev/null
-grep -F 'Archive packaging is not deterministic for the accepted payload.' "$ROOT/build.sh" >/dev/null
+grep -F -- '--sort=name --format=gnu --numeric-owner --owner=0 --group=0' "$ROOT/scripts/build-common.sh" >/dev/null
+grep -F 'gzip -n > "$dest"' "$ROOT/scripts/build-common.sh" >/dev/null
+grep -F 'Archive packaging is not deterministic for the accepted payload.' "$ROOT/accept.sh" >/dev/null
 grep -F 'Immutable payload contains a group/world-writable regular file' "$ROOT/build.sh" >/dev/null
 grep -F 'args+=(--prerelease)' "$ROOT/.github/workflows/publish-release.yml" >/dev/null
 # Product version and Git source-ancestry policy.
@@ -250,6 +244,10 @@ grep -F 'ERPI_AGENT_SOURCE_DESCRIPTION' "$ROOT/build.sh" >/dev/null
 grep -F "describe --tags --match 'v[0-9]*' --abbrev=0 --first-parent" "$ROOT/build.sh" >/dev/null
 grep -F 'Distributable builds require a clean committed source tree' "$ROOT/build.sh" >/dev/null
 grep -F 'ARTIFACT="$OUT_DIR/${ARTIFACT_STEM}.tar.gz"' "$ROOT/build.sh" >/dev/null
+grep -F 'local artifact_version="v${product_version}"' "$ROOT/scripts/build-identity.sh" >/dev/null
+grep -F 'ARTIFACT_STEM="erpi-agent-env-${artifact_platform}-${artifact_version}"' "$ROOT/scripts/build-identity.sh" >/dev/null
+! grep -F 'ARTIFACT_STEM="erpi-agent-env-${artifact_platform}-${source_description}"' "$ROOT/scripts/build-identity.sh" >/dev/null
+grep -F 'Commit hashes never appear in archive filenames.' "$ROOT/README.md" >/dev/null
 grep -F '"product_version": "$PRODUCT_VERSION"' "$ROOT/build.sh" >/dev/null
 grep -F '"source": {"commit": "$SOURCE_COMMIT", "description": "$SOURCE_DESCRIPTION", "base_tag": "$SOURCE_BASE_TAG", "distance": $SOURCE_DISTANCE}' "$ROOT/build.sh" >/dev/null
 grep -F 'expected_filename = f"{artifact_stem}.tar.gz"' "$ROOT/scripts/write-acceptance-metadata.py" >/dev/null
@@ -269,22 +267,21 @@ if grep -R -nE 'dnf[[:space:]].*install|yum[[:space:]].*install' "$ROOT/build.sh
 fi
 grep -F -- 'docker run --rm --network none' "$ROOT/build.sh" >/dev/null
 grep -F -- 'docker run --rm --network none' "$ROOT/scripts/rebuild-qualified-database-assets.sh" >/dev/null
-grep -F 'rpm -Uvh --nodeps --noscripts /work/postgres-flex.rpm' "$ROOT/build.sh" >/dev/null
-grep -F 'rpm -Uvh --nodeps --noscripts /work/postgres-flex.rpm' "$ROOT/scripts/rebuild-qualified-database-assets.sh" >/dev/null
-grep -F 'make AROPT=crsD -j2' "$ROOT/build.sh" >/dev/null
-grep -F 'make AROPT=crsD -j2' "$ROOT/scripts/rebuild-qualified-database-assets.sh" >/dev/null
+grep -F 'rpm -Uvh --nodeps --noscripts /work/postgres-flex.rpm' "$ROOT/scripts/postgres-server-build.sh" >/dev/null
+grep -F 'make AROPT=crsD -j"$ERPI_BUILD_JOBS"' "$ROOT/scripts/postgres-server-build.sh" >/dev/null
+! grep -R -nF 'make AROPT=crsD -j2' "$ROOT/build.sh" "$ROOT/scripts/postgres-server-build.sh" "$ROOT/scripts/rebuild-qualified-database-assets.sh"
 grep -F 'source_row postgres-server-build-flex' "$ROOT/build.sh" >/dev/null
 grep -F "'postgres-server-build-flex'" "$ROOT/templates/scripts/selftest.sh" >/dev/null
-for workflow in "$ROOT/.github/workflows/accept-runtime.yml" "$ROOT/.github/workflows/build-dist.yml"; do
+for workflow in "$ROOT/.github/workflows/accept-runtime.yml" "$ROOT/.github/workflows/reproduce-distribution.yml"; do
   grep -F 'name: Compute builder download cache key' "$workflow" >/dev/null
   grep -F 'key: erpi-agent-env-linux-x64-${{ steps.download-cache.outputs.key }}' "$workflow" >/dev/null
   ! grep -F "hashFiles('versions.env'" "$workflow" >/dev/null
 done
 [[ ! -e "$ROOT/vendor/database/postgres-server-17.10-linux-x64.txz" ]] || { echo 'Opaque prebuilt PostgreSQL server must not return.' >&2; exit 1; }
 [[ ! -e "$ROOT/scripts/qualify-postgres-server.sh" ]] || { echo 'Temporary PostgreSQL qualification script must not remain in the live tree.' >&2; exit 1; }
-! grep -F 'qualify-postgres-server' "$ROOT/.github/workflows/build-dist.yml"
+! grep -F 'qualify-postgres-server' "$ROOT/.github/workflows/reproduce-distribution.yml"
 grep -F 'POSTGRES_BUILD_IMAGE_REF="$(build_docker_image_ref "$POSTGRES_BUILD_IMAGE" "$POSTGRES_BUILD_IMAGE_SHA256")"' "$ROOT/build.sh" >/dev/null
-grep -F './configure --prefix=/usr/local/pg-build --without-readline --without-zlib --without-icu' "$ROOT/build.sh" >/dev/null
+grep -F './configure --prefix=/usr/local/pg-build --without-readline --without-zlib --without-icu' "$ROOT/scripts/postgres-server-build.sh" >/dev/null
 grep -F 'cp -a "$PG_BUILD_WORK/stage/usr/local/pg-build/." "$BUILD/runtime/postgres/server/"' "$ROOT/build.sh" >/dev/null
 grep -F 'Source-built PostgreSQL server unexpectedly contains a bundled third-party shared library.' "$ROOT/build.sh" >/dev/null
 grep -F 'Source-built PostgreSQL exceeds runtime GLIBC floor' "$ROOT/build.sh" >/dev/null
@@ -323,7 +320,7 @@ grep -F 'PG_DELTA_VERSION="1.0.0-alpha.33"' "$ROOT/versions.env" >/dev/null
 grep -F 'PG_DELTA_LOCK_SHA256="fa6659239ce4e70738b5936f5690c2fdcf6bf2ef09e7c13a58c0009c8401bccf"' "$ROOT/versions.env" >/dev/null
 grep -F 'PG_DELTA_SUPABASE_CLI_BASELINE="2.114.0"' "$ROOT/versions.env" >/dev/null
 grep -F 'build_verify_sha256 "$PG_DELTA_LOCK" "$PG_DELTA_LOCK_SHA256"' "$ROOT/build.sh" >/dev/null
-grep -F 'build_connected_npm "$BUILD/bin/npm" ci --prefix "$BUILD/runtime/pg-delta" --ignore-scripts --no-audit --no-fund' "$ROOT/build.sh" >/dev/null
+grep -F 'build_connected_npm "$BUILD/bin/npm" ci' "$ROOT/build.sh" >/dev/null
 grep -F 'rm -rf "$BUILD/runtime/pg-delta/node_modules/.bin"' "$ROOT/build.sh" >/dev/null
 grep -F 'source_row pg-delta-lock' "$ROOT/build.sh" >/dev/null
 grep -F 'pg-delta-package-lock.json' "$ROOT/scripts/download-cache-key.sh" >/dev/null
@@ -349,6 +346,7 @@ grep -F 'build_connected_npm "$BUILD/bin/npm" ci' "$ROOT/build.sh" >/dev/null
 grep -F 'PLPGSQL_CHECK_SOURCE_URL=' "$ROOT/versions.env" >/dev/null
 grep -F 'build_acquire_verified "$PLPGSQL_CHECK_SOURCE_URL"' "$ROOT/scripts/rebuild-qualified-database-assets.sh" >/dev/null
 "$ROOT/tests/build-common-check.sh"
+"$ROOT/tests/build-acceptance-phase-check.sh"
 # Candidate boundaries are enforced both structurally and by executable regression tests.
 require_contains() {
   local needle="$1" file="$2" label="$3"

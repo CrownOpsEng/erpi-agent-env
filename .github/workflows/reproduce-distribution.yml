@@ -1,67 +1,52 @@
-name: Accept runtime
+name: Reproduce distribution
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .gitattributes
-      - build.sh
-      - accept.sh
-      - versions.env
-      - requirements.in
-      - requirements.lock
-      - payload/**
-      - scripts/**
-      - templates/**
-      - tests/**
-      - vendor/**
-      - .github/workflows/accept-runtime.yml
   workflow_dispatch:
     inputs:
-      target_ref:
-        description: Exact final PR-head SHA or ref to accept
-        required: false
-        default: ''
+      release_tag:
+        description: Existing immutable release/prerelease tag to independently reproduce
+        required: true
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: accept-runtime-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: reproduce-distribution-${{ inputs.release_tag }}
+  cancel-in-progress: false
 
 jobs:
-  acceptance:
-    name: Full Linux x86-64 acceptance
+  reproduce:
+    name: Independently reproduce Linux x86-64 runtime
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
 
     steps:
-      - name: Check out exact source under acceptance
+      - name: Check out immutable tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
-          ref: ${{ inputs.target_ref || github.sha }}
+          ref: ${{ inputs.release_tag }}
 
-      - name: Record exact source identity
+      - name: Record exact tag identity
         id: source
         shell: bash
         run: |
           set -euo pipefail
+          source ./versions.env
           sha="$(git rev-parse HEAD)"
+          expected="v${PRODUCT_VERSION}"
+          [[ "$RELEASE_TAG" == "$expected" ]] || { echo "Tag $RELEASE_TAG does not match product version $expected." >&2; exit 1; }
           base_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 --first-parent "$sha")"
           distance="$(git rev-list --count --first-parent "${base_tag}..${sha}")"
-          if [[ "$distance" == 0 ]]; then
-            description="$base_tag"
-          else
-            description="${base_tag}-${distance}-g${sha:0:12}"
-          fi
+          [[ "$base_tag" == "$RELEASE_TAG" && "$distance" == 0 ]] || { echo "Reproduction must start at exact immutable tag $RELEASE_TAG." >&2; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "base_tag=$base_tag" >> "$GITHUB_OUTPUT"
-          echo "distance=$distance" >> "$GITHUB_OUTPUT"
-          echo "description=$description" >> "$GITHUB_OUTPUT"
+          echo "distance=0" >> "$GITHUB_OUTPUT"
+          echo "description=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Compute builder download cache key
         id: download-cache
@@ -78,51 +63,46 @@ jobs:
       - name: Run source validation
         run: ./tests/static-check.sh
 
-      - name: Build runtime
+      - name: Build exact tagged source
         env:
           ERPI_AGENT_SOURCE_COMMIT: ${{ steps.source.outputs.sha }}
           ERPI_AGENT_SOURCE_BASE_TAG: ${{ steps.source.outputs.base_tag }}
-          ERPI_AGENT_SOURCE_DISTANCE: ${{ steps.source.outputs.distance }}
+          ERPI_AGENT_SOURCE_DISTANCE: '0'
           ERPI_AGENT_SOURCE_DESCRIPTION: ${{ steps.source.outputs.description }}
         run: ./build.sh
 
-      - name: Accept built runtime
+      - name: Accept reproduced distribution
         run: ./accept.sh
 
-      - name: Write acceptance metadata
+      - name: Write reproduction metadata
+        id: metadata
         shell: bash
-        env:
-          ACCEPTED_SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
           sidecar="$(printf '%s\n' dist/*.tar.gz.sha256)"
           python3 scripts/write-acceptance-metadata.py \
             --sidecar "$sidecar" \
             --output dist/acceptance.json \
-            --source-sha "$ACCEPTED_SOURCE_SHA" \
-            --source-base-tag "${{ steps.source.outputs.base_tag }}" \
-            --source-distance "${{ steps.source.outputs.distance }}" \
-            --source-description "${{ steps.source.outputs.description }}" \
+            --source-sha "${{ steps.source.outputs.sha }}" \
+            --source-base-tag "$RELEASE_TAG" \
+            --source-distance 0 \
+            --source-description "$RELEASE_TAG" \
             --repository "$GITHUB_REPOSITORY" \
             --workflow "$GITHUB_WORKFLOW" \
             --run-id "$GITHUB_RUN_ID" \
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --event "$GITHUB_EVENT_NAME"
-          cat "$sidecar"
-          {
-            echo '```json'
-            cat dist/acceptance.json
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+            --event "$GITHUB_EVENT_NAME" \
+            --release-tag "$RELEASE_TAG"
+          echo "name=reproduction-${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Retain exact accepted distribution
+      - name: Upload reproduction evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: acceptance-${{ steps.source.outputs.sha }}
+          name: ${{ steps.metadata.outputs.name }}
           path: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
             dist/acceptance.json
           if-no-files-found: error
           compression-level: 0
-          retention-days: 90
+          retention-days: 30

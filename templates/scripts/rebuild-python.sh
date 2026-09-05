@@ -19,7 +19,8 @@ ln -s python "$ROOT/env/bin/python${PYTHON_MINOR}"
 "$ROOT/scripts/repair-python.sh" --quiet
 UV_CACHE_DIR="$ROOT/state/uv-cache" UV_LINK_MODE=copy "$UV_ISOLATED" "$ROOT/bin/uv" pip sync --offline \
   --python "$ROOT/env/bin/python" --require-hashes --no-index --find-links "$ROOT/wheelhouse" "$ROOT/manifest/requirements.lock"
-"$ROOT/scripts/selftest.sh"
+"$ROOT/env/bin/python" "$ROOT/scripts/normalize-python-metadata.py" "$ROOT/env"
+"$ROOT/scripts/python-smoke.sh"
 if [[ -f "$ROOT/manifest/SHA256SUMS" ]]; then
   "$ROOT/scripts/verify.sh" >/dev/null
 fi

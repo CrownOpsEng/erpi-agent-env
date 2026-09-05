@@ -10,7 +10,7 @@ Source validation does not prove the runtime.
 
 ## Runtime acceptance
 
-A payload-affecting source commit is releasable only after **Accept runtime** builds the complete archive from that exact commit and the resulting runtime passes all builder gates, including:
+A payload-affecting source commit is releasable only after **Accept runtime** runs the two explicit phases on that exact commit: `build.sh` constructs one archive, then `accept.sh` qualifies that already-built artifact. Construction and qualification are separate so ordinary builds do not silently execute release-grade integration work. Acceptance includes:
 
 - verified upstream/custom payload hashes before execution or inclusion
 - supported Linux x86-64/glibc host contract
@@ -30,23 +30,25 @@ A payload-affecting source commit is releasable only after **Accept runtime** bu
 - pristine mutable state before packaging and no group/world-writable immutable regular files
 - immutable checksum/symlink manifest verification
 - parseable four-column `manifest/sources.tsv` and bundled direct third-party compliance material required by the builder contract, including ShellCheck corresponding source/license
-- deterministic archive ordering/timestamps/gzip metadata and a stable first-use `pyvenv.cfg` sentinel
-- fresh archive extraction, repair, self-test, and stale-path rejection
+- deterministic archive ordering/timestamps/gzip metadata and a stable first-use `pyvenv.cfg` sentinel, proven by reproducing the accepted archive byte-for-byte from its untouched extraction
+- hostile relocation of that extraction, one complete runtime integration self-test, Python-only offline destruction/rebuild proof, immutable verification, and stale-path rejection
 
 The accepted archive hash and exact source SHA belong in machine-generated `acceptance.json` and the archive sidecar, not copied into narrative docs.
 
-Before merge, prefer a complete local `./build.sh` run on the clean, committed final PR head whenever the host has working Docker. If local Docker is unavailable, manually dispatch **Accept runtime** with the exact final PR-head SHA as `target_ref` and require that run to succeed immediately before merge. The automatic post-merge run on the exact `main` SHA remains mandatory before release publication.
+Before merge, prefer a complete local `./build.sh` followed by `./accept.sh` on the clean, committed final PR head whenever local build prerequisites are available. `build.sh` alone is construction evidence, not runtime acceptance. A verified warm PostgreSQL derived-cache hit needs neither Docker nor the original PostgreSQL/Flex source bytes; a cold miss requires them. If the local builder cannot complete, manually dispatch **Accept runtime** with the exact final PR-head SHA as `target_ref` and require that run to succeed immediately before merge. The automatic post-merge run on the exact `main` SHA remains mandatory before release publication.
 
 
 ## Connected build acquisition boundary
 
-Pinned direct artifacts share one acquisition primitive: verify and reuse a valid cache entry, discard a corrupt entry, otherwise download from the pinned HTTPS URL to temporary bytes, verify SHA-256, and only then promote those bytes into the cache. The normal builder and qualified-native maintainer rebuild path use that same primitive; package-specific download implementations are not permitted where this model applies.
+Pinned direct artifacts share one acquisition primitive: verify and reuse a valid cache entry, discard a corrupt entry, otherwise download from the pinned HTTPS URL to temporary bytes, verify SHA-256, and only then promote those bytes into the cache. The normal builder and qualified-native maintainer rebuild path use that same primitive; package-specific download implementations are not permitted where this model applies. Derived build outputs may be cached only when their cache key covers every immutable upstream input and the exact build-recipe bytes, and a cache hit must still pass the payload's runtime/native validation before inclusion.
 
 Lock-driven ecosystems remain resolver-owned. Python wheel download and pg-delta `npm ci` use their exact source-controlled locks and remain connected during environment construction. The builder explicitly overrides inherited offline-only selection such as pip `no-index` or npm `offline`, while preserving ordinary configured indexes/registries, mirrors, proxies, certificate roots, and authentication. Runtime recovery paths remain intentionally offline and must not inherit this connected-build behavior.
 
 ## PostgreSQL source/native qualification
 
-The PostgreSQL server is not accepted from a prebuilt third-party binary bundle. Every full runtime build fetches the exact pinned official PostgreSQL source tarball, verifies its SHA-256, and builds the normal install prefix inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10's normal build regenerates scanner sources, so its Flex prerequisite is also immutable: the builder verifies the exact pinned AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM SHA-256 and package identity/signature, installs that local RPM without dependency resolution or package scripts, and disables container networking for the PostgreSQL compilation. Flex is a build input recorded in provenance, not redistributed runtime payload. Deterministic GNU `ar` mode (`AROPT=crsD`) is required for PostgreSQL static archives. Optional readline, zlib, and ICU integrations are disabled to avoid unnecessary external runtime-library dependencies; the resulting ELF symbol floor and dynamic dependencies are checked before runtime acceptance.
+The PostgreSQL server is not accepted from a prebuilt third-party binary bundle. A cold builder fetches the exact pinned official PostgreSQL source tarball, verifies its SHA-256, and builds the normal install prefix inside a digest-pinned manylinux 2.28 image. PostgreSQL 17.10's normal build regenerates scanner sources, so its Flex prerequisite is also immutable: the builder verifies the exact pinned AlmaLinux `flex-2.6.1-9.el8.x86_64` RPM SHA-256 and package identity/signature, installs that local RPM without dependency resolution or package scripts, and disables container networking for compilation. Deterministic GNU `ar` mode (`AROPT=crsD`) is required and parallelism is controlled by `ERPI_BUILD_JOBS`, defaulting to the available CPU count.
+
+The resulting server tree may be reused from `.download-cache/derived` only under a key derived from the PostgreSQL source SHA, Flex SHA, build-image digest, and exact `scripts/postgres-server-build.sh` recipe SHA. The derived archive is self-contained with the server payload and matching upstream PostgreSQL notice, so a verified cache hit does not reacquire PostgreSQL/Flex source bytes or require Docker. A cache hit is not authority by itself: the normal builder still checks server shape, GLIBC floor, and dynamic dependencies before inclusion. `scripts/rebuild-qualified-database-assets.sh` deliberately uses the same source build recipe for the independent native-payload reproduction path. Flex is build input provenance, not redistributed runtime payload. Optional readline, zlib, and ICU integrations remain disabled to avoid unnecessary external runtime-library dependencies.
 
 The source-controlled PostgreSQL client and plpgsql_check payloads are qualified build inputs. Their pinned hashes are validated by source checks and by `build.sh` before extraction. They are qualified from a controlled GLIBC 2.28 build using pinned PostgreSQL 17.10/plpgsql_check sources; maximum GLIBC requirements are 2.25 for the client payload and 2.17 for plpgsql_check. `scripts/rebuild-qualified-database-assets.sh` provides their pinned maintainer reproduction path.
 
@@ -61,6 +63,8 @@ Hydration must remain repository-contained and transactional: validate every des
 Any change to this boundary requires the dedicated network-free source-level negative suite plus real connected-build acquisition and runtime hydration/import/cleanup acceptance. A happy-path package import alone is not sufficient evidence.
 
 ## Long-running commands and supervision
+
+Long builder/acceptance subprocesses must not appear idle. Shared `build_run_logged` execution owns captured logs, a periodic progress heartbeat (15 seconds by default), failure-tail reporting, and elapsed timing. `build.sh`, `accept.sh`, and maintainer native rebuilds use that common mechanism for genuinely long operations; each top-level command emits a timing summary.
 
 Do not change the logical shape of a repository acceptance run merely because an agent execution wrapper has a shorter foreground window.
 
@@ -122,7 +126,7 @@ That consumer proof should use the repository's real pinned client dependency an
 
 Git independently owns exact source identity. For a clean committed source, the builder resolves the nearest reachable immutable `v<release-version>` tag, counts commits from that tag, and records that ancestry with the exact source SHA. Exact tags produce the tag itself; descendants produce the Git-describe shape `vX.Y.Z[-prerelease]-N-g<abbrev>`.
 
-Runtime `manifest/environment.json` and generated `acceptance.json` record product/build version, full source commit, source description, base tag, and numeric distance separately. The archive filename uses the exact source description; the SHA-256 sidecar remains authority for exact archive bytes.
+Runtime `manifest/environment.json` and generated `acceptance.json` record product/build version, full source commit, source description, base tag, and numeric distance separately. The archive filename is product/build-version-owned and never contains a commit hash; ordinary development that retains an already-published version may append only the first-parent distance to avoid local filename collisions. Clean release/prerelease promotions use `v$PRODUCT_VERSION` immediately, before the matching tag exists. The SHA-256 sidecar remains authority for exact archive bytes.
 
 The builder refuses dirty worktrees. Exported source without `.git` must provide the complete source tuple (`ERPI_AGENT_SOURCE_COMMIT`, `ERPI_AGENT_SOURCE_BASE_TAG`, `ERPI_AGENT_SOURCE_DISTANCE`, and `ERPI_AGENT_SOURCE_DESCRIPTION`) because a SHA alone cannot reconstruct tag ancestry.
 
@@ -145,9 +149,11 @@ A release/prerelease requires:
 3. the promotion change touches only approved release metadata and moves `PRODUCT_VERSION` to a clean release/prerelease version while matching `.github/release-request.json`;
 4. source validation passes for the exact promotion commit;
 5. **Accept runtime** passes for that exact commit before publication;
-6. the permanent release workflow creates/verifies immutable `v$PRODUCT_VERSION` at that exact source and prepares a draft Release;
-7. **Build distribution** checks out the real tag, requires source description to equal that tag, repeats full runtime acceptance, and attaches archive/checksum/`acceptance.json` before publication;
+6. **Accept runtime** retains the exact accepted archive, checksum sidecar, and `acceptance.json` as workflow evidence bound to that source SHA;
+7. the permanent release workflow revalidates that successful acceptance evidence, creates/verifies immutable `v$PRODUCT_VERSION` at the accepted SHA, attaches those exact already-accepted bytes to the draft Release, and publishes without rebuilding them;
 8. PostgreSQL/runtime provenance boundaries remain intact.
+
+**Reproduce distribution** is an optional manual audit path for an existing immutable release/prerelease tag. It independently rebuilds and accepts the tag and uploads reproduction evidence, but it is not a publication path and never mutates a Release.
 
 If an RC exposes a defect, keep its tag/assets immutable and advance candidate-build revisions on that RC line (`rc.1-1`, `rc.1-2`, ...). Do not cut `rc.2` until a corrected build has actually earned promotion through the required real-world qualification. A failed or incomplete fix attempt consumes only another build revision, not another RC number.
 

@@ -18,7 +18,7 @@ Usage: ./build.sh [--out DIR] [--cache DIR] [--keep-work]
 
 Build ERPI Agent Environment product ${PRODUCT_VERSION} for ${TARGET}.
 Artifact identity is derived from Git release/prerelease ancestry. Exported source trees without .git must provide ERPI_AGENT_SOURCE_COMMIT, ERPI_AGENT_SOURCE_BASE_TAG, ERPI_AGENT_SOURCE_DISTANCE, and ERPI_AGENT_SOURCE_DESCRIPTION.
-Requires an internet-connected supported Linux x86-64 host (kernel >= ${MIN_KERNEL_VERSION}, glibc >= ${MIN_GLIBC_VERSION}) with a working Docker daemon. No sudo is used.
+Requires an internet-connected supported Linux x86-64 host (kernel >= ${MIN_KERNEL_VERSION}, glibc >= ${MIN_GLIBC_VERSION}). A working Docker daemon is required only on a derived PostgreSQL cache miss. No sudo is used.
 USAGE
 }
 
@@ -111,7 +111,7 @@ fi
 source "$SELF_DIR/scripts/build-identity.sh"
 compute_build_identity "$PRODUCT_VERSION" "$SOURCE_COMMIT" "$SOURCE_BASE_TAG" "$SOURCE_DISTANCE" "$SOURCE_DESCRIPTION" "$TARGET"
 
-for cmd in bash curl tar gzip bzip2 xz sha256sum find file readelf grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname env docker id dirname basename; do build_need "$cmd"; done
+for cmd in bash curl tar gzip bzip2 xz sha256sum find file readelf grep sed awk mktemp cp mv ln chmod install readlink xargs sort du ldd uname env id dirname basename tail; do build_need "$cmd"; done
 TAR_VERSION="$(tar --version 2>/dev/null || true)"
 grep -q 'GNU tar' <<<"$TAR_VERSION" || { echo "GNU tar is required by this builder." >&2; exit 1; }
 [[ "$(uname -s)" == Linux ]] || { echo "Builder target is Linux only." >&2; exit 1; }
@@ -137,8 +137,6 @@ KERNEL_VERSION="${KERNEL_VERSION_OVERRIDE:-$(uname -r)}"
 KERNEL_VERSION="${KERNEL_VERSION%%-*}"
 version_at_least "$GLIBC_VERSION" "$MIN_GLIBC_VERSION" || { echo "glibc >= $MIN_GLIBC_VERSION is required; found $GLIBC_VERSION." >&2; exit 1; }
 version_at_least "$KERNEL_VERSION" "$MIN_KERNEL_VERSION" || { echo "Linux kernel >= $MIN_KERNEL_VERSION is required; found $KERNEL_VERSION." >&2; exit 1; }
-docker info >/dev/null 2>&1 || { echo "A working Docker daemon is required to build the pinned PostgreSQL server from official source." >&2; exit 1; }
-
 mkdir -p "$OUT_DIR" "$CACHE_DIR"
 OUT_DIR="$(CDPATH= cd -- "$OUT_DIR" && pwd -P)"
 CACHE_DIR="$(CDPATH= cd -- "$CACHE_DIR" && pwd -P)"
@@ -150,7 +148,8 @@ BUILDER_UV_CACHE="$CACHE_DIR/uv-cache"
 BUILDER_UV_PYTHON_CACHE="$CACHE_DIR/uv-python-archives"
 BUILDER_PIP_CACHE="$CACHE_DIR/pip-cache"
 BUILDER_NPM_CACHE="$CACHE_DIR/npm-cache"
-mkdir -p "$BUILDER_UV_CACHE" "$BUILDER_UV_PYTHON_CACHE" "$BUILDER_PIP_CACHE" "$BUILDER_NPM_CACHE"
+mkdir -p "$BUILDER_UV_CACHE" "$BUILDER_UV_PYTHON_CACHE" "$BUILDER_PIP_CACHE" "$BUILDER_NPM_CACHE" "$CACHE_DIR/derived"
+BUILD_JOBS="$(build_jobs)"
 mkdir -p "$BUILD" "$BUILD/bin" "$BUILD/runtime/python" "$BUILD/runtime/node" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$BUILD/runtime/node-capsules" "$BUILD/runtime/pg-delta" "$BUILD/runtime/postgrest" "$BUILD/runtime/supabase" "$BUILD/env" "$BUILD/wheelhouse" "$BUILD/licenses/source" "$BUILD/licenses/shellcheck" "$BUILD/licenses/third-party" "$BUILD/licenses/postgresql" "$BUILD/licenses/pg-delta" "$BUILD/licenses/postgrest" "$BUILD/licenses/supabase" \
   "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" \
   "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/state/postgrest" "$BUILD/manifest" "$BUILD/scripts" "$WORK/download-extract"
@@ -229,7 +228,10 @@ PYTHON_MIRROR_REL="${PYTHON_MIRROR_REL//%2B/+}"
 PYTHON_MIRROR_FILE="$PYTHON_MIRROR_ROOT/$PYTHON_MIRROR_REL"
 mkdir -p "$(dirname -- "$PYTHON_MIRROR_FILE")"
 install -m 0644 "$PYTHON_AR" "$PYTHON_MIRROR_FILE"
-UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" python install "$PYTHON_VERSION" --mirror "file://$PYTHON_MIRROR_ROOT" --install-dir "$BUILD/runtime/python" --no-bin --managed-python
+build_run_logged "Install pinned CPython $PYTHON_VERSION" "$WORK/python-install.log" \
+  env UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" \
+  "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" python install "$PYTHON_VERSION" \
+  --mirror "file://$PYTHON_MIRROR_ROOT" --install-dir "$BUILD/runtime/python" --no-bin --managed-python
 BASE_PY="$(find "$BUILD/runtime/python" -mindepth 2 -maxdepth 4 -path "*/bin/python${PYTHON_MINOR}" -print -quit)"
 [[ -n "$BASE_PY" && -x "$BASE_PY" ]] || { echo "uv did not install expected Python $PYTHON_VERSION" >&2; exit 1; }
 BASE_ROOT="$(CDPATH= cd -- "$(dirname -- "$BASE_PY")/.." && pwd -P)"
@@ -277,10 +279,16 @@ install -m 0644 "$PIP_BOOT_CACHE" "$PIP_BOOT_WHEEL"
 build_verify_sha256 "$PIP_BOOT_WHEEL" "$PIP_BOOTSTRAP_WHEEL_SHA256"
 UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip install --python "$BUILD/env/bin/python" \
   --no-index --find-links "$BUILD/wheelhouse" "pip==26.1.2"
-PIP_CACHE_DIR="$BUILDER_PIP_CACHE" build_connected_pip "$BUILD/env/bin/python" -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: --dest "$BUILD/wheelhouse" -r "$BUILD/manifest/requirements.lock"
+download_locked_python_wheelhouse() {
+  PIP_CACHE_DIR="$BUILDER_PIP_CACHE" build_connected_pip "$BUILD/env/bin/python" -m pip download \
+    --disable-pip-version-check --require-hashes --only-binary=:all: \
+    --dest "$BUILD/wheelhouse" -r "$BUILD/manifest/requirements.lock"
+}
+build_run_logged "Download locked Python wheelhouse" "$WORK/python-wheel-download.log" download_locked_python_wheelhouse
 UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" UV_LINK_MODE=copy "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip sync --python "$BUILD/env/bin/python" \
   --require-hashes --no-index --find-links "$BUILD/wheelhouse" "$BUILD/manifest/requirements.lock"
 UV_CACHE_DIR="$BUILDER_UV_CACHE" UV_PYTHON_CACHE_DIR="$BUILDER_UV_PYTHON_CACHE" "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/bin/uv" pip check --python "$BUILD/env/bin/python"
+"$BUILD/env/bin/python" "$SELF_DIR/scripts/normalize-python-metadata.py" "$BUILD/env"
 
 log "Node.js $NODE_VERSION"
 NODE_AR="$DL/node-v${NODE_VERSION}-linux-x64.tar.xz"
@@ -330,7 +338,11 @@ for path, record in packages.items():
     assert str(record.get('resolved','')).startswith('https://registry.npmjs.org/'), (path, 'resolved')
     assert record.get('license'), (path, 'license')
 PY_PG_DELTA_LOCK
-NPM_CONFIG_CACHE="$BUILDER_NPM_CACHE" build_connected_npm "$BUILD/bin/npm" ci --prefix "$BUILD/runtime/pg-delta" --ignore-scripts --no-audit --no-fund
+install_locked_pg_delta() {
+  NPM_CONFIG_CACHE="$BUILDER_NPM_CACHE" build_connected_npm "$BUILD/bin/npm" ci \
+    --prefix "$BUILD/runtime/pg-delta" --ignore-scripts --no-audit --no-fund
+}
+build_run_logged "Install locked pg-delta Node dependencies" "$WORK/pg-delta-npm-ci.log" install_locked_pg_delta
 "$BUILD/env/bin/python" - "$SELF_DIR/vendor/pg-delta/LICENSE" "$BUILD/runtime/pg-delta/node_modules/@supabase/pg-delta/LICENSE" <<'PY_PG_DELTA_LICENSE'
 import pathlib, sys
 source, installed = map(pathlib.Path, sys.argv[1:])
@@ -496,72 +508,89 @@ version_at_least "$MIN_GLIBC_VERSION" "${SUPABASE_MAX_GLIBC#GLIBC_}" || {
   exit 1
 }
 
-log "PostgreSQL $POSTGRES_VERSION from pinned official source"
+log "PostgreSQL $POSTGRES_VERSION runtime"
 PG_SOURCE_AR="$DL/postgresql-${POSTGRES_VERSION}.tar.bz2"
 PG_FLEX_RPM="$DL/${POSTGRES_FLEX_RPM_NEVRA}.rpm"
 PG_CLIENT_AR="$SELF_DIR/vendor/database/postgresql-client-${POSTGRES_VERSION}-linux-x64-gnu.tar.gz"
 PLCHECK_AR="$SELF_DIR/vendor/database/plpgsql-check-${PLPGSQL_CHECK_VERSION}-pg17-linux-x64-gnu.tar.gz"
-build_acquire_verified "$POSTGRES_SOURCE_URL" "$PG_SOURCE_AR" "$POSTGRES_SOURCE_SHA256"
-build_acquire_verified "$POSTGRES_FLEX_RPM_URL" "$PG_FLEX_RPM" "$POSTGRES_FLEX_RPM_SHA256"
 build_verify_sha256 "$PG_CLIENT_AR" "$POSTGRES_CLIENT_SHA256"
 build_verify_sha256 "$PLCHECK_AR" "$PLPGSQL_CHECK_SHA256"
 
-# Build the ordinary PostgreSQL installation tree at a stable in-container path.
-# Optional readline/zlib/ICU integrations are disabled to avoid adding host
-# library requirements; this is a portability choice, not a size-minimization
-# exercise. The release source tarball and build image are both pinned.
-PG_BUILD_WORK="$WORK/postgres-source-build"
-rm -rf "$PG_BUILD_WORK" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client"
-mkdir -p "$PG_BUILD_WORK" "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$WORK/postgres-client" "$WORK/plcheck"
-tar -xjf "$PG_SOURCE_AR" -C "$PG_BUILD_WORK"
-install -m 0644 "$PG_FLEX_RPM" "$PG_BUILD_WORK/postgres-flex.rpm"
-POSTGRES_BUILD_IMAGE_REF="$(build_docker_image_ref "$POSTGRES_BUILD_IMAGE" "$POSTGRES_BUILD_IMAGE_SHA256")"
-docker run --rm --network none \
-  -e POSTGRES_VERSION="$POSTGRES_VERSION" \
-  -e POSTGRES_FLEX_VERSION="$POSTGRES_FLEX_VERSION" \
-  -e POSTGRES_FLEX_RPM_NEVRA="$POSTGRES_FLEX_RPM_NEVRA" \
-  -e HOST_UID="$(id -u)" \
-  -e HOST_GID="$(id -g)" \
-  -v "$PG_BUILD_WORK:/work" \
-  "$POSTGRES_BUILD_IMAGE_REF" bash -lc '
-    set -euo pipefail
-    restore_owner() { chown -R "$HOST_UID:$HOST_GID" /work >/dev/null 2>&1 || true; }
-    trap restore_owner EXIT
+PG_RECIPE="$SELF_DIR/scripts/postgres-server-build.sh"
+PG_RECIPE_SHA256="$(build_sha256 "$PG_RECIPE")"
+PG_DERIVED_KEY="$(printf '%s\0%s\0%s\0%s\0' \
+  "$POSTGRES_SOURCE_SHA256" "$POSTGRES_FLEX_RPM_SHA256" "$POSTGRES_BUILD_IMAGE_SHA256" "$PG_RECIPE_SHA256" \
+  | sha256sum | awk '{print $1}')"
+PG_DERIVED_DIR="$CACHE_DIR/derived"
+PG_DERIVED_AR="$PG_DERIVED_DIR/postgres-server-${POSTGRES_VERSION}-${PG_DERIVED_KEY}.tar.gz"
+PG_DERIVED_SHA="$PG_DERIVED_AR.sha256"
+PG_DERIVED_HIT=0
 
-    flex_nevra="$(rpm -qp --qf "%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n" /work/postgres-flex.rpm)"
-    [[ "$flex_nevra" == "$POSTGRES_FLEX_RPM_NEVRA" ]] || {
-      echo "Pinned PostgreSQL Flex RPM identity mismatch: $flex_nevra" >&2
-      exit 1
-    }
-    rpm -K /work/postgres-flex.rpm | grep -F "digests signatures OK" >/dev/null || {
-      echo "Pinned PostgreSQL Flex RPM signature/digest verification failed." >&2
-      exit 1
-    }
-    rpm -Uvh --nodeps --noscripts /work/postgres-flex.rpm >/dev/null
-    [[ "$(flex --version)" == "flex $POSTGRES_FLEX_VERSION" ]] || {
-      echo "Pinned PostgreSQL Flex executable version mismatch." >&2
-      exit 1
-    }
-    command -v m4 >/dev/null || {
-      echo "Pinned PostgreSQL build image no longer supplies m4 required by Flex." >&2
-      exit 1
-    }
+if [[ -s "$PG_DERIVED_AR" && -s "$PG_DERIVED_SHA" ]]; then
+  if (cd "$PG_DERIVED_DIR" && sha256sum -c "$(basename -- "$PG_DERIVED_SHA")" >/dev/null 2>&1); then
+    PG_DERIVED_HIT=1
+  else
+    echo "Discarding invalid derived PostgreSQL cache entry." >&2
+    rm -f -- "$PG_DERIVED_AR" "$PG_DERIVED_SHA"
+  fi
+fi
 
-    cd "/work/postgresql-${POSTGRES_VERSION}"
-    ./configure --prefix=/usr/local/pg-build --without-readline --without-zlib --without-icu >/dev/null
-    make AROPT=crsD -j2 >/dev/null
-    make AROPT=crsD DESTDIR=/work/stage install >/dev/null
-    make -C contrib/amcheck AROPT=crsD -j2 >/dev/null
-    make -C contrib/amcheck AROPT=crsD DESTDIR=/work/stage install >/dev/null
-  '
-cp -a "$PG_BUILD_WORK/stage/usr/local/pg-build/." "$BUILD/runtime/postgres/server/"
-install -m 0644 "$PG_BUILD_WORK/postgresql-${POSTGRES_VERSION}/COPYRIGHT" "$BUILD/licenses/postgresql/COPYRIGHT"
+rm -rf "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$WORK/postgres-client" "$WORK/plcheck"
+mkdir -p "$BUILD/runtime/postgres/server" "$BUILD/runtime/postgres/client" "$WORK/postgres-client" "$WORK/plcheck"
+
+if (( PG_DERIVED_HIT )); then
+  log "Restore verified derived PostgreSQL cache"
+  PG_DERIVED_EXTRACT="$WORK/postgres-derived-extract"
+  rm -rf "$PG_DERIVED_EXTRACT"; mkdir -p "$PG_DERIVED_EXTRACT"
+  build_run_logged "Restore PostgreSQL derived payload" "$WORK/postgres-derived-restore.log" \
+    tar -xzf "$PG_DERIVED_AR" -C "$PG_DERIVED_EXTRACT"
+  cp -a "$PG_DERIVED_EXTRACT/server/." "$BUILD/runtime/postgres/server/"
+  install -m 0644 "$PG_DERIVED_EXTRACT/COPYRIGHT" "$BUILD/licenses/postgresql/COPYRIGHT"
+else
+  log "Build PostgreSQL from pinned source ($BUILD_JOBS workers)"
+  build_need docker || { echo 'Docker is required for a cold PostgreSQL derived-cache miss.' >&2; exit 1; }
+  docker info >/dev/null 2>&1 || { echo 'A working Docker daemon is required for a cold PostgreSQL derived-cache miss.' >&2; exit 1; }
+  build_acquire_verified "$POSTGRES_SOURCE_URL" "$PG_SOURCE_AR" "$POSTGRES_SOURCE_SHA256"
+  build_acquire_verified "$POSTGRES_FLEX_RPM_URL" "$PG_FLEX_RPM" "$POSTGRES_FLEX_RPM_SHA256"
+
+  PG_BUILD_WORK="$WORK/postgres-source-build"
+  rm -rf "$PG_BUILD_WORK"; mkdir -p "$PG_BUILD_WORK"
+  tar -xjf "$PG_SOURCE_AR" -C "$PG_BUILD_WORK"
+  install -m 0644 "$PG_FLEX_RPM" "$PG_BUILD_WORK/postgres-flex.rpm"
+  install -m 0755 "$PG_RECIPE" "$PG_BUILD_WORK/postgres-server-build.sh"
+  POSTGRES_BUILD_IMAGE_REF="$(build_docker_image_ref "$POSTGRES_BUILD_IMAGE" "$POSTGRES_BUILD_IMAGE_SHA256")"
+  build_run_logged "Compile PostgreSQL $POSTGRES_VERSION ($BUILD_JOBS workers)" "$WORK/postgres-build.log" \
+    docker run --rm --network none \
+      -e POSTGRES_VERSION="$POSTGRES_VERSION" \
+      -e POSTGRES_FLEX_VERSION="$POSTGRES_FLEX_VERSION" \
+      -e POSTGRES_FLEX_RPM_NEVRA="$POSTGRES_FLEX_RPM_NEVRA" \
+      -e ERPI_BUILD_JOBS="$BUILD_JOBS" \
+      -e HOST_UID="$(id -u)" \
+      -e HOST_GID="$(id -g)" \
+      -v "$PG_BUILD_WORK:/work" \
+      "$POSTGRES_BUILD_IMAGE_REF" /work/postgres-server-build.sh
+  cp -a "$PG_BUILD_WORK/stage/usr/local/pg-build/." "$BUILD/runtime/postgres/server/"
+  install -m 0644 "$PG_BUILD_WORK/postgresql-${POSTGRES_VERSION}/COPYRIGHT" "$BUILD/licenses/postgresql/COPYRIGHT"
+
+  PG_DERIVED_STAGE="$WORK/postgres-derived-stage"
+  rm -rf "$PG_DERIVED_STAGE"; mkdir -p "$PG_DERIVED_STAGE/server"
+  cp -a "$BUILD/runtime/postgres/server/." "$PG_DERIVED_STAGE/server/"
+  install -m 0644 "$BUILD/licenses/postgresql/COPYRIGHT" "$PG_DERIVED_STAGE/COPYRIGHT"
+  PG_DERIVED_TMP="$PG_DERIVED_AR.part.$$"
+  rm -f -- "$PG_DERIVED_TMP"
+  build_run_logged "Cache derived PostgreSQL payload" "$WORK/postgres-derived-cache.log" \
+    bash -c 'set -euo pipefail; tar --sort=name --format=gnu --numeric-owner --owner=0 --group=0 --mtime="$1" --clamp-mtime -cf - -C "$2" server COPYRIGHT | gzip -n > "$3"' \
+    _ "$ARCHIVE_MTIME" "$PG_DERIVED_STAGE" "$PG_DERIVED_TMP"
+  mv -- "$PG_DERIVED_TMP" "$PG_DERIVED_AR"
+  (cd "$PG_DERIVED_DIR" && sha256sum "$(basename -- "$PG_DERIVED_AR")") > "$PG_DERIVED_SHA"
+fi
+
 tar -xzf "$PG_CLIENT_AR" -C "$WORK/postgres-client"
 cp -a "$WORK/postgres-client/client-payload/." "$BUILD/runtime/postgres/client/"
 PG_RUNTIME_LD_LIBRARY_PATH="$BUILD/runtime/postgres/client/lib:$BUILD/runtime/postgres/server/lib"
 
-# Fail closed if the source-built server accidentally regains the opaque native
-# library bundle that motivated removal of the prebuilt server.
+# A derived-cache hit is only reusable input, never authority. Validate the
+# included server tree on every build before it enters the runtime.
 if find "$BUILD/runtime/postgres/server" -type f \
   \( -name 'libssl.so*' -o -name 'libcrypto.so*' -o -name 'libicu*.so*' -o -name 'libxml2.so*' -o -name 'libxslt.so*' -o -name 'liblzma.so*' -o -name 'libz.so*' -o -name 'libossp-uuid.so*' \) \
   -print -quit | grep -q .; then
@@ -608,11 +637,13 @@ cp "$SELF_DIR/templates/scripts/node-deps.py" "$BUILD/scripts/node-deps.py"
 cp "$SELF_DIR/templates/scripts/github.sh" "$BUILD/scripts/github.sh"
 cp "$SELF_DIR/templates/scripts/git-handoff.py" "$BUILD/scripts/git-handoff.py"
 cp "$SELF_DIR/templates/scripts/selftest.sh" "$BUILD/scripts/selftest.sh"
+cp "$SELF_DIR/templates/scripts/python-smoke.sh" "$BUILD/scripts/python-smoke.sh"
+cp "$SELF_DIR/scripts/normalize-python-metadata.py" "$BUILD/scripts/normalize-python-metadata.py"
 cp "$SELF_DIR/templates/scripts/verify.sh" "$BUILD/scripts/verify.sh"
 cp "$SELF_DIR/templates/scripts/rebuild-python.sh" "$BUILD/scripts/rebuild-python.sh"
 cp "$SELF_DIR/scripts/uv-isolated-exec.sh" "$BUILD/scripts/uv-isolated-exec.sh"
 cp "$SELF_DIR/templates/bin/python-wrapper" "$BUILD/scripts/python-wrapper.template"
-chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/capabilities.py" "$BUILD/scripts/postgres.py" "$BUILD/scripts/postgrest.py" "$BUILD/scripts/pgtap.py" "$BUILD/scripts/node-deps.py" "$BUILD/scripts/github.sh" "$BUILD/scripts/git-handoff.py" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh" "$BUILD/scripts/uv-isolated-exec.sh"
+chmod 0755 "$BUILD/bin/agent-env" "$BUILD/scripts/capabilities.py" "$BUILD/scripts/postgres.py" "$BUILD/scripts/postgrest.py" "$BUILD/scripts/pgtap.py" "$BUILD/scripts/node-deps.py" "$BUILD/scripts/github.sh" "$BUILD/scripts/git-handoff.py" "$BUILD/scripts/selftest.sh" "$BUILD/scripts/python-smoke.sh" "$BUILD/scripts/normalize-python-metadata.py" "$BUILD/scripts/verify.sh" "$BUILD/scripts/repair-python.sh" "$BUILD/scripts/rebuild-python.sh" "$BUILD/scripts/uv-isolated-exec.sh"
 mkdir -p "$BUILD/state/uv-cache" "$BUILD/state/uv-python" "$BUILD/state/uv-tools" "$BUILD/state/uv-tool-bin" "$BUILD/state/pip-cache" "$BUILD/state/npm-cache" "$BUILD/state/npm-global" "$BUILD/state/pycache" "$BUILD/state/postgres" "$BUILD/state/postgrest"
 
 cat > "$BUILD/manifest/environment.json" <<JSON
@@ -710,19 +741,7 @@ fi
 log "Sanitize generated bytecode and mutable state"
 find "$BUILD" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$BUILD" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
-# Caches are useful during tests but are not required for first-use operation; wheelhouse is the recovery source.
-# Remove the entire mutable tree so dotfiles, symlinks, and path-bearing cache metadata cannot leak into the artifact.
-reset_runtime_state
-
-log "Portability gate: reject original build-root residue"
-# pyvenv.cfg is the one declared relocation-mutable file. Before the first move
-# it correctly names the current absolute base-Python path, so exclude it here.
-# After relocation it is repaired and then included in the stale-path scan.
-if grep -r -a -F -l --exclude='pyvenv.cfg' "$ORIGINAL_BUILD_ROOT" "$BUILD" > "$WORK/residue.txt" 2>/dev/null; then
-  echo "Absolute original build path remains in portable payload:" >&2
-  cat "$WORK/residue.txt" >&2
-  exit 1
-fi
+# Caches are useful during construction but are not required for first-use operation; wheelhouse is the recovery source.
 
 log "Portability gate: no absolute symlinks"
 absolute_links=0
@@ -732,30 +751,7 @@ while IFS= read -r -d '' link; do
 done < <(find "$BUILD" -type l -print0)
 (( absolute_links == 0 )) || { echo "Absolute symlink(s) found." >&2; exit 1; }
 
-log "Relocation torture test"
-MOVED="$WORK_PARENT/Second Location – spaces and unicode/deep/nested/relocation/target/erpi-agent-env"
-mkdir -p "$(dirname -- "$MOVED")"
-mv "$BUILD" "$MOVED"
-BUILD="$MOVED"
-"$BUILD/scripts/repair-python.sh" --quiet
-"$BUILD/bin/agent-env" selftest
-
-log "Offline Python destruction/rebuild proof"
-"$BUILD/bin/agent-env" rebuild-python >/dev/null
-"$BUILD/bin/agent-env" selftest >/dev/null
-
-# Scan the moved tree again for the original source root, now including pyvenv.cfg.
-# Relocation repair must have removed the old location completely.
-if grep -r -a -F -l "$ORIGINAL_BUILD_ROOT" "$BUILD" > "$WORK/residue-after-move.txt" 2>/dev/null; then
-  echo "Relocation left original path residue:" >&2
-  cat "$WORK/residue-after-move.txt" >&2
-  exit 1
-fi
-
 log "Reset mutable state for distribution"
-# Relocation/self-test/rebuild deliberately populate state/ with bytecode and caches.
-# None of that state is authoritative, and .pyc co_filename/cache metadata can encode
-# the path where the tests ran. Ship an empty mutable state tree instead.
 reset_runtime_state
 state_residue="$(find "$BUILD/state" -mindepth 1 \( -type f -o -type l \) -print -quit)"
 if [[ -n "$state_residue" ]]; then
@@ -783,58 +779,44 @@ awk '
   { print }
 ' "$PYVENV_CFG" > "$PYVENV_CFG.tmp"
 mv "$PYVENV_CFG.tmp" "$PYVENV_CFG"
-if grep -r -a -F -l "$BUILD" "$BUILD" > "$WORK/current-build-residue.txt" 2>/dev/null; then
-  echo "Current random build path remains in distribution payload:" >&2
-  cat "$WORK/current-build-residue.txt" >&2
-  exit 1
-fi
 
+check_distribution_residue() {
+  local output="$1" rc=0
+  if grep -r -a -F -l "$BUILD" "$BUILD" >"$output" 2>/dev/null; then
+    echo "Current random build path remains in distribution payload:" >&2
+    cat "$output" >&2
+    return 1
+  else
+    rc=$?
+    [[ "$rc" == 1 ]] || return "$rc"
+  fi
+}
+log "Final distribution path scan"
+build_run_logged "Scan payload for random build-root residue" "$WORK/distribution-path-scan.log" \
+  check_distribution_residue "$WORK/current-build-residue.txt"
+
+write_checksum_manifest() {
+  cd "$BUILD"
+  find . -type l ! -path './state/*' -printf '%p\t%l\n' | LC_ALL=C sort > manifest/SYMLINKS
+  find . -type f \
+    ! -path './state/*' \
+    ! -path './env/pyvenv.cfg' \
+    ! -path './manifest/SHA256SUMS' \
+    -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > manifest/SHA256SUMS
+  "$BUILD/bin/agent-env" verify >/dev/null
+}
 log "Immutable payload checksum manifest"
-cd "$BUILD"
-find . -type l ! -path './state/*' -printf '%p\t%l\n' | LC_ALL=C sort > manifest/SYMLINKS
-find . -type f \
-  ! -path './state/*' \
-  ! -path './env/pyvenv.cfg' \
-  ! -path './manifest/SHA256SUMS' \
-  -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > manifest/SHA256SUMS
-"$BUILD/bin/agent-env" verify >/dev/null
+build_run_logged "Hash immutable payload" "$WORK/checksum-manifest.log" write_checksum_manifest
 
-log "Archive/extract proof"
+log "Package distribution"
 ARTIFACT="$OUT_DIR/${ARTIFACT_STEM}.tar.gz"
 TMP_ART="$ARTIFACT.part.$$"
 rm -f "$TMP_ART" "$ARTIFACT"
-# Normalize ordering, timestamps, owner metadata, and gzip headers so the
-# same accepted payload produces identical archive bytes.
-write_archive() {
-  local dest="$1"
-  tar --sort=name --format=gnu --numeric-owner --owner=0 --group=0 \
-    --mtime="$ARCHIVE_MTIME" --clamp-mtime \
-    -cf - -C "$(dirname -- "$BUILD")" "$(basename -- "$BUILD")" | gzip -n > "$dest"
-}
-write_archive "$TMP_ART"
-REPRO_ART="$WORK_PARENT/reproducibility-proof.tar.gz"
-write_archive "$REPRO_ART"
-[[ "$(sha256sum "$TMP_ART" | awk '{print $1}')" == "$(sha256sum "$REPRO_ART" | awk '{print $1}')" ]] || {
-  echo "Archive packaging is not deterministic for the accepted payload." >&2
-  exit 1
-}
+build_run_logged "Compress distribution archive" "$WORK/archive.log" \
+  build_write_archive "$BUILD" "$TMP_ART" "$ARCHIVE_MTIME"
 mv "$TMP_ART" "$ARTIFACT"
 (cd "$OUT_DIR" && sha256sum "$(basename -- "$ARTIFACT")") > "$ARTIFACT.sha256"
 (cd "$OUT_DIR" && sha256sum -c "$(basename -- "$ARTIFACT.sha256")") >/dev/null
-
-EXTRACT_TEST="$WORK_PARENT/final extraction proof"
-mkdir -p "$EXTRACT_TEST"
-tar -xzf "$ARTIFACT" -C "$EXTRACT_TEST"
-EXTRACTED="$EXTRACT_TEST/erpi-agent-env"
-"$EXTRACTED/bin/agent-env" selftest >/dev/null
-# The archive was created from $BUILD. First-use repair in the extracted copy
-# must remove that former absolute location everywhere, including pyvenv.cfg.
-if grep -r -a -F -l "$BUILD" "$EXTRACTED" > "$WORK/residue-after-extract.txt" 2>/dev/null; then
-  echo "Fresh extraction retained its archive-build location:" >&2
-  cat "$WORK/residue-after-extract.txt" >&2
-  exit 1
-fi
-"$EXTRACTED/bin/agent-env" verify >/dev/null
 
 log "Build complete"
 echo "Product version: $PRODUCT_VERSION"
@@ -843,3 +825,4 @@ echo "Source commit: $SOURCE_COMMIT"
 echo "$ARTIFACT"
 echo "$ARTIFACT.sha256"
 echo "Size: $(du -h "$ARTIFACT" | awk '{print $1}')"
+build_timing_summary

@@ -100,7 +100,7 @@ def main() -> None:
     expected_filename = f"{artifact_stem}.tar.gz"
     if filename != expected_filename:
         raise SystemExit(
-            f"Artifact filename {filename!r} does not match source identity {args.source_description!r}; expected {expected_filename!r}"
+            f"Artifact filename {filename!r} does not match product/build version {product_version!r}; expected {expected_filename!r}"
         )
 
     artifact_path = sidecar_path.parent / filename
