@@ -384,7 +384,8 @@ NODE_CAPSULE_SOURCES="$WORK/node-capsule-sources.tsv"
   "$POSTGRES_JS_VERSION" "$POSTGRES_JS_SHA256" \
   "$PGLS_WASM_VERSION" "$PGLS_WASM_SHA256" \
   "$FAST_CHECK_VERSION" "$FAST_CHECK_SHA256" \
-  "$PURE_RAND_VERSION" "$PURE_RAND_SHA256" <<'PY_NODE_MANIFEST'
+  "$PURE_RAND_VERSION" "$PURE_RAND_SHA256" \
+  "$COMMANDER_VERSION" "$COMMANDER_SHA256" <<'PY_NODE_MANIFEST'
 import csv, json, pathlib, re, sys
 path=pathlib.Path(sys.argv[1])
 out=pathlib.Path(sys.argv[2])
@@ -395,6 +396,7 @@ expected={
     '@postgres-language-server/wasm': ('pgls-wasm', values[4], f'postgres-language-server-wasm-{values[4]}.tgz', values[5]),
     'fast-check': ('fast-check', values[6], f'fast-check-{values[6]}.tgz', values[7]),
     'pure-rand': ('pure-rand', values[8], f'pure-rand-{values[8]}.tgz', values[9]),
+    'commander': ('commander', values[10], f'commander-{values[10]}.tgz', values[11]),
 }
 data=json.loads(path.read_text(encoding='utf-8'))
 assert data.get('schema') == 1, data.get('schema')
@@ -673,7 +675,7 @@ cat > "$BUILD/manifest/environment.json" <<JSON
     "postgrest": {"version": "$POSTGREST_VERSION", "supabase_cli_baseline": "$POSTGREST_SUPABASE_CLI_BASELINE", "database_targets": "numeric-loopback-only", "http_listener": "loopback-only"},
     "supabase_cli": {"version": "$SUPABASE_CLI_VERSION", "distribution": "official-linux-amd64", "companion": "bundled-supabase-go", "credentials": "host/session", "container_runtime": "host-required-for-stack-commands"},
     "git_handoff": {"artifact_format": "git-bundle-zip-v1", "requires_host_git": true, "network": "not-required"},
-    "node_capsules": {"yaml": "$YAML_VERSION", "postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION"},
+    "node_capsules": {"yaml": "$YAML_VERSION", "postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION", "commander": "$COMMANDER_VERSION"},
     "utilities": {"shellcheck": "$SHELLCHECK_VERSION", "miller": "$MILLER_VERSION", "httpx_cli": true}
   },
   "runtime_contract": {"os": "Linux", "architecture": "x86_64", "kernel_min": "$MIN_KERNEL_VERSION", "glibc_min": "$MIN_GLIBC_VERSION", "libstdcxx_symbol_min": "$MIN_GLIBCXX_SYMBOL"},

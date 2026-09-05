@@ -27,5 +27,6 @@ The direct inventory includes:
 - `@postgres-language-server/wasm` 0.25.7 — MIT.
 - fast-check 4.9.0 — MIT.
 - pure-rand 8.4.2 — MIT.
+- commander 15.0.0 — MIT.
 
 This file is an inventory and routing notice. The reproduced license/attribution texts remain authoritative for their respective components.

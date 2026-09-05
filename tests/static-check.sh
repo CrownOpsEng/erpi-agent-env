@@ -44,6 +44,7 @@ expected={
     '@postgres-language-server/wasm': ('pgls-wasm', vals['PGLS_WASM_VERSION'], f"postgres-language-server-wasm-{vals['PGLS_WASM_VERSION']}.tgz", vals['PGLS_WASM_SHA256']),
     'fast-check': ('fast-check', vals['FAST_CHECK_VERSION'], f"fast-check-{vals['FAST_CHECK_VERSION']}.tgz", vals['FAST_CHECK_SHA256']),
     'pure-rand': ('pure-rand', vals['PURE_RAND_VERSION'], f"pure-rand-{vals['PURE_RAND_VERSION']}.tgz", vals['PURE_RAND_SHA256']),
+    'commander': ('commander', vals['COMMANDER_VERSION'], f"commander-{vals['COMMANDER_VERSION']}.tgz", vals['COMMANDER_SHA256']),
 }
 assert manifest.get('schema')==1
 assert isinstance(manifest.get('packages'),dict) and set(manifest['packages'])==set(expected)
