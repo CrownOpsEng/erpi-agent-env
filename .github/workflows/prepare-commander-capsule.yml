@@ -2,7 +2,8 @@ name: Prepare Commander capsule update
 
 on:
   push:
-    branches: [fix/commander-node-capsule]
+    branches:
+      - fix/commander-node-capsule
 
 permissions:
   actions: write
@@ -24,174 +25,16 @@ jobs:
           fetch-depth: 0
           ref: fix/commander-node-capsule
 
-      - name: Acquire Commander and apply bounded source update
+      - name: Prepare exact Commander capsule source
         shell: bash
         run: |
           set -euo pipefail
-          url='https://registry.npmjs.org/commander/-/commander-15.0.0.tgz'
-          integrity='sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg=='
-          tmp="$(mktemp)"
-          trap 'rm -f "$tmp"' EXIT
-          curl --fail --location --proto '=https' --tlsv1.2 --retry 4 --retry-all-errors -o "$tmp" "$url"
-          sha256="$(sha256sum "$tmp" | awk '{print $1}')"
-          actual_integrity="sha512-$(openssl dgst -sha512 -binary "$tmp" | base64 -w0)"
-          [[ "$actual_integrity" == "$integrity" ]] || {
-            echo "Commander npm integrity mismatch" >&2
-            exit 1
-          }
-          tar -xOzf "$tmp" package/package.json | node -e '
-            let s="";
-            process.stdin.setEncoding("utf8");
-            process.stdin.on("data", d => s += d);
-            process.stdin.on("end", () => {
-              const p = JSON.parse(s);
-              if (p.name !== "commander" || p.version !== "15.0.0" || p.license !== "MIT" || p.type !== "module" || p.engines?.node !== ">=22.12.0") process.exit(1);
-            });'
-          printf 'Commander 15.0.0 SHA-256: %s\n' "$sha256"
-
-          SHA256="$sha256" python3 - <<'PY'
-          import json, os, pathlib
-
-          root = pathlib.Path('.')
-          sha256 = os.environ['SHA256']
-          integrity = 'sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg=='
-          url = 'https://registry.npmjs.org/commander/-/commander-15.0.0.tgz'
-
-          def text(path):
-              return (root / path).read_text(encoding='utf-8')
-
-          def write(path, value):
-              (root / path).write_text(value, encoding='utf-8')
-
-          def replace_once(path, old, new):
-              value = text(path)
-              count = value.count(old)
-              if count != 1:
-                  raise SystemExit(f'{path}: expected one occurrence, found {count}: {old!r}')
-              write(path, value.replace(old, new, 1))
-
-          versions = text('versions.env')
-          if 'COMMANDER_VERSION=' in versions or 'COMMANDER_SHA256=' in versions:
-              raise SystemExit('versions.env already contains Commander pins')
-          anchor = 'PURE_RAND_SHA256="3ce449c758cb2ea0db7ff30a1b378d381d9e74681acec74e1e2591ea6aa381ca"\n'
-          if versions.count(anchor) != 1:
-              raise SystemExit('versions.env pure-rand anchor changed')
-          versions = versions.replace(
-              anchor,
-              anchor + f'COMMANDER_VERSION="15.0.0"\nCOMMANDER_SHA256="{sha256}"\n',
-              1,
-          )
-          write('versions.env', versions)
-
-          manifest_path = root / 'vendor/node-capsules/manifest.json'
-          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-          packages = manifest['packages']
-          if 'commander' in packages:
-              raise SystemExit('Commander already exists in capsule manifest')
-          packages['commander'] = {
-              'component': 'commander',
-              'version': '15.0.0',
-              'file': 'commander-15.0.0.tgz',
-              'sha256': sha256,
-              'integrity': integrity,
-              'url': url,
-          }
-          manifest_path.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
-
-          replace_once(
-              'build.sh',
-              '  "$PURE_RAND_VERSION" "$PURE_RAND_SHA256" <<\'PY_NODE_MANIFEST\'\n',
-              '  "$PURE_RAND_VERSION" "$PURE_RAND_SHA256" \\\n  "$COMMANDER_VERSION" "$COMMANDER_SHA256" <<\'PY_NODE_MANIFEST\'\n',
-          )
-          replace_once(
-              'build.sh',
-              "    'pure-rand': ('pure-rand', values[8], f'pure-rand-{values[8]}.tgz', values[9]),\n",
-              "    'pure-rand': ('pure-rand', values[8], f'pure-rand-{values[8]}.tgz', values[9]),\n    'commander': ('commander', values[10], f'commander-{values[10]}.tgz', values[11]),\n",
-          )
-          replace_once(
-              'build.sh',
-              '"node_capsules": {"yaml": "$YAML_VERSION", "postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION"},',
-              '"node_capsules": {"yaml": "$YAML_VERSION", "postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION", "commander": "$COMMANDER_VERSION"},',
-          )
-
-          replace_once(
-              'tests/static-check.sh',
-              "    'pure-rand': ('pure-rand', vals['PURE_RAND_VERSION'], f\"pure-rand-{vals['PURE_RAND_VERSION']}.tgz\", vals['PURE_RAND_SHA256']),\n",
-              "    'pure-rand': ('pure-rand', vals['PURE_RAND_VERSION'], f\"pure-rand-{vals['PURE_RAND_VERSION']}.tgz\", vals['PURE_RAND_SHA256']),\n    'commander': ('commander', vals['COMMANDER_VERSION'], f\"commander-{vals['COMMANDER_VERSION']}.tgz\", vals['COMMANDER_SHA256']),\n",
-          )
-
-          replace_once('tests/node-deps-safety-check.sh', "len(marker['packages'])==5", "len(marker['packages'])==6")
-          replace_once('tests/node-deps-safety-check.sh', "len(marker['packages'])==4", "len(marker['packages'])==5")
-
-          replace_once(
-              'templates/scripts/selftest.sh',
-              'import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus";',
-              'import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus"; import { Command } from "commander";',
-          )
-          replace_once(
-              'templates/scripts/selftest.sh',
-              '||typeof xoroshiro128plus!=="function") process.exit(1)',
-              '||typeof xoroshiro128plus!=="function"||typeof Command!=="function") process.exit(1)',
-          )
-          replace_once('templates/scripts/selftest.sh', "len(marker['packages'])==5", "len(marker['packages'])==6")
-
-          replace_once(
-              'README.md',
-              '- exact offline npm capability capsules for yaml 2.9.0, postgres 3.4.7, PostgreSQL Language Server WASM 0.25.7, fast-check 4.9.0, and pure-rand 8.4.2',
-              '- exact offline npm capability capsules for yaml 2.9.0, postgres 3.4.7, PostgreSQL Language Server WASM 0.25.7, fast-check 4.9.0, pure-rand 8.4.2, and commander 15.0.0',
-          )
-          replace_once(
-              'README.md',
-              "The target repository's `package-lock.json` remains authority. The capsule set includes `yaml` 2.9.0 for repositories that lock that exact package, alongside the existing database and test-library capsules.",
-              "The target repository's `package-lock.json` remains authority. The capsule set includes `yaml` 2.9.0 and `commander` 15.0.0 for repositories that lock those exact packages, alongside the existing database and test-library capsules.",
-          )
-          replace_once(
-              'templates/RUNTIME-README.md',
-              'The immutable capsule store currently contains exact bytes for `yaml` 2.9.0, postgres 3.4.7, `@postgres-language-server/wasm` 0.25.7, fast-check 4.9.0 and pure-rand 8.4.2.',
-              'The immutable capsule store currently contains exact bytes for `yaml` 2.9.0, postgres 3.4.7, `@postgres-language-server/wasm` 0.25.7, fast-check 4.9.0, pure-rand 8.4.2 and `commander` 15.0.0.',
-          )
-          replace_once(
-              'templates/THIRD-PARTY.md',
-              '- pure-rand 8.4.2 — MIT.\n',
-              '- pure-rand 8.4.2 — MIT.\n- commander 15.0.0 — MIT.\n',
-          )
-
-          license_path = root / 'vendor/licenses/THIRD-PARTY-LICENSES.md'
-          licenses = license_path.read_text(encoding='utf-8')
-          if '\n## commander\n' in licenses:
-              raise SystemExit('Commander license already present')
-          commander_license = """
-
-## commander
-
-(The MIT License)
-
-Copyright (c) 2011 TJ Holowaychuk <tj@vision-media.ca>
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-'Software'), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""
-          license_path.write_text(licenses.rstrip() + commander_license + '\n', encoding='utf-8')
-
-          (root / '.github/workflows/prepare-commander-capsule.yml').unlink()
-          PY
-
+          archive="$RUNNER_TEMP/commander-15.0.0.tgz"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --retry 4 --retry-all-errors --connect-timeout 20 \
+            -o "$archive" \
+            'https://registry.npmjs.org/commander/-/commander-15.0.0.tgz'
+          python3 scripts/prepare-commander-capsule.py "$archive"
           git diff --check
           git diff --stat
 
@@ -221,7 +64,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
           Pin the exact Commander 15.0.0 npm archive and integrity metadata, include it in the generic offline capsule build/provenance/capability inventory, and retain the upstream MIT license text. Extend source safety fixtures and runtime acceptance to require six hydrated packages and exercise the real Commander Command export. Update the builder and runtime documentation to describe the expanded exact-match capsule set without making Commander a global tool or shifting dependency authority away from the target repository.
 
           Verified:
-          Downloaded commander-15.0.0.tgz from the pinned npm registry URL, verified its lockfile SHA-512 integrity, checked package metadata for name/version/MIT license/ESM packaging/Node >=22.12.0 compatibility, passed git diff --check, and passed every repository source test script on the final source tree.
+          Downloaded commander-15.0.0.tgz from the pinned npm registry URL, verified its lockfile SHA-512 integrity, checked package metadata for name/version/MIT license/ESM packaging/Node >=22.12.0 compatibility and absence of runtime dependencies, passed git diff --check, and passed every repository source test script on the final source tree.
 
           Impact:
           Fix. Existing supported behavior is unchanged; the offline hydration path now covers the exact Commander dependency required by the current ERPI CLI. This is PATCH-level release material for v0.3.1 after qualification and metadata-only promotion.
@@ -246,7 +89,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
         run: |
           set -euo pipefail
           started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          payload="$(jq -nc --arg sha "$TARGET_SHA" '{ref:"main",inputs:{target_ref:$sha}}')"
+          payload="$(python3 -c 'import json,os; print(json.dumps({"ref":"main","inputs":{"target_ref":os.environ["TARGET_SHA"]}}))')"
           curl --fail --silent --show-error \
             -X POST \
             -H "Accept: application/vnd.github+json" \
@@ -254,7 +97,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/accept-runtime.yml/dispatches" \
             -d "$payload"
-          printf 'started_at=%s\n' "$started_at" >> "$GITHUB_OUTPUT"
+          echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
 
       - name: Require permanent runtime acceptance success
         shell: bash
@@ -270,11 +113,16 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
               -H "Authorization: Bearer $GH_TOKEN" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
               "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/accept-runtime.yml/runs?event=workflow_dispatch&per_page=20")"
-            run_id="$(jq -r --arg started "$STARTED_AT" '[.workflow_runs[] | select(.created_at >= $started)] | sort_by(.created_at) | first | .id // empty' <<<"$runs")"
-            [[ -n "$run_id" ]] && break
+            run_id="$(RUNS="$runs" STARTED_AT="$STARTED_AT" python3 -c 'import json,os; d=json.loads(os.environ["RUNS"]); xs=[r for r in d["workflow_runs"] if r["created_at"] >= os.environ["STARTED_AT"]]; xs.sort(key=lambda r:r["created_at"]); print(xs[0]["id"] if xs else "")')"
+            if [[ -n "$run_id" ]]; then
+              break
+            fi
             sleep 2
           done
-          [[ -n "$run_id" ]] || { echo 'Permanent Accept runtime dispatch was not observed.' >&2; exit 1; }
+          if [[ -z "$run_id" ]]; then
+            echo 'Permanent Accept runtime dispatch was not observed.' >&2
+            exit 1
+          fi
           echo "Permanent Accept runtime run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$run_id"
 
           for _ in $(seq 1 300); do
@@ -283,13 +131,12 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
               -H "Authorization: Bearer $GH_TOKEN" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
               "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
-            status="$(jq -r '.status' <<<"$run")"
-            conclusion="$(jq -r '.conclusion // empty' <<<"$run")"
+            read -r status conclusion < <(RUN="$run" python3 -c 'import json,os; r=json.loads(os.environ["RUN"]); print(r["status"], r.get("conclusion") or "")')
             if [[ "$status" == 'completed' ]]; then
-              [[ "$conclusion" == 'success' ]] || {
+              if [[ "$conclusion" != 'success' ]]; then
                 echo "Permanent Accept runtime concluded: $conclusion" >&2
                 exit 1
-              }
+              fi
               echo 'Permanent Accept runtime passed.'
               exit 0
             fi
