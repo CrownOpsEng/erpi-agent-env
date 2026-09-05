@@ -69,6 +69,11 @@ grep -F 'Immutable tag $release_tag already points to' "$PUBLISH" >/dev/null
 grep -F -- '--verify-tag' "$PUBLISH" >/dev/null
 grep -F -- '--draft' "$PUBLISH" >/dev/null
 grep -F 'args+=(--prerelease)' "$PUBLISH" >/dev/null
+grep -F 'for attempt in $(seq 1 10); do' "$PUBLISH" >/dev/null
+grep -F '[[ -n "$is_draft" ]] && break' "$PUBLISH" >/dev/null
+grep -F 'sleep 1' "$PUBLISH" >/dev/null
+grep -F 'Release $RELEASE_TAG was not visible after preparation; refusing to alter assets.' "$PUBLISH" >/dev/null
+grep -F 'Release $RELEASE_TAG is no longer a draft; refusing to alter immutable assets.' "$PUBLISH" >/dev/null
 grep -F 'gh release upload "$RELEASE_TAG" "$ARCHIVE" "$SIDECAR" "$METADATA"' "$PUBLISH" >/dev/null
 grep -F 'gh release edit "$RELEASE_TAG"' "$PUBLISH" >/dev/null
 

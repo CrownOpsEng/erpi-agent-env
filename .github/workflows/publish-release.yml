@@ -198,7 +198,13 @@ jobs:
           METADATA: ${{ steps.evidence.outputs.metadata }}
         run: |
           set -euo pipefail
-          is_draft="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .draft" | sed -n '1p')"
+          is_draft=""
+          for attempt in $(seq 1 10); do
+            is_draft="$(gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .draft" | sed -n '1p')"
+            [[ -n "$is_draft" ]] && break
+            sleep 1
+          done
+          [[ -n "$is_draft" ]] || { echo "Release $RELEASE_TAG was not visible after preparation; refusing to alter assets." >&2; exit 1; }
           [[ "$is_draft" == true ]] || { echo "Release $RELEASE_TAG is no longer a draft; refusing to alter immutable assets." >&2; exit 1; }
           gh release upload "$RELEASE_TAG" "$ARCHIVE" "$SIDECAR" "$METADATA" --repo "$GITHUB_REPOSITORY" --clobber
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
