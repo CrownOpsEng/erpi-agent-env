@@ -1,0 +1,266 @@
+name: Prepare Commander capsule update
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prepare-commander-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  prepare-and-accept:
+    if: github.event.pull_request.head.ref == 'fix/commander-node-capsule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out topic branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: fix/commander-node-capsule
+
+      - name: Acquire Commander and apply bounded source update
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://registry.npmjs.org/commander/-/commander-15.0.0.tgz'
+          integrity='sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg=='
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 4 --retry-all-errors -o "$tmp" "$url"
+          sha256="$(sha256sum "$tmp" | awk '{print $1}')"
+          actual_integrity="sha512-$(openssl dgst -sha512 -binary "$tmp" | base64 -w0)"
+          [[ "$actual_integrity" == "$integrity" ]] || {
+            echo "Commander npm integrity mismatch" >&2
+            exit 1
+          }
+          tar -xOzf "$tmp" package/package.json | node -e '
+            let s=""; process.stdin.setEncoding("utf8"); process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
+              const p=JSON.parse(s);
+              if(p.name!=="commander"||p.version!=="15.0.0"||p.license!=="MIT"||p.type!=="module"||p.engines?.node!==">=22.12.0") process.exit(1);
+            });'
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          SHA256="$sha256" python3 - <<'PY'
+          import json, os, pathlib
+
+          root = pathlib.Path('.')
+          sha256 = os.environ['SHA256']
+          integrity = 'sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg=='
+          url = 'https://registry.npmjs.org/commander/-/commander-15.0.0.tgz'
+
+          def text(path):
+              return (root/path).read_text(encoding='utf-8')
+
+          def write(path, value):
+              (root/path).write_text(value, encoding='utf-8')
+
+          def replace_once(path, old, new):
+              value = text(path)
+              count = value.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one occurrence, found {count}: {old!r}')
+              write(path, value.replace(old, new, 1))
+
+          versions = text('versions.env')
+          if 'COMMANDER_VERSION=' in versions or 'COMMANDER_SHA256=' in versions:
+              raise SystemExit('versions.env already contains Commander pins')
+          anchor = 'PURE_RAND_SHA256="3ce449c758cb2ea0db7ff30a1b378d381d9e74681acec74e1e2591ea6aa381ca"\n'
+          if versions.count(anchor) != 1:
+              raise SystemExit('versions.env pure-rand anchor changed')
+          versions = versions.replace(anchor, anchor + f'COMMANDER_VERSION="15.0.0"\nCOMMANDER_SHA256="{sha256}"\n', 1)
+          write('versions.env', versions)
+
+          manifest_path = root/'vendor/node-capsules/manifest.json'
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          packages = manifest['packages']
+          if 'commander' in packages:
+              raise SystemExit('Commander already exists in capsule manifest')
+          packages['commander'] = {
+              'component': 'commander',
+              'version': '15.0.0',
+              'file': 'commander-15.0.0.tgz',
+              'sha256': sha256,
+              'integrity': integrity,
+              'url': url,
+          }
+          manifest_path.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+
+          replace_once(
+              'build.sh',
+              '  "$PURE_RAND_VERSION" "$PURE_RAND_SHA256" <<\'PY_NODE_MANIFEST\'\n',
+              '  "$PURE_RAND_VERSION" "$PURE_RAND_SHA256" \\\n  "$COMMANDER_VERSION" "$COMMANDER_SHA256" <<\'PY_NODE_MANIFEST\'\n',
+          )
+          replace_once(
+              'build.sh',
+              "    'pure-rand': ('pure-rand', values[8], f'pure-rand-{values[8]}.tgz', values[9]),\n",
+              "    'pure-rand': ('pure-rand', values[8], f'pure-rand-{values[8]}.tgz', values[9]),\n    'commander': ('commander', values[10], f'commander-{values[10]}.tgz', values[11]),\n",
+          )
+          replace_once(
+              'build.sh',
+              '"node_capsules": {"yaml": "$YAML_VERSION", "postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION"},',
+              '"node_capsules": {"yaml": "$YAML_VERSION", "postgres": "$POSTGRES_JS_VERSION", "@postgres-language-server/wasm": "$PGLS_WASM_VERSION", "fast-check": "$FAST_CHECK_VERSION", "pure-rand": "$PURE_RAND_VERSION", "commander": "$COMMANDER_VERSION"},',
+          )
+
+          replace_once(
+              'tests/static-check.sh',
+              "    'pure-rand': ('pure-rand', vals['PURE_RAND_VERSION'], f\"pure-rand-{vals['PURE_RAND_VERSION']}.tgz\", vals['PURE_RAND_SHA256']),\n",
+              "    'pure-rand': ('pure-rand', vals['PURE_RAND_VERSION'], f\"pure-rand-{vals['PURE_RAND_VERSION']}.tgz\", vals['PURE_RAND_SHA256']),\n    'commander': ('commander', vals['COMMANDER_VERSION'], f\"commander-{vals['COMMANDER_VERSION']}.tgz\", vals['COMMANDER_SHA256']),\n",
+          )
+
+          replace_once('tests/node-deps-safety-check.sh', "len(marker['packages'])==5", "len(marker['packages'])==6")
+          replace_once('tests/node-deps-safety-check.sh', "len(marker['packages'])==4", "len(marker['packages'])==5")
+
+          replace_once(
+              'templates/scripts/selftest.sh',
+              'import { parse as parseYaml, stringify as stringifyYaml } from "yaml"; import postgres from "postgres"; import * as pgls from "@postgres-language-server/wasm"; import * as fc from "fast-check"; import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus"; const parsed=parseYaml("enabled: true\\n"); if(parsed.enabled!==true||parseYaml(stringifyYaml(parsed)).enabled!==true||typeof postgres!=="function"||typeof pgls!=="object"||typeof fc.assert!=="function"||typeof xoroshiro128plus!=="function") process.exit(1)',
+              'import { parse as parseYaml, stringify as stringifyYaml } from "yaml"; import postgres from "postgres"; import * as pgls from "@postgres-language-server/wasm"; import * as fc from "fast-check"; import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus"; import { Command } from "commander"; const parsed=parseYaml("enabled: true\\n"); if(parsed.enabled!==true||parseYaml(stringifyYaml(parsed)).enabled!==true||typeof postgres!=="function"||typeof pgls!=="object"||typeof fc.assert!=="function"||typeof xoroshiro128plus!=="function"||typeof Command!=="function") process.exit(1)',
+          )
+          replace_once('templates/scripts/selftest.sh', "len(marker['packages'])==5", "len(marker['packages'])==6")
+
+          replace_once(
+              'README.md',
+              '- exact offline npm capability capsules for yaml 2.9.0, postgres 3.4.7, PostgreSQL Language Server WASM 0.25.7, fast-check 4.9.0, and pure-rand 8.4.2',
+              '- exact offline npm capability capsules for yaml 2.9.0, postgres 3.4.7, PostgreSQL Language Server WASM 0.25.7, fast-check 4.9.0, pure-rand 8.4.2, and commander 15.0.0',
+          )
+          replace_once(
+              'README.md',
+              'The target repository\'s `package-lock.json` remains authority. The capsule set includes `yaml` 2.9.0 for repositories that lock that exact package, alongside the existing database and test-library capsules.',
+              'The target repository\'s `package-lock.json` remains authority. The capsule set includes `yaml` 2.9.0 and `commander` 15.0.0 for repositories that lock those exact packages, alongside the existing database and test-library capsules.',
+          )
+          replace_once(
+              'templates/RUNTIME-README.md',
+              'The immutable capsule store currently contains exact bytes for `yaml` 2.9.0, postgres 3.4.7, `@postgres-language-server/wasm` 0.25.7, fast-check 4.9.0 and pure-rand 8.4.2.',
+              'The immutable capsule store currently contains exact bytes for `yaml` 2.9.0, postgres 3.4.7, `@postgres-language-server/wasm` 0.25.7, fast-check 4.9.0, pure-rand 8.4.2 and `commander` 15.0.0.',
+          )
+          replace_once(
+              'templates/THIRD-PARTY.md',
+              '- pure-rand 8.4.2 — MIT.\n',
+              '- pure-rand 8.4.2 — MIT.\n- commander 15.0.0 — MIT.\n',
+          )
+
+          license_path = root/'vendor/licenses/THIRD-PARTY-LICENSES.md'
+          licenses = license_path.read_text(encoding='utf-8')
+          if '\n## commander\n' in licenses:
+              raise SystemExit('Commander license already present')
+          commander_license = """
+
+## commander
+
+(The MIT License)
+
+Copyright (c) 2011 TJ Holowaychuk <tj@vision-media.ca>
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""
+          license_path.write_text(licenses.rstrip() + commander_license + '\n', encoding='utf-8')
+
+          workflow = root/'.github/workflows/prepare-commander-capsule.yml'
+          workflow.unlink()
+          PY
+
+          git diff --check
+          git diff --stat
+
+      - name: Commit exact final source before qualification
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -F - <<'EOF'
+          fix(node-capsules): hydrate Commander for repository CLIs
+
+          Why:
+          ERPI now uses commander 15.0.0 in its repository-owned CLI. The released agent environment's offline Node capsule set stops short of that exact dependency, forcing an avoidable network install before the authoritative CLI can execute.
+
+          What:
+          Pin the exact Commander 15.0.0 npm archive and integrity metadata, include it in the generic offline capsule build/provenance/capability inventory, and retain the upstream MIT license text. Extend source safety fixtures and runtime acceptance to require six hydrated packages and exercise the real Commander Command export. Update the builder and runtime documentation to describe the expanded exact-match capsule set without making Commander a global tool or shifting dependency authority away from the target repository.
+
+          Verified:
+          The preparation step downloaded commander-15.0.0.tgz from the pinned npm registry URL, verified its lockfile SHA-512 integrity, and checked package metadata for name, version, MIT license, ESM packaging, and Node >=22.12.0 compatibility before committing. Full source tests, build, relocation/offline runtime acceptance, and archive reproduction run against this exact clean commit before it is pushed.
+
+          Impact:
+          Fix. Existing supported behavior is unchanged; the offline hydration path now covers the exact Commander dependency required by the current ERPI CLI. This is PATCH-level release material for v0.3.1 after qualification and metadata-only promotion.
+          EOF
+          sha="$(git rev-parse HEAD)"
+          base_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 --first-parent "$sha")"
+          distance="$(git rev-list --count --first-parent "${base_tag}..${sha}")"
+          if [[ "$distance" == 0 ]]; then description="$base_tag"; else description="${base_tag}-${distance}-g${sha:0:12}"; fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "base_tag=$base_tag" >> "$GITHUB_OUTPUT"
+          echo "distance=$distance" >> "$GITHUB_OUTPUT"
+          echo "description=$description" >> "$GITHUB_OUTPUT"
+
+      - name: Compute builder download cache key
+        id: download-cache
+        run: echo "key=$(./scripts/download-cache-key.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore builder download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .download-cache
+          key: erpi-agent-env-linux-x64-${{ steps.download-cache.outputs.key }}
+          restore-keys: |
+            erpi-agent-env-linux-x64-
+
+      - name: Run complete source test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_script in tests/*.sh; do
+            GIT_CONFIG_GLOBAL=/dev/null "$test_script"
+          done
+
+      - name: Build exact final runtime
+        env:
+          ERPI_AGENT_SOURCE_COMMIT: ${{ steps.commit.outputs.sha }}
+          ERPI_AGENT_SOURCE_BASE_TAG: ${{ steps.commit.outputs.base_tag }}
+          ERPI_AGENT_SOURCE_DISTANCE: ${{ steps.commit.outputs.distance }}
+          ERPI_AGENT_SOURCE_DESCRIPTION: ${{ steps.commit.outputs.description }}
+        run: ./build.sh
+
+      - name: Accept exact final runtime
+        run: ./accept.sh
+
+      - name: Push accepted final commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '${{ steps.commit.outputs.sha }}'
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          git push origin HEAD:fix/commander-node-capsule
+
+      - name: Retain pre-merge acceptance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: commander-capsule-acceptance-${{ steps.commit.outputs.sha }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
