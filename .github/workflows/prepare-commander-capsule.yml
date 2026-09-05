@@ -1,21 +1,22 @@
 name: Prepare Commander capsule update
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize]
+  push:
+    branches: [fix/commander-node-capsule]
 
 permissions:
+  actions: write
   contents: write
 
 concurrency:
-  group: prepare-commander-${{ github.event.pull_request.number }}
+  group: prepare-commander-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   prepare-and-accept:
-    if: github.event.pull_request.head.ref == 'fix/commander-node-capsule'
+    if: github.ref == 'refs/heads/fix/commander-node-capsule'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - name: Check out topic branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -24,7 +25,6 @@ jobs:
           ref: fix/commander-node-capsule
 
       - name: Acquire Commander and apply bounded source update
-        id: prepare
         shell: bash
         run: |
           set -euo pipefail
@@ -40,11 +40,15 @@ jobs:
             exit 1
           }
           tar -xOzf "$tmp" package/package.json | node -e '
-            let s=""; process.stdin.setEncoding("utf8"); process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{
-              const p=JSON.parse(s);
-              if(p.name!=="commander"||p.version!=="15.0.0"||p.license!=="MIT"||p.type!=="module"||p.engines?.node!==">=22.12.0") process.exit(1);
+            let s="";
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", d => s += d);
+            process.stdin.on("end", () => {
+              const p = JSON.parse(s);
+              if (p.name !== "commander" || p.version !== "15.0.0" || p.license !== "MIT" || p.type !== "module" || p.engines?.node !== ">=22.12.0") process.exit(1);
             });'
-          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          printf 'Commander 15.0.0 SHA-256: %s\n' "$sha256"
+
           SHA256="$sha256" python3 - <<'PY'
           import json, os, pathlib
 
@@ -54,10 +58,10 @@ jobs:
           url = 'https://registry.npmjs.org/commander/-/commander-15.0.0.tgz'
 
           def text(path):
-              return (root/path).read_text(encoding='utf-8')
+              return (root / path).read_text(encoding='utf-8')
 
           def write(path, value):
-              (root/path).write_text(value, encoding='utf-8')
+              (root / path).write_text(value, encoding='utf-8')
 
           def replace_once(path, old, new):
               value = text(path)
@@ -72,10 +76,14 @@ jobs:
           anchor = 'PURE_RAND_SHA256="3ce449c758cb2ea0db7ff30a1b378d381d9e74681acec74e1e2591ea6aa381ca"\n'
           if versions.count(anchor) != 1:
               raise SystemExit('versions.env pure-rand anchor changed')
-          versions = versions.replace(anchor, anchor + f'COMMANDER_VERSION="15.0.0"\nCOMMANDER_SHA256="{sha256}"\n', 1)
+          versions = versions.replace(
+              anchor,
+              anchor + f'COMMANDER_VERSION="15.0.0"\nCOMMANDER_SHA256="{sha256}"\n',
+              1,
+          )
           write('versions.env', versions)
 
-          manifest_path = root/'vendor/node-capsules/manifest.json'
+          manifest_path = root / 'vendor/node-capsules/manifest.json'
           manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
           packages = manifest['packages']
           if 'commander' in packages:
@@ -117,8 +125,13 @@ jobs:
 
           replace_once(
               'templates/scripts/selftest.sh',
-              'import { parse as parseYaml, stringify as stringifyYaml } from "yaml"; import postgres from "postgres"; import * as pgls from "@postgres-language-server/wasm"; import * as fc from "fast-check"; import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus"; const parsed=parseYaml("enabled: true\\n"); if(parsed.enabled!==true||parseYaml(stringifyYaml(parsed)).enabled!==true||typeof postgres!=="function"||typeof pgls!=="object"||typeof fc.assert!=="function"||typeof xoroshiro128plus!=="function") process.exit(1)',
-              'import { parse as parseYaml, stringify as stringifyYaml } from "yaml"; import postgres from "postgres"; import * as pgls from "@postgres-language-server/wasm"; import * as fc from "fast-check"; import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus"; import { Command } from "commander"; const parsed=parseYaml("enabled: true\\n"); if(parsed.enabled!==true||parseYaml(stringifyYaml(parsed)).enabled!==true||typeof postgres!=="function"||typeof pgls!=="object"||typeof fc.assert!=="function"||typeof xoroshiro128plus!=="function"||typeof Command!=="function") process.exit(1)',
+              'import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus";',
+              'import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus"; import { Command } from "commander";',
+          )
+          replace_once(
+              'templates/scripts/selftest.sh',
+              '||typeof xoroshiro128plus!=="function") process.exit(1)',
+              '||typeof xoroshiro128plus!=="function"||typeof Command!=="function") process.exit(1)',
           )
           replace_once('templates/scripts/selftest.sh', "len(marker['packages'])==5", "len(marker['packages'])==6")
 
@@ -129,8 +142,8 @@ jobs:
           )
           replace_once(
               'README.md',
-              'The target repository\'s `package-lock.json` remains authority. The capsule set includes `yaml` 2.9.0 for repositories that lock that exact package, alongside the existing database and test-library capsules.',
-              'The target repository\'s `package-lock.json` remains authority. The capsule set includes `yaml` 2.9.0 and `commander` 15.0.0 for repositories that lock those exact packages, alongside the existing database and test-library capsules.',
+              "The target repository's `package-lock.json` remains authority. The capsule set includes `yaml` 2.9.0 for repositories that lock that exact package, alongside the existing database and test-library capsules.",
+              "The target repository's `package-lock.json` remains authority. The capsule set includes `yaml` 2.9.0 and `commander` 15.0.0 for repositories that lock those exact packages, alongside the existing database and test-library capsules.",
           )
           replace_once(
               'templates/RUNTIME-README.md',
@@ -143,7 +156,7 @@ jobs:
               '- pure-rand 8.4.2 — MIT.\n- commander 15.0.0 — MIT.\n',
           )
 
-          license_path = root/'vendor/licenses/THIRD-PARTY-LICENSES.md'
+          license_path = root / 'vendor/licenses/THIRD-PARTY-LICENSES.md'
           licenses = license_path.read_text(encoding='utf-8')
           if '\n## commander\n' in licenses:
               raise SystemExit('Commander license already present')
@@ -176,14 +189,21 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
           license_path.write_text(licenses.rstrip() + commander_license + '\n', encoding='utf-8')
 
-          workflow = root/'.github/workflows/prepare-commander-capsule.yml'
-          workflow.unlink()
+          (root / '.github/workflows/prepare-commander-capsule.yml').unlink()
           PY
 
           git diff --check
           git diff --stat
 
-      - name: Commit exact final source before qualification
+      - name: Run complete source test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_script in tests/*.sh; do
+            GIT_CONFIG_GLOBAL=/dev/null "$test_script"
+          done
+
+      - name: Commit source-validated final state
         id: commit
         shell: bash
         run: |
@@ -201,52 +221,15 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
           Pin the exact Commander 15.0.0 npm archive and integrity metadata, include it in the generic offline capsule build/provenance/capability inventory, and retain the upstream MIT license text. Extend source safety fixtures and runtime acceptance to require six hydrated packages and exercise the real Commander Command export. Update the builder and runtime documentation to describe the expanded exact-match capsule set without making Commander a global tool or shifting dependency authority away from the target repository.
 
           Verified:
-          The preparation step downloaded commander-15.0.0.tgz from the pinned npm registry URL, verified its lockfile SHA-512 integrity, and checked package metadata for name, version, MIT license, ESM packaging, and Node >=22.12.0 compatibility before committing. Full source tests, build, relocation/offline runtime acceptance, and archive reproduction run against this exact clean commit before it is pushed.
+          Downloaded commander-15.0.0.tgz from the pinned npm registry URL, verified its lockfile SHA-512 integrity, checked package metadata for name/version/MIT license/ESM packaging/Node >=22.12.0 compatibility, passed git diff --check, and passed every repository source test script on the final source tree.
 
           Impact:
           Fix. Existing supported behavior is unchanged; the offline hydration path now covers the exact Commander dependency required by the current ERPI CLI. This is PATCH-level release material for v0.3.1 after qualification and metadata-only promotion.
           EOF
           sha="$(git rev-parse HEAD)"
-          base_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 --first-parent "$sha")"
-          distance="$(git rev-list --count --first-parent "${base_tag}..${sha}")"
-          if [[ "$distance" == 0 ]]; then description="$base_tag"; else description="${base_tag}-${distance}-g${sha:0:12}"; fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "base_tag=$base_tag" >> "$GITHUB_OUTPUT"
-          echo "distance=$distance" >> "$GITHUB_OUTPUT"
-          echo "description=$description" >> "$GITHUB_OUTPUT"
 
-      - name: Compute builder download cache key
-        id: download-cache
-        run: echo "key=$(./scripts/download-cache-key.sh)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore builder download cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .download-cache
-          key: erpi-agent-env-linux-x64-${{ steps.download-cache.outputs.key }}
-          restore-keys: |
-            erpi-agent-env-linux-x64-
-
-      - name: Run complete source test suite
-        shell: bash
-        run: |
-          set -euo pipefail
-          for test_script in tests/*.sh; do
-            GIT_CONFIG_GLOBAL=/dev/null "$test_script"
-          done
-
-      - name: Build exact final runtime
-        env:
-          ERPI_AGENT_SOURCE_COMMIT: ${{ steps.commit.outputs.sha }}
-          ERPI_AGENT_SOURCE_BASE_TAG: ${{ steps.commit.outputs.base_tag }}
-          ERPI_AGENT_SOURCE_DISTANCE: ${{ steps.commit.outputs.distance }}
-          ERPI_AGENT_SOURCE_DESCRIPTION: ${{ steps.commit.outputs.description }}
-        run: ./build.sh
-
-      - name: Accept exact final runtime
-        run: ./accept.sh
-
-      - name: Push accepted final commit
+      - name: Push final PR head
         shell: bash
         run: |
           set -euo pipefail
@@ -254,13 +237,63 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           git push origin HEAD:fix/commander-node-capsule
 
-      - name: Retain pre-merge acceptance evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: commander-capsule-acceptance-${{ steps.commit.outputs.sha }}
-          path: |
-            dist/*.tar.gz
-            dist/*.tar.gz.sha256
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
+      - name: Dispatch permanent runtime acceptance
+        id: dispatch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          set -euo pipefail
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          payload="$(jq -nc --arg sha "$TARGET_SHA" '{ref:"main",inputs:{target_ref:$sha}}')"
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/accept-runtime.yml/dispatches" \
+            -d "$payload"
+          printf 'started_at=%s\n' "$started_at" >> "$GITHUB_OUTPUT"
+
+      - name: Require permanent runtime acceptance success
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STARTED_AT: ${{ steps.dispatch.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          run_id=''
+          for _ in $(seq 1 60); do
+            runs="$(curl --fail --silent --show-error \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/accept-runtime.yml/runs?event=workflow_dispatch&per_page=20")"
+            run_id="$(jq -r --arg started "$STARTED_AT" '[.workflow_runs[] | select(.created_at >= $started)] | sort_by(.created_at) | first | .id // empty' <<<"$runs")"
+            [[ -n "$run_id" ]] && break
+            sleep 2
+          done
+          [[ -n "$run_id" ]] || { echo 'Permanent Accept runtime dispatch was not observed.' >&2; exit 1; }
+          echo "Permanent Accept runtime run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$run_id"
+
+          for _ in $(seq 1 300); do
+            run="$(curl --fail --silent --show-error \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+            status="$(jq -r '.status' <<<"$run")"
+            conclusion="$(jq -r '.conclusion // empty' <<<"$run")"
+            if [[ "$status" == 'completed' ]]; then
+              [[ "$conclusion" == 'success' ]] || {
+                echo "Permanent Accept runtime concluded: $conclusion" >&2
+                exit 1
+              }
+              echo 'Permanent Accept runtime passed.'
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Permanent Accept runtime did not complete within this qualification job.' >&2
+          exit 1
