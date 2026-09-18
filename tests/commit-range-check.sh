@@ -60,7 +60,7 @@ dev_head="$(git rev-parse HEAD)"
 printf 'PRODUCT_VERSION="0.2.0-rc.1"\nTARGET="linux-x86_64-gnu"\n' > versions.env
 write_request 0.2.0-rc.1
 git add versions.env .github/release-request.json
-good_message 'chore(release): cut 0.2.0-rc.1' 'The first release candidate metadata checkpoint' > "$TMP/message"
+printf '%s\n' 'chore(release): promote v0.2.0-rc.1' > "$TMP/message"
 git commit -q -F "$TMP/message"
 rc1_cut="$(git rev-parse HEAD)"
 ./scripts/check-commit-range.sh "$dev_head" "$rc1_cut" >/dev/null
@@ -107,7 +107,7 @@ distance="$(git rev-list --count --first-parent "${base_tag}..HEAD")"
 printf 'PRODUCT_VERSION="0.2.0-rc.2"\nTARGET="linux-x86_64-gnu"\n' > versions.env
 write_request 0.2.0-rc.2
 git add versions.env .github/release-request.json
-good_message 'chore(release): promote 0.2.0-rc.2' 'The next immutable candidate is promoted only after revisioned qualification' > "$TMP/message"
+printf '%s\n' 'chore(release): promote v0.2.0-rc.2' > "$TMP/message"
 git commit -q -F "$TMP/message"
 rc2_cut="$(git rev-parse HEAD)"
 ./scripts/check-commit-range.sh "$rc1_build2" "$rc2_cut" >/dev/null
@@ -126,6 +126,20 @@ git commit -q -F "$TMP/message"
 mixed="$(git rev-parse HEAD)"
 if ./scripts/check-commit-range.sh "$rc2_cut" "$mixed" >/dev/null 2>&1; then
   echo 'Commit-range checker allowed PRODUCT_VERSION to change with runtime source.' >&2
+  exit 1
+fi
+
+# A terse release-shaped subject must not bypass the metadata-only requirement.
+git reset -q --hard "$rc2_cut"
+printf 'PRODUCT_VERSION="0.2.0"\nTARGET="linux-x86_64-gnu"\n' > versions.env
+write_request 0.2.0
+echo mixed-terse >> file.txt
+git add versions.env .github/release-request.json file.txt
+printf '%s\n' 'chore(release): promote v0.2.0' > "$TMP/message"
+git commit -q -F "$TMP/message"
+mixed_terse="$(git rev-parse HEAD)"
+if ./scripts/check-commit-range.sh "$rc2_cut" "$mixed_terse" >/dev/null 2>&1; then
+  echo 'Commit-range checker allowed a terse release message on a mixed source change.' >&2
   exit 1
 fi
 

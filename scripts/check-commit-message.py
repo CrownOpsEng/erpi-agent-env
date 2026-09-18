@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 
@@ -12,6 +13,11 @@ SUBJECT_RE = re.compile(
 )
 REQUIRED = ("Why:", "What:", "Verified:")
 OPTIONAL = "Impact:"
+RELEASE_PROMOTION_SUBJECT = "chore(release): promote v{}"
+CLEAN_RELEASE_VERSION_RE = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-(?:alpha|beta|rc)\.[1-9][0-9]*)?$"
+)
 
 
 def fail(message: str) -> None:
@@ -23,6 +29,21 @@ def meaningful(lines: list[str], heading: str) -> None:
     text = " ".join(line.strip() for line in lines if line.strip())
     if len(text) < 12:
         fail(f"{heading} needs a meaningful explanation, not a placeholder")
+
+
+def validate_release_promotion(message: str, version: str) -> None:
+    if not CLEAN_RELEASE_VERSION_RE.fullmatch(version):
+        fail(
+            "release promotion context requires a clean stable/alpha/beta/rc version, "
+            f"not {version}"
+        )
+    lines = message.rstrip("\n").splitlines()
+    expected = RELEASE_PROMOTION_SUBJECT.format(version)
+    if lines != [expected]:
+        fail(
+            "release promotion must be exactly one line: "
+            f"{expected}"
+        )
 
 
 def validate(message: str) -> None:
@@ -69,8 +90,19 @@ def validate(message: str) -> None:
 
 
 def main() -> None:
-    validate(sys.stdin.read())
-    print("Detailed commit message check passed.")
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--release-promotion-version",
+        help="allow the exact one-line metadata-only promotion subject for this version",
+    )
+    args = parser.parse_args()
+    message = sys.stdin.read()
+    if args.release_promotion_version:
+        validate_release_promotion(message, args.release_promotion_version)
+        print("Release promotion commit message check passed.")
+    else:
+        validate(message)
+        print("Detailed commit message check passed.")
 
 
 if __name__ == "__main__":

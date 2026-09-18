@@ -27,6 +27,30 @@ expect_fail() {
   fi
 }
 
+
+for version in 0.4.0 0.4.0-alpha.1 0.4.0-beta.2 0.4.0-rc.3; do
+  release="chore(release): promote v${version}"
+  printf '%s\n' "$release" | python3 "$CHECKER" --release-promotion-version "$version" >/dev/null
+done
+release='chore(release): promote v0.4.0'
+
+if printf '%s\n' "$release" | python3 "$CHECKER" >/dev/null 2>&1; then
+  echo "Detailed commit-message checker unexpectedly accepted a terse release promotion without release context." >&2
+  exit 1
+fi
+if printf '%s\n' 'chore(release): promote v0.4.1' | python3 "$CHECKER" --release-promotion-version 0.4.0 >/dev/null 2>&1; then
+  echo "Release promotion checker accepted the wrong promoted version." >&2
+  exit 1
+fi
+if printf '%s\n' 'chore(release): promote v0.4.0-rc.1-1' | python3 "$CHECKER" --release-promotion-version 0.4.0-rc.1-1 >/dev/null 2>&1; then
+  echo "Release promotion checker accepted a revisioned development build as a clean release." >&2
+  exit 1
+fi
+if printf '%s\n\nWhy:\nextra body' "$release" | python3 "$CHECKER" --release-promotion-version 0.4.0 >/dev/null 2>&1; then
+  echo "Release promotion checker accepted an unexpected body." >&2
+  exit 1
+fi
+
 expect_fail 'fix(repo): terse subject only'
 expect_fail 'Fix repository policy
 
