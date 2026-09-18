@@ -15,7 +15,7 @@ A payload-affecting source commit is releasable only after **Accept runtime** ru
 - verified upstream/custom payload hashes before execution or inclusion
 - supported Linux x86-64/glibc host contract
 - exact SHA-verified python-build-standalone acquisition through the shared cache path, uv-managed installation from that local mirror, Python relocation repair, native-import checks, and offline venv destruction/rebuild
-- bundled command functional probes, including ShellCheck positive/negative behavior, Miller transformation, HTTPX CLI localhost execution, and host-Git-backed connector handoff restoration when Git is available
+- bundled command functional probes, including JSON Schema `date-time` positive/negative format validation, ShellCheck positive/negative behavior, Miller transformation, HTTPX CLI localhost execution, and host-Git-backed connector handoff restoration when Git is available
 - connected acquisition of every Node capsule from its manifest URL with pinned SHA-256, followed by exact-lock offline hydration using the real bundled packages, content-bound ownership, import execution, and safe cleanup
 - source-level Node-capsule negative tests for lock mismatch, all-or-nothing late conflicts, symlinked `node_modules`/scope escape attempts, stale ownership, pre-existing repository packages, and legacy-marker refusal
 - PostgreSQL server/client version and extension integration checks

@@ -29,6 +29,9 @@ for line in req_in.splitlines():
     if not line or line.startswith('#'): continue
     name,version=line.split('==',1); name=re.sub(r'\[.*\]$','',name)
     assert locked.get(name.lower())==version,(name,version,locked.get(name.lower()))
+assert 'jsonschema[format-nongpl]==4.26.0' in {line.strip() for line in req_in.splitlines()}
+for package in ('fqdn','isoduration','jsonpointer','rfc3339-validator','rfc3986-validator','rfc3987-syntax','uri-template','webcolors'):
+    assert package in locked,('missing jsonschema format dependency',package)
 assert 'pytest' not in locked and 'setuptools' not in locked and 'wheel' not in locked
 checks={
  'vendor/database/postgresql-client-17.10-linux-x64-gnu.tar.gz':'POSTGRES_CLIENT_SHA256',
@@ -173,6 +176,8 @@ grep -F '__ERPI_AGENT_PYTHON_PREFIX__' "$ROOT/scripts/normalize-python-sysconfig
 grep -F "sysconfig.get_config_var('BINDIR')" "$ROOT/templates/scripts/python-smoke.sh" >/dev/null
 # Native/compiled Python and console entrypoints have a bounded subsystem smoke check.
 grep -F 'import httpx, jsonschema, packaging, yaml, tomlkit, rpds' "$ROOT/templates/scripts/python-smoke.sh" >/dev/null
+grep -F 'from jsonschema import Draft202012Validator, FormatChecker' "$ROOT/templates/scripts/python-smoke.sh" >/dev/null
+grep -F "assert not format_validator.is_valid('not-a-date-time')" "$ROOT/templates/scripts/python-smoke.sh" >/dev/null
 grep -F 'from yaml import CLoader' "$ROOT/templates/scripts/python-smoke.sh" >/dev/null
 ! grep -F 'pytest --version' "$ROOT/templates/scripts/python-smoke.sh"
 grep -Fx 'pip --version >/dev/null' "$ROOT/templates/scripts/python-smoke.sh" >/dev/null

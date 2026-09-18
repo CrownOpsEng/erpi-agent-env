@@ -20,7 +20,7 @@ The finished bundle pins and verifies a deliberately small generic capability la
 - Node.js 24.19.0 LTS with npm/npx
 - GitHub CLI, jq, yq, ripgrep, actionlint, gitleaks, ShellCheck, and Miller
 - a bounded Git-bundle handoff restorer that turns connector-downloaded repository artifacts into verified local worktrees without shell GitHub networking or credentials
-- a locked Python analysis layer with the HTTPX CLI completed, without project-specific pytest/setuptools/wheel requirements
+- a locked Python analysis layer with the HTTPX CLI completed and JSON Schema 4.26.0 plus non-GPL format validators, without project-specific pytest/setuptools/wheel requirements
 - PostgreSQL 17.10 server plus explicitly routed client/test/recovery tools, pgTAP 1.3.3, and plpgsql_check 2.8.11
 - Supabase CLI 2.117.0 from the exact official Linux amd64 release archive, with its matched `supabase-go` companion and host/session credentials preserved outside the bundle
 - PostgREST 16.2 as the exact official static Linux x64 native default selected by Supabase CLI 2.117.0, exposed only through a loopback-only local execution wrapper
@@ -88,7 +88,7 @@ Hydration is deliberately transactional and repository-contained. It validates a
 
 ## Python lock and build isolation
 
-`requirements.lock` is source-controlled input, not generated during hydration. Its exact 21-package hashed resolution and its own SHA-256 are pinned. Changing the lock is an intentional builder change, not an ambient resolver event.
+`requirements.lock` is source-controlled input, not generated during hydration. Its exact 33-package hashed resolution and its own SHA-256 are pinned. Changing the lock is an intentional builder change, not an ambient resolver event.
 
 Builder/recovery uv invocations ignore project/user uv configuration and Python artifact-selection overrides while preserving ordinary proxy and CA/system-certificate transport settings. The exact pinned python-build-standalone archive is downloaded and SHA-256 verified by the shared acquisition layer, then supplied to uv through its supported local mirror path. The temporary pip bootstrap wheel follows the same verified acquisition rule before execution.
 
