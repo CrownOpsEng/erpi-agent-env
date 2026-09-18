@@ -33,7 +33,15 @@ assert pathlib.Path(sysconfig.get_config_var('LIBDIR')).resolve()==base/'lib'
 assert '__ERPI_AGENT_PYTHON_PREFIX__' not in repr(sysconfig.get_config_vars())
 import httpx, jsonschema, packaging, yaml, tomlkit, rpds  # noqa: F401
 from yaml import CLoader
+from jsonschema import Draft202012Validator, FormatChecker
+import rfc3339_validator  # noqa: F401
 assert CLoader is not None
+format_validator=Draft202012Validator(
+    {'type':'string','format':'date-time'},
+    format_checker=FormatChecker(),
+)
+assert format_validator.is_valid('2026-09-18T15:04:05Z')
+assert not format_validator.is_valid('not-a-date-time')
 print('python-ok',sys.version.split()[0])
 PY
 real_python="$(readlink -f "$ROOT/env/bin/.python-real")"

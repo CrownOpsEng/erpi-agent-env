@@ -1,5 +1,5 @@
 httpx[cli]==0.28.1
-jsonschema==4.26.0
+jsonschema[format-nongpl]==4.26.0
 packaging==26.2
 PyYAML==6.0.3
 tomlkit==0.15.1
