@@ -1,11 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { createPlan, renderPlanFiles } from "@supabase/pg-delta";
-import { supabase } from "@supabase/pg-delta/integrations/supabase";
+import { Pool } from "pg";
+import {
+  hasBlockingDiagnostics,
+  renderPlanFiles,
+  STRICT_COVERAGE_CODES,
+} from "@supabase/pg-delta/frontends";
+import { resolveProfile, supabaseProfile } from "@supabase/pg-delta/integrations";
+import { plan } from "@supabase/pg-delta/plan";
 
-const PG_DELTA_VERSION = "1.0.0-alpha.33";
-const SUPABASE_CLI_BASELINE = "2.114.0";
+const PG_DELTA_VERSION = "1.0.0-alpha.49";
+const SUPABASE_CLI_BASELINE = "2.117.0";
 
 function usage() {
   process.stderr.write(
@@ -79,19 +85,10 @@ function prepareOutput(raw) {
   return out;
 }
 
-function safeRenderedPath(renderedPath) {
-  if (
-    !renderedPath ||
-    path.isAbsolute(renderedPath) ||
-    renderedPath.includes("/") ||
-    renderedPath.includes("\\") ||
-    renderedPath === "." ||
-    renderedPath === ".." ||
-    renderedPath.includes("..")
-  ) {
-    throw new Error("pg-delta returned an unsafe output filename.");
-  }
-  return renderedPath;
+function renderedPath(index, suffix) {
+  const sequence = String(index + 1).padStart(3, "0");
+  const tail = suffix ?? "";
+  return `${sequence}_plan${tail}.sql`;
 }
 
 function redact(text, values) {
@@ -112,11 +109,23 @@ function redact(text, values) {
   return result;
 }
 
+function diagnosticText(diagnostic) {
+  const code = typeof diagnostic?.code === "string" ? diagnostic.code : "unknown";
+  const severity = typeof diagnostic?.severity === "string" ? diagnostic.severity : "unknown";
+  const message = typeof diagnostic?.message === "string" ? diagnostic.message : "diagnostic without message";
+  return `${severity} ${code}: ${message}`;
+}
+
+function isStrictCoverageBlocker(diagnostic) {
+  return diagnostic?.severity === "error" || STRICT_COVERAGE_CODES.has(diagnostic?.code);
+}
+
 const args = parseArgs(process.argv.slice(2));
 const source = validateLoopbackDatabaseUrl(args.source, "--source");
 const target = validateLoopbackDatabaseUrl(args.target, "--target");
+
 // Explicit URLs are the sole database authority for this command. Prevent host
-// PostgreSQL environment from influencing pg-delta or any transitive client.
+// PostgreSQL environment from influencing pg-delta or its pg client.
 for (const key of [
   "DATABASE_URL", "PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER",
   "PGPASSWORD", "PGPASSFILE", "PGSERVICE", "PGSERVICEFILE", "PGOPTIONS",
@@ -126,40 +135,64 @@ for (const key of [
   delete process.env[key];
 }
 
+const sourcePool = new Pool({ connectionString: source, max: 4 });
+const targetPool = new Pool({ connectionString: target, max: 4 });
+
 try {
-  const result = await createPlan(source, target, {
-    ...supabase,
-    skipDefaultPrivilegeSubtraction: true,
+  // Match the bundled Supabase CLI 2.117 profile-based pipeline rather than
+  // reconstructing its managed-view policy locally. Resolve once against the
+  // source and use the same profile/options to extract both sides.
+  const profile = await resolveProfile(sourcePool, supabaseProfile, { redactSecrets: true });
+  const [sourceState, targetState] = await Promise.all([
+    profile.extract(sourcePool, { redactSecrets: true }),
+    profile.extract(targetPool, { redactSecrets: true }),
+  ]);
+  const generatedPlan = plan(sourceState.factBase, targetState.factBase, {
+    ...profile.planOptions,
+    redactSecrets: true,
   });
-  const files = result
-    ? renderPlanFiles(result.plan, {
-        includeTransactions: false,
-        sqlFormatOptions: { maxWidth: 180, keywordCase: "upper" },
-      })
-    : [];
+  const diagnostics = [
+    ...sourceState.diagnostics,
+    ...targetState.diagnostics,
+    ...(generatedPlan.diagnostics ?? []),
+  ];
+  if (hasBlockingDiagnostics(diagnostics, { strictCoverage: true })) {
+    const blocking = diagnostics.filter(isStrictCoverageBlocker).map(diagnosticText);
+    throw new Error(`strict coverage gate refused an incomplete pg-delta plan: ${blocking.join(" | ")}`);
+  }
+  for (const diagnostic of diagnostics) {
+    process.stderr.write(`pg-delta diagnostic: ${diagnosticText(diagnostic)}\n`);
+  }
+  const rendered = renderPlanFiles(generatedPlan, { allowDrops: true });
   const out = prepareOutput(args.out);
   const envelope = {
     version: 1,
     pgDeltaVersion: PG_DELTA_VERSION,
     supabaseCliBaseline: SUPABASE_CLI_BASELINE,
-    files: files.map((file, index) => {
-      const renderedPath = safeRenderedPath(file.path);
-      return {
-        order: index + 1,
-        name: renderedPath.replace(/^\d+_/, "").replace(/\.sql$/, ""),
-        path: renderedPath,
-        transactionMode: file.unit.transactionMode,
-        statements: file.unit.statements.length,
-      };
-    }),
+    profile: profile.id,
+    files: rendered.files.map((file, index) => ({
+      order: index + 1,
+      name: file.suffix === null ? "plan" : `plan${file.suffix}`,
+      path: renderedPath(index, file.suffix),
+      transactionMode: file.transactional ? "transactional" : "none",
+      statements: file.actionCount,
+    })),
   };
-  for (const [index, file] of files.entries()) {
-    fs.writeFileSync(path.join(out, envelope.files[index].path), file.sql, { encoding: "utf8", mode: 0o644 });
+  for (const [index, file] of rendered.files.entries()) {
+    fs.writeFileSync(path.join(out, envelope.files[index].path), file.contents, {
+      encoding: "utf8",
+      mode: 0o644,
+    });
   }
-  fs.writeFileSync(path.join(out, "envelope.json"), `${JSON.stringify(envelope, null, 2)}\n`, { encoding: "utf8", mode: 0o644 });
+  fs.writeFileSync(path.join(out, "envelope.json"), `${JSON.stringify(envelope, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o644,
+  });
   process.stdout.write(`${JSON.stringify(envelope)}\n`);
 } catch (error) {
   const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   process.stderr.write(`pg-delta plan failed: ${redact(message, [source, target, args.source, args.target])}\n`);
-  process.exit(1);
+  process.exitCode = 1;
+} finally {
+  await Promise.allSettled([sourcePool.end(), targetPool.end()]);
 }

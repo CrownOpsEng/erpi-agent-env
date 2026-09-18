@@ -313,23 +313,35 @@ install -m 0644 "$PG_DELTA_LOCK" "$BUILD/runtime/pg-delta/package-lock.json"
 install -m 0644 "$PG_DELTA_LOCK" "$BUILD/manifest/pg-delta-package-lock.json"
 install -m 0644 "$SELF_DIR/templates/scripts/pg-delta.mjs" "$BUILD/runtime/pg-delta/plan.mjs"
 install -m 0644 "$SELF_DIR/vendor/pg-delta/LICENSE" "$BUILD/licenses/pg-delta/LICENSE"
-"$BUILD/env/bin/python" - "$BUILD/runtime/pg-delta/package.json" "$PG_DELTA_LOCK" "$PG_DELTA_VERSION" <<'PY_PG_DELTA_LOCK'
+"$BUILD/env/bin/python" - "$BUILD/runtime/pg-delta/package.json" "$PG_DELTA_LOCK" "$PG_DELTA_VERSION" "$PG_TOPO_VERSION" "$PG_DELTA_PG_CLIENT_VERSION" <<'PY_PG_DELTA_LOCK'
 import json, pathlib, re, sys
 package_path, lock_path = map(pathlib.Path, sys.argv[1:3])
 expected = sys.argv[3]
+topo_expected = sys.argv[4]
+pg_client_expected = sys.argv[5]
 package = json.loads(package_path.read_text(encoding='utf-8'))
 lock = json.loads(lock_path.read_text(encoding='utf-8'))
 assert package.get('private') is True
-assert package.get('dependencies') == {'@supabase/pg-delta': expected}
+assert package.get('dependencies') == {'@supabase/pg-delta': expected, '@supabase/pg-topo': topo_expected, 'pg': pg_client_expected}
 assert lock.get('lockfileVersion') == 3
 packages = lock.get('packages')
 assert isinstance(packages, dict) and packages
-assert packages[''].get('dependencies') == {'@supabase/pg-delta': expected}
+assert packages[''].get('dependencies') == {'@supabase/pg-delta': expected, '@supabase/pg-topo': topo_expected, 'pg': pg_client_expected}
 direct = packages.get('node_modules/@supabase/pg-delta', {})
 assert direct.get('version') == expected
 assert direct.get('license') == 'MIT'
 assert direct.get('engines', {}).get('node') == '>=20.0.0'
-assert direct.get('bin') == {'pgdelta': 'dist/cli/bin/cli.js'}
+assert direct.get('bin') == {'pgdelta': 'dist/cli/main.js'}
+assert direct.get('dependencies') == {'debug': '^4.3.7', 'pg': '^8.17.2', 'pg-connection-string': '^2.13.0'}
+assert direct.get('peerDependencies') == {'@supabase/pg-topo': '^1.0.0-alpha.6'}
+assert direct.get('peerDependenciesMeta') == {'@supabase/pg-topo': {'optional': True}}
+topo = packages.get('node_modules/@supabase/pg-topo', {})
+assert topo.get('version') == topo_expected
+assert topo.get('license') == 'MIT'
+assert topo.get('dependencies') == {'@pgsql/traverse': '^17.2.4', 'plpgsql-parser': '^0.5.4'}
+pg_client = packages.get('node_modules/pg', {})
+assert pg_client.get('version') == pg_client_expected
+assert pg_client.get('license') == 'MIT'
 for path, record in packages.items():
     if not path.startswith('node_modules/'):
         continue
@@ -355,7 +367,7 @@ rm -rf "$BUILD/runtime/pg-delta/node_modules/.bin"
 "$BUILD/runtime/node/bin/node" --check "$BUILD/runtime/pg-delta/plan.mjs"
 (
   cd "$BUILD/runtime/pg-delta"
-  "$BUILD/runtime/node/bin/node" --input-type=module -e 'import { createPlan, renderPlanFiles } from "@supabase/pg-delta"; import { supabase } from "@supabase/pg-delta/integrations/supabase"; if(typeof createPlan!=="function"||typeof renderPlanFiles!=="function"||typeof supabase!=="object") process.exit(1)'
+  "$BUILD/runtime/node/bin/node" --input-type=module -e 'import { renderPlanFiles } from "@supabase/pg-delta/frontends"; import { resolveProfile, supabaseProfile } from "@supabase/pg-delta/integrations"; import { plan } from "@supabase/pg-delta/plan"; if(typeof resolveProfile!=="function"||typeof supabaseProfile!=="object"||typeof plan!=="function"||typeof renderPlanFiles!=="function") process.exit(1)'
 )
 "$BUILD/env/bin/python" - "$PG_DELTA_LOCK" "$BUILD/runtime/pg-delta/node_modules" "$BUILD/manifest/pg-delta-packages.tsv" <<'PY_PG_DELTA_PROVENANCE'
 import csv, json, pathlib, sys
@@ -671,7 +683,7 @@ cat > "$BUILD/manifest/environment.json" <<JSON
   },
   "capabilities": {
     "postgresql": {"server": "$POSTGRES_VERSION", "server_source": "$POSTGRES_SOURCE_URL", "server_source_sha256": "$POSTGRES_SOURCE_SHA256", "server_build_image": "${POSTGRES_BUILD_IMAGE}@sha256:${POSTGRES_BUILD_IMAGE_SHA256}", "pgtap": "$PGTAP_VERSION", "plpgsql_check": "$PLPGSQL_CHECK_VERSION", "client_tools": true, "disposable_clusters": true, "pgbench": true, "dump_restore": true, "amcheck": true, "checksums": true},
-    "pg_delta": {"version": "$PG_DELTA_VERSION", "supabase_cli_baseline": "$PG_DELTA_SUPABASE_CLI_BASELINE", "surface": "plan-only", "live_connections": "numeric-loopback-only"},
+    "pg_delta": {"version": "$PG_DELTA_VERSION", "pg_topo_version": "$PG_TOPO_VERSION", "pg_client_version": "$PG_DELTA_PG_CLIENT_VERSION", "supabase_cli_baseline": "$PG_DELTA_SUPABASE_CLI_BASELINE", "surface": "plan-only", "live_connections": "numeric-loopback-only"},
     "postgrest": {"version": "$POSTGREST_VERSION", "supabase_cli_baseline": "$POSTGREST_SUPABASE_CLI_BASELINE", "database_targets": "numeric-loopback-only", "http_listener": "loopback-only"},
     "supabase_cli": {"version": "$SUPABASE_CLI_VERSION", "distribution": "official-linux-amd64", "companion": "bundled-supabase-go", "credentials": "host/session", "container_runtime": "host-required-for-stack-commands"},
     "git_handoff": {"artifact_format": "git-bundle-zip-v1", "requires_host_git": true, "network": "not-required"},

@@ -71,6 +71,12 @@ source_base_tag() {
 }
 
 
+
+clean_release_version() {
+  local version="$1"
+  [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.[1-9][0-9]*)?$ ]]
+}
+
 candidate_base_version() {
   local version="$1"
   if [[ "$version" =~ ^([0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[1-9][0-9]*)-([1-9][0-9]*)$ ]]; then
@@ -105,7 +111,6 @@ version_change_is_release_metadata_only() {
 for commit in "${commits[@]}"; do
   subject="$(git show -s --format=%s "$commit")"
   echo "Checking commit ${commit:0:12}: $subject"
-  git show -s --format=%B "$commit" | python3 "$ROOT/scripts/check-commit-message.py"
 
   current_version="$(product_version_from_commit "$commit")" || {
     echo "Commit $commit must define PRODUCT_VERSION in versions.env; BUNDLE_VERSION is obsolete." >&2
@@ -115,6 +120,22 @@ for commit in "${commits[@]}"; do
   base_version="${base_tag#v}"
 
   parent="$(git rev-parse "${commit}^1" 2>/dev/null || true)"
+
+  release_message_version=""
+  if [[ -n "$parent" ]] && parent_message_version="$(product_version_from_commit "$parent" 2>/dev/null)"; then
+    if [[ "$current_version" != "$parent_message_version" ]] \
+      && clean_release_version "$current_version" \
+      && version_change_is_release_metadata_only "$parent" "$commit"; then
+      release_message_version="$current_version"
+    fi
+  fi
+  if [[ -n "$release_message_version" ]]; then
+    git show -s --format=%B "$commit" | python3 "$ROOT/scripts/check-commit-message.py" \
+      --release-promotion-version "$release_message_version"
+  else
+    git show -s --format=%B "$commit" | python3 "$ROOT/scripts/check-commit-message.py"
+  fi
+
   [[ -n "$parent" ]] || continue
 
   if parent_version="$(product_version_from_commit "$parent" 2>/dev/null)"; then

@@ -39,6 +39,14 @@ Use a Conventional Commit type such as `feat`, `fix`, `perf`, `refactor`, `test`
 
 `Verified:` is evidence already obtained. Do not write future-tense claims such as “CI will pass” or use the commit body as a task list. Post-push/PR CI results belong in the PR/review evidence; the commit must remain truthful at creation time.
 
+A release-metadata-only promotion is deliberately terse because it is not a review unit and carries no new behavior. After the commit-range checker proves that only `versions.env` and `.github/release-request.json` changed, and that the version transition is a valid clean release/prerelease promotion, its complete commit message is exactly:
+
+```text
+chore(release): promote v<version>
+```
+
+No body is required for that mechanically bounded exception. A release-shaped subject never relaxes the detailed-message requirement for any commit that changes other files.
+
 The record describes the final checkpoint, not the editing chronology. Preserve useful rationale; leave failed attempts and transient debugging narration in tool logs, review discussion, or other historical evidence when it matters.
 
 ## Pull requests
