@@ -42,11 +42,11 @@ The runtime includes pgTAP 1.3.3, plpgsql_check 2.8.11, pgbench, pg_dump/pg_rest
 
 ### Supabase CLI
 
-`supabase` runs the pinned official Supabase CLI 2.114.0 Linux amd64 distribution. The wrapper always binds the matching bundled `supabase-go` companion while leaving `HOME`, XDG paths, access tokens, project credentials, and network policy as host/session state. Filesystem-only commands such as `supabase init` and `supabase migration new` work without a container runtime; commands that manage the local Supabase stack still require a usable host Docker-compatible runtime and any remote operations still require host network access and credentials.
+`supabase` runs the pinned official Supabase CLI 2.117.0 Linux amd64 distribution. The wrapper always binds the matching bundled `supabase-go` companion while leaving `HOME`, XDG paths, access tokens, project credentials, and network policy as host/session state. Filesystem-only commands such as `supabase init` and `supabase migration new` work without a container runtime; commands that manage the local Supabase stack still require a usable host Docker-compatible runtime and any remote operations still require host network access and credentials.
 
 ### PostgREST request execution
 
-`agent-env postgrest run --db-uri postgresql://authenticator@127.0.0.1:54322/postgres --db-schemas api --db-anon-role anon --port 3000 -- COMMAND` starts the pinned standalone PostgREST 14.16 process, waits for its schema cache to become ready, exports `POSTGREST_URL` to `COMMAND`, and tears the service down when that command exits. The version is the exact upstream native default selected by the qualified Supabase CLI 2.114.0 baseline.
+`agent-env postgrest run --db-uri postgresql://authenticator@127.0.0.1:54322/postgres --db-schemas api --db-anon-role anon --port 3000 -- COMMAND` starts the pinned standalone PostgREST 16.2 process, waits for its schema cache to become ready, exports `POSTGREST_URL` to `COMMAND`, and tears the service down when that command exits. The version is the exact upstream native default selected by the qualified Supabase CLI 2.117.0 baseline.
 
 Database URLs are restricted to numeric loopback and query parameters capable of retargeting libpq are refused. HTTP is always bound to `127.0.0.1`; inherited `PGRST_*` variables are scrubbed before the service starts. Optional `--db-extra-search-path` and `--db-pre-request` values are repository-owned PostgREST configuration, not provider policy. This surface is for real PostgREST request-role, transaction, search-path, pre-request and RPC semantics. It deliberately does not emulate Kong, Supabase Auth/API-key routing, Storage, or managed-platform behavior.
 
@@ -54,7 +54,7 @@ Database URLs are restricted to numeric loopback and query parameters capable of
 
 `agent-env pg-delta plan --source postgresql://... --target postgresql://... --out DIR` generates numbered SQL plan files plus `envelope.json`. Both live URLs must use numeric loopback (`127.0.0.1` or `::1`); inherited PostgreSQL targeting variables are scrubbed, and remote URLs are refused before connection. The output directory must be new or empty.
 
-This is deliberately **plan-only**. The upstream pg-delta `apply` and `sync` commands are not exposed. Version 1.0.0-alpha.33 is pinned because it is the exact default used by the qualified Supabase CLI 2.114.0 baseline; useful, safe planning compatibility is the contract, not byte-for-byte parity with every Supabase CLI wrapper option. The emitted `transactionMode` metadata remains relevant to whatever repository-owned tooling reviews or applies a plan.
+This is deliberately **plan-only**. The upstream pg-delta `apply` and `sync` commands are not exposed. Version 1.0.0-alpha.49 plus its matched `@supabase/pg-topo` 1.0.0-alpha.6 companion are pinned because they are the exact engine pair used by the qualified Supabase CLI 2.117.0 baseline; the wrapper also declares the `pg` 8.23.0 client it imports directly. Planning fails closed on pg-delta errors and strict coverage gaps instead of emitting a knowingly incomplete migration, while non-blocking diagnostics are written to stderr. Useful, safe planning compatibility is the contract, not byte-for-byte parity with every Supabase CLI wrapper option. The emitted `transactionMode` metadata remains relevant to whatever repository-owned tooling reviews or applies a plan.
 
 ## Offline repository-owned Node dependencies
 

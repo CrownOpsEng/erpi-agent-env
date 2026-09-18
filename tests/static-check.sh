@@ -62,14 +62,24 @@ pg_lock_path=root/'vendor/pg-delta/package-lock.json'
 pg_lock=json.loads(pg_lock_path.read_text(encoding='utf-8'))
 assert hashlib.sha256(pg_lock_path.read_bytes()).hexdigest()==vals['PG_DELTA_LOCK_SHA256']
 assert pg_package.get('private') is True
-assert pg_package.get('dependencies')=={'@supabase/pg-delta':vals['PG_DELTA_VERSION']}
+assert pg_package.get('dependencies')=={'@supabase/pg-delta':vals['PG_DELTA_VERSION'],'@supabase/pg-topo':vals['PG_TOPO_VERSION'],'pg':vals['PG_DELTA_PG_CLIENT_VERSION']}
 assert pg_lock.get('lockfileVersion')==3
 pg_packages=pg_lock.get('packages'); assert isinstance(pg_packages,dict) and pg_packages
-assert pg_packages[''].get('dependencies')=={'@supabase/pg-delta':vals['PG_DELTA_VERSION']}
+assert pg_packages[''].get('dependencies')=={'@supabase/pg-delta':vals['PG_DELTA_VERSION'],'@supabase/pg-topo':vals['PG_TOPO_VERSION'],'pg':vals['PG_DELTA_PG_CLIENT_VERSION']}
 direct=pg_packages.get('node_modules/@supabase/pg-delta',{})
 assert direct.get('version')==vals['PG_DELTA_VERSION']
 assert direct.get('license')=='MIT'
-assert direct.get('bin')=={'pgdelta':'dist/cli/bin/cli.js'}
+assert direct.get('bin')=={'pgdelta':'dist/cli/main.js'}
+assert direct.get('dependencies')=={'debug':'^4.3.7','pg':'^8.17.2','pg-connection-string':'^2.13.0'}
+assert direct.get('peerDependencies')=={'@supabase/pg-topo':'^1.0.0-alpha.6'}
+assert direct.get('peerDependenciesMeta')=={'@supabase/pg-topo':{'optional':True}}
+topo=pg_packages.get('node_modules/@supabase/pg-topo',{})
+assert topo.get('version')==vals['PG_TOPO_VERSION']
+assert topo.get('license')=='MIT'
+assert topo.get('dependencies')=={'@pgsql/traverse':'^17.2.4','plpgsql-parser':'^0.5.4'}
+pg_client=pg_packages.get('node_modules/pg',{})
+assert pg_client.get('version')==vals['PG_DELTA_PG_CLIENT_VERSION']
+assert pg_client.get('license')=='MIT'
 for path,record in pg_packages.items():
     if not path.startswith('node_modules/'): continue
     assert record.get('version'),(path,'version')
@@ -125,17 +135,17 @@ grep -F 'YQ_SHA256="fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789e
 ! grep -R -nE 'YQ_CHECKSUMS_SHA256|YQ_HASH|yq-checksums|awk.*yq_linux_amd64' "$ROOT/build.sh" "$ROOT/versions.env"
 grep -F "find . -xtype l ! -path './state/*'" "$ROOT/templates/scripts/verify.sh" >/dev/null
 # Standalone PostgREST is an exact upstream static asset with bounded local routing.
-grep -F 'POSTGREST_VERSION="14.16"' "$ROOT/versions.env" >/dev/null
-grep -F 'POSTGREST_SHA256="36b8ae140f188cfcd6003494805bf35a41e895f88c12be9183d60f91782145c6"' "$ROOT/versions.env" >/dev/null
-grep -F 'POSTGREST_SUPABASE_CLI_BASELINE="2.114.0"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGREST_VERSION="16.2"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGREST_SHA256="4712595baae0f5d84a527d55a11166d6bf4d9b0f1d102505c5e9d59219787f08"' "$ROOT/versions.env" >/dev/null
+grep -F 'POSTGREST_SUPABASE_CLI_BASELINE="2.117.0"' "$ROOT/versions.env" >/dev/null
 grep -F 'postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz' "$ROOT/build.sh" >/dev/null
 grep -F 'build_acquire_verified "$POSTGREST_URL" "$POSTGREST_AR" "$POSTGREST_SHA256"' "$ROOT/build.sh" >/dev/null
 grep -F 'PGRST_SERVER_HOST' "$ROOT/templates/scripts/postgrest.py" >/dev/null
 grep -F 'RETARGET_QUERY_KEYS' "$ROOT/templates/scripts/postgrest.py" >/dev/null
 grep -F 'postgrest run' "$ROOT/templates/bin/agent-env" >/dev/null
 # Supabase CLI is the exact official paired Linux amd64 release and keeps credentials outside the bundle.
-grep -F 'SUPABASE_CLI_VERSION="2.114.0"' "$ROOT/versions.env" >/dev/null
-grep -F 'SUPABASE_CLI_SHA256="f36a33ca867f1cce9ba5efa705863fdc545d1465d3719a721793ea67eb692c5a"' "$ROOT/versions.env" >/dev/null
+grep -F 'SUPABASE_CLI_VERSION="2.117.0"' "$ROOT/versions.env" >/dev/null
+grep -F 'SUPABASE_CLI_SHA256="69c05f85b9e47ee706d30f1a6ca8a526b4e337bfd12c7ef1ef522d24e7280d24"' "$ROOT/versions.env" >/dev/null
 grep -F 'supabase_${SUPABASE_CLI_VERSION}_linux_amd64.tar.gz' "$ROOT/build.sh" >/dev/null
 grep -F 'SUPABASE_GO_BINARY="$ROOT/runtime/supabase/supabase-go"' "$ROOT/templates/bin/supabase-wrapper" >/dev/null
 grep -F 'source_row supabase-cli' "$ROOT/build.sh" >/dev/null
@@ -317,9 +327,11 @@ grep -F 'source_row "$component" "$version" "$url" "$hash"' "$ROOT/build.sh" >/d
 ! grep -R -nF 'runtime/node/lib/node_modules/yaml' "$ROOT/build.sh" "$ROOT/templates" "$ROOT/README.md" "$ROOT/VALIDATION.md"
 ! grep -R -nF 'NODE_PATH=' "$ROOT/templates/activate" "$ROOT/templates/bin/node-wrapper" "$ROOT/templates/bin/agent-env"
 # pg-delta is runtime-owned, exactly locked, plan-only, and restricted to numeric loopback.
-grep -F 'PG_DELTA_VERSION="1.0.0-alpha.33"' "$ROOT/versions.env" >/dev/null
-grep -F 'PG_DELTA_LOCK_SHA256="fa6659239ce4e70738b5936f5690c2fdcf6bf2ef09e7c13a58c0009c8401bccf"' "$ROOT/versions.env" >/dev/null
-grep -F 'PG_DELTA_SUPABASE_CLI_BASELINE="2.114.0"' "$ROOT/versions.env" >/dev/null
+grep -F 'PG_DELTA_VERSION="1.0.0-alpha.49"' "$ROOT/versions.env" >/dev/null
+grep -F 'PG_TOPO_VERSION="1.0.0-alpha.6"' "$ROOT/versions.env" >/dev/null
+grep -F 'PG_DELTA_PG_CLIENT_VERSION="8.23.0"' "$ROOT/versions.env" >/dev/null
+grep -Eq '^PG_DELTA_LOCK_SHA256="[0-9a-f]{64}"$' "$ROOT/versions.env"
+grep -F 'PG_DELTA_SUPABASE_CLI_BASELINE="2.117.0"' "$ROOT/versions.env" >/dev/null
 grep -F 'build_verify_sha256 "$PG_DELTA_LOCK" "$PG_DELTA_LOCK_SHA256"' "$ROOT/build.sh" >/dev/null
 grep -F 'build_connected_npm "$BUILD/bin/npm" ci' "$ROOT/build.sh" >/dev/null
 grep -F 'rm -rf "$BUILD/runtime/pg-delta/node_modules/.bin"' "$ROOT/build.sh" >/dev/null
@@ -327,10 +339,19 @@ grep -F 'source_row pg-delta-lock' "$ROOT/build.sh" >/dev/null
 grep -F 'pg-delta-package-lock.json' "$ROOT/scripts/download-cache-key.sh" >/dev/null
 grep -F 'pg-delta plan [...]' "$ROOT/templates/bin/agent-env" >/dev/null
 grep -F 'numeric loopback only' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
-grep -F 'skipDefaultPrivilegeSubtraction: true' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
-grep -F 'includeTransactions: false' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
+grep -F 'resolveProfile(sourcePool, supabaseProfile' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
+grep -F 'profile.extract(sourcePool' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
+grep -F 'profile.extract(targetPool' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
+grep -F 'renderPlanFiles(generatedPlan, { allowDrops: true })' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
+grep -F 'hasBlockingDiagnostics(diagnostics, { strictCoverage: true })' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
+grep -F 'STRICT_COVERAGE_CODES' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
 grep -F 'remote database URLs are refused' "$ROOT/templates/scripts/pg-delta.mjs" >/dev/null
 grep -F 'pgdelta-convergence/envelope.json' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F '.files[] | [.transactionMode, .path] | @tsv' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F -- '--single-transaction -d pgdelta_clone -f "$plan_file"' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F 'Unknown pg-delta transaction mode in self-test' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F 'pg-delta strict coverage unexpectedly accepted an unmodeled statistics object' "$ROOT/templates/scripts/selftest.sh" >/dev/null
+grep -F '## pg 8.23.0 (node-postgres)' "$ROOT/vendor/licenses/THIRD-PARTY-LICENSES.md" >/dev/null
 grep -F '198.51.100.10' "$ROOT/templates/scripts/selftest.sh" >/dev/null
 grep -F 'auth.managed_noise' "$ROOT/templates/scripts/selftest.sh" >/dev/null
 ! grep -E '^[[:space:]]*(apply|sync)\)' "$ROOT/templates/bin/agent-env"

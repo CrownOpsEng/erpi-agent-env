@@ -4,6 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "dependencies": {
-    "@supabase/pg-delta": "1.0.0-alpha.33"
+    "@supabase/pg-delta": "1.0.0-alpha.49",
+    "@supabase/pg-topo": "1.0.0-alpha.6",
+    "pg": "8.23.0"
   }
 }

@@ -54,17 +54,17 @@ licenses=root/'licenses/third-party'
 notice=licenses/'THIRD-PARTY-LICENSES.md'
 assert notice.is_file() and notice.stat().st_size>10000,notice
 pg_delta=env['capabilities']['pg_delta']
-assert pg_delta=={'version':'1.0.0-alpha.33','supabase_cli_baseline':'2.114.0','surface':'plan-only','live_connections':'numeric-loopback-only'},pg_delta
+assert pg_delta=={'version':'1.0.0-alpha.49','pg_topo_version':'1.0.0-alpha.6','pg_client_version':'8.23.0','supabase_cli_baseline':'2.117.0','surface':'plan-only','live_connections':'numeric-loopback-only'},pg_delta
 versions=(root/'manifest/versions.env').read_text(encoding='utf-8')
 lock_hash=re.search(r'^PG_DELTA_LOCK_SHA256="([0-9a-f]{64})"$',versions,re.M).group(1)
 assert hashlib.sha256((root/'manifest/pg-delta-package-lock.json').read_bytes()).hexdigest()==lock_hash
 assert not (root/'runtime/pg-delta/node_modules/.bin').exists(), 'upstream pgdelta CLI shim must not be exposed'
 assert (root/'licenses/pg-delta/LICENSE').is_file()
 postgrest=env['capabilities']['postgrest']
-assert postgrest=={'version':'14.16','supabase_cli_baseline':'2.114.0','database_targets':'numeric-loopback-only','http_listener':'loopback-only'},postgrest
+assert postgrest=={'version':'16.2','supabase_cli_baseline':'2.117.0','database_targets':'numeric-loopback-only','http_listener':'loopback-only'},postgrest
 assert (root/'licenses/postgrest/LICENSE').is_file()
 supabase=env['capabilities']['supabase_cli']
-assert supabase=={'version':'2.114.0','distribution':'official-linux-amd64','companion':'bundled-supabase-go','credentials':'host/session','container_runtime':'host-required-for-stack-commands'},supabase
+assert supabase=={'version':'2.117.0','distribution':'official-linux-amd64','companion':'bundled-supabase-go','credentials':'host/session','container_runtime':'host-required-for-stack-commands'},supabase
 assert (root/'licenses/supabase/LICENSE').is_file()
 assert (root/'runtime/supabase/supabase').is_file() and (root/'runtime/supabase/supabase-go').is_file()
 assert not (root/'bin/supabase-go').exists(), 'supabase-go companion must not be ambient PATH surface'
@@ -81,9 +81,9 @@ actionlint --version
 gitleaks version
 shellcheck --version | grep -F 'version: 0.11.0' >/dev/null
 mlr --version | grep -F '6.20.2' >/dev/null
-"$ROOT/runtime/postgrest/postgrest" --version | grep -Fx 'PostgREST 14.16' >/dev/null
-supabase --version | grep -Fx '2.114.0' >/dev/null
-"$ROOT/runtime/supabase/supabase-go" --version | grep -Fx '2.114.0' >/dev/null
+"$ROOT/runtime/postgrest/postgrest" --version | grep -Fx 'PostgREST 16.2' >/dev/null
+supabase --version | grep -Fx '2.117.0' >/dev/null
+"$ROOT/runtime/supabase/supabase-go" --version | grep -Fx '2.117.0' >/dev/null
 printf '{"a":1}\n' | jq -e '.a == 1' >/dev/null
 printf 'a: 1\n' | yq -e '.a == 1' >/dev/null
 printf 'agent-env\n' | rg -q agent-env
@@ -527,29 +527,55 @@ PG_PORT="$(free_port)"
   "$ERPI_AGENT_ENV/bin/agent-env" pgtap '"$TMP"'/pgtap.sql >/dev/null
   if "$ERPI_AGENT_ENV/bin/agent-env" pgtap '"$TMP"'/pgtap-bad.sql >/dev/null 2>&1; then echo "pgTAP negative probe unexpectedly passed" >&2; exit 1; fi
 
-  for db in pgdelta_source pgdelta_target pgdelta_clone; do
+  for db in pgdelta_source pgdelta_target pgdelta_clone pgdelta_coverage; do
     "$ERPI_AGENT_ENV/bin/agent-env" pg createdb "$db"
   done
   "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_source -f '"$TMP"'/pgdelta-source.sql >/dev/null
   "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_target -f '"$TMP"'/pgdelta-target.sql >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_coverage -f '"$TMP"'/pgdelta-source.sql >/dev/null
+  "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_coverage -c "create statistics delta_probe.notes_coverage_stats on entity_id, created_at from delta_probe.notes" >/dev/null
   "$ERPI_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner pgdelta_source \
     | "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_clone >/dev/null
   source_url="postgresql://postgres@127.0.0.1:${PGPORT}/pgdelta_source"
   target_url="postgresql://postgres@127.0.0.1:${PGPORT}/pgdelta_target"
   clone_url="postgresql://postgres@127.0.0.1:${PGPORT}/pgdelta_clone"
+  coverage_url="postgresql://postgres@127.0.0.1:${PGPORT}/pgdelta_coverage"
+  if "$ERPI_AGENT_ENV/bin/agent-env" pg-delta plan --source "$coverage_url" --target "$target_url" --out '"$TMP"'/pgdelta-coverage-plan >'"$TMP"'/pgdelta-coverage.stdout 2>'"$TMP"'/pgdelta-coverage.stderr; then
+    echo "pg-delta strict coverage unexpectedly accepted an unmodeled statistics object" >&2
+    exit 1
+  fi
+  grep -F "strict coverage gate refused an incomplete pg-delta plan" '"$TMP"'/pgdelta-coverage.stderr >/dev/null
+  grep -F "unmodeled_kind" '"$TMP"'/pgdelta-coverage.stderr >/dev/null
+  [[ ! -e '"$TMP"'/pgdelta-coverage-plan ]] || { echo "Rejected pg-delta coverage plan created output." >&2; exit 1; }
   before_source="$("$ERPI_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=ERPIAgentEnvSelftest pgdelta_source | sha256sum | cut -d" " -f1)"
   before_target="$("$ERPI_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=ERPIAgentEnvSelftest pgdelta_target | sha256sum | cut -d" " -f1)"
   "$ERPI_AGENT_ENV/bin/agent-env" pg-delta plan --source "$source_url" --target "$target_url" --out '"$TMP"'/pgdelta-plan >/dev/null
   test -s '"$TMP"'/pgdelta-plan/envelope.json
+  "$ERPI_AGENT_ENV/runtime/node/bin/node" -e "const fs=require(\"node:fs\"); const e=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\")); if(e.pgDeltaVersion!==\"1.0.0-alpha.49\"||e.supabaseCliBaseline!==\"2.117.0\"||e.profile!==\"supabase\"||!Array.isArray(e.files)) { console.error(e); process.exit(1) }" '"$TMP"'/pgdelta-plan/envelope.json
   cat '"$TMP"'/pgdelta-plan/*.sql > '"$TMP"'/pgdelta-plan.sql
   grep -F "nonempty_text" '"$TMP"'/pgdelta-plan.sql >/dev/null
   grep -F "updated_at" '"$TMP"'/pgdelta-plan.sql >/dev/null
   grep -F "notes_recent_idx" '"$TMP"'/pgdelta-plan.sql >/dev/null
   grep -F "notes-guard" '"$TMP"'/pgdelta-plan.sql >/dev/null
   ! grep -F "auth.managed_noise" '"$TMP"'/pgdelta-plan.sql >/dev/null
-  for file in '"$TMP"'/pgdelta-plan/*.sql; do
-    "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_clone -f "$file" >/dev/null
-  done
+  tab="$(printf "\\t")"
+  while IFS="$tab" read -r transaction_mode relative_path; do
+    test -n "$relative_path"
+    plan_file='"$TMP"'/pgdelta-plan/$relative_path
+    test -f "$plan_file"
+    case "$transaction_mode" in
+      transactional)
+        "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 --single-transaction -d pgdelta_clone -f "$plan_file" >/dev/null
+        ;;
+      none)
+        "$ERPI_AGENT_ENV/bin/agent-env" pg psql -X -v ON_ERROR_STOP=1 -d pgdelta_clone -f "$plan_file" >/dev/null
+        ;;
+      *)
+        echo "Unknown pg-delta transaction mode in self-test: $transaction_mode" >&2
+        exit 1
+        ;;
+    esac
+  done < <(jq -r ".files[] | [.transactionMode, .path] | @tsv" '"$TMP"'/pgdelta-plan/envelope.json)
   "$ERPI_AGENT_ENV/bin/agent-env" pg-delta plan --source "$clone_url" --target "$target_url" --out '"$TMP"'/pgdelta-convergence >/dev/null
   "$ERPI_AGENT_ENV/runtime/node/bin/node" -e "const fs=require(\"node:fs\"); const e=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\")); if(e.files.length) { console.error(e); process.exit(1) }" '"$TMP"'/pgdelta-convergence/envelope.json
   after_source="$("$ERPI_AGENT_ENV/bin/agent-env" pg pg_dump --schema-only --no-owner --restrict-key=ERPIAgentEnvSelftest pgdelta_source | sha256sum | cut -d" " -f1)"
